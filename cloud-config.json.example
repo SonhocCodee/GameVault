@@ -1,0 +1,6 @@
+{
+  "oauthClientId": "XXXX.apps.googleusercontent.com",
+  "oauthClientSecret": "GOCSPX-XXXX",
+  "firebaseApiKey": "AIzaXXXX",
+  "firebaseProjectId": "ten-project-firebase"
+}
