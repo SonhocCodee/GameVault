@@ -16,6 +16,8 @@ import {
   Settings,
   Users,
   ChevronDown,
+  LayoutGrid,
+  GitCommitVertical,
 } from 'lucide-react';
 import type { GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
@@ -41,6 +43,8 @@ export interface NavbarProps {
   onOpenWishlistModal?: () => void;
   onOpenSettingsModal?: () => void;
   onOpenCommunity?: () => void;
+  libraryLayout?: 'grid' | 'timeline';
+  onLibraryLayoutChange?: (layout: 'grid' | 'timeline') => void;
 }
 
 const STATUS_TABS: Array<{ id: string; label: string }> = [
@@ -80,6 +84,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenWishlistModal,
   onOpenSettingsModal,
   onOpenCommunity,
+  libraryLayout = 'grid',
+  onLibraryLayoutChange,
 }) => {
   const [toolsOpen, setToolsOpen] = useState<boolean>(false);
   const toolsRef = useRef<HTMLDivElement>(null);
@@ -372,6 +378,38 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
             </div>
+
+            {/* View Mode Switcher: Grid vs Timeline Tree */}
+            {onLibraryLayoutChange && (
+              <div className="flex items-center rounded-lg border border-[#2a2e3d] bg-[#161821] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => onLibraryLayoutChange('grid')}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
+                    libraryLayout === 'grid'
+                      ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                      : 'text-[#8e95a5] hover:bg-[#202433] hover:text-[#f1f3f7]'
+                  }`}
+                  title="Chế độ xem dạng thẻ / danh mục"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Dạng thẻ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onLibraryLayoutChange('timeline')}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
+                    libraryLayout === 'timeline'
+                      ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                      : 'text-[#8e95a5] hover:bg-[#202433] hover:text-[#f1f3f7]'
+                  }`}
+                  title="Chế độ xem dòng thời gian theo từng tháng/năm"
+                >
+                  <GitCommitVertical className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Dòng thời gian</span>
+                </button>
+              </div>
+            )}
 
             {/* Sorter */}
             <div className="flex items-center gap-2">

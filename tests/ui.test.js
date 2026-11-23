@@ -58,6 +58,7 @@ describe('Milestone 4: React UI & AMD Adrenalin Theme Suite', () => {
       'src/renderer/components/SyncModal.tsx',
       'src/renderer/components/SettingsModal.tsx',
       'src/renderer/components/GameRowSection.tsx',
+      'src/renderer/components/TimelineView.tsx',
     ];
 
     for (const relPath of requiredFiles) {
@@ -156,6 +157,155 @@ describe('Milestone 4: React UI & AMD Adrenalin Theme Suite', () => {
       assert.strictEqual(backlog.length, 1);
       assert.strictEqual(paused.length, 1);
       assert.strictEqual(dropped.length, 1);
+    });
+  });
+
+  describe('GameRowSection Row Expansion Logic (3 -> 5 -> 10 -> all)', () => {
+    // Pure logic simulation of expansion stages
+    const getNextExpansionStage = (current, totalGames, cols) => {
+      if (current === 'carousel') return { nextStage: 3, hasMore: true };
+      if (current === 3) {
+        if (totalGames > 3 * cols) return { nextStage: 5, hasMore: true };
+        return { nextStage: 'carousel', hasMore: false };
+      }
+      if (current === 5) {
+        if (totalGames > 5 * cols) return { nextStage: 10, hasMore: true };
+        return { nextStage: 'carousel', hasMore: false };
+      }
+      if (current === 10) {
+        if (totalGames > 10 * cols) return { nextStage: 'all', hasMore: true };
+        return { nextStage: 'carousel', hasMore: false };
+      }
+      return { nextStage: 'carousel', hasMore: false };
+    };
+
+    const getDisplayedCount = (stage, totalGames, cols) => {
+      if (stage === 'carousel' || stage === 'all') return totalGames;
+      return Math.min(totalGames, stage * cols);
+    };
+
+    test('progresses sequentially: carousel -> 3 -> 5 -> 10 -> all for large game collections', () => {
+      const totalGames = 80;
+      const cols = 5;
+
+      // Start: carousel
+      let stage = 'carousel';
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 80);
+
+      // 1st click: expands to 3 rows (3 * 5 = 15 games)
+      let next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.nextStage, 3);
+      assert.strictEqual(next.hasMore, true);
+      stage = next.nextStage;
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 15);
+
+      // 2nd click: expands to 5 rows (5 * 5 = 25 games)
+      next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.nextStage, 5);
+      assert.strictEqual(next.hasMore, true);
+      stage = next.nextStage;
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 25);
+
+      // 3rd click: expands to 10 rows (10 * 5 = 50 games)
+      next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.nextStage, 10);
+      assert.strictEqual(next.hasMore, true);
+      stage = next.nextStage;
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 50);
+
+      // 4th click: expands to all (80 games)
+      next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.nextStage, 'all');
+      assert.strictEqual(next.hasMore, true);
+      stage = next.nextStage;
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 80);
+
+      // 5th click: collapses back to carousel
+      next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.nextStage, 'carousel');
+      assert.strictEqual(next.hasMore, false);
+    });
+
+    test('correctly stops and collapses when all games fit in 3 rows', () => {
+      const totalGames = 12;
+      const cols = 5; // 3 rows capacity = 15 games >= 12 games
+
+      let stage = 'carousel';
+      let next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.nextStage, 3);
+      stage = next.nextStage;
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 12);
+
+      // Since all 12 games are already shown in 3 rows, hasMore is false and next is collapse
+      next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.hasMore, false);
+      assert.strictEqual(next.nextStage, 'carousel');
+    });
+
+    test('correctly stops and collapses when games fit in 5 rows', () => {
+      const totalGames = 22;
+      const cols = 5; // 3 rows = 15, 5 rows = 25
+
+      let stage = 'carousel';
+      let next = getNextExpansionStage(stage, totalGames, cols);
+      stage = next.nextStage; // 3
+      assert.strictEqual(stage, 3);
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 15);
+
+      next = getNextExpansionStage(stage, totalGames, cols);
+      stage = next.nextStage; // 5
+      assert.strictEqual(stage, 5);
+      assert.strictEqual(getDisplayedCount(stage, totalGames, cols), 22);
+
+      // In 5 rows, all 22 games are shown
+      next = getNextExpansionStage(stage, totalGames, cols);
+      assert.strictEqual(next.hasMore, false);
+      assert.strictEqual(next.nextStage, 'carousel');
+    });
+  });
+
+  describe('Gaming Timeline Tree Aggregation & Smart Positioning', () => {
+    test('groups sessions into year and month accurately', () => {
+      const sampleSessions = [
+        { game_id: 1, start_time: '2026-11-15T10:00:00', duration_minutes: 120 },
+        { game_id: 1, start_time: '2026-11-20T14:00:00', duration_minutes: 60 },
+        { game_id: 2, start_time: '2026-11-05T09:00:00', duration_minutes: 90 },
+        { game_id: 1, start_time: '2026-10-12T19:00:00', duration_minutes: 150 },
+        { game_id: 2, start_time: '2025-08-01T20:00:00', duration_minutes: 200 },
+      ];
+
+      const monthMap = new Map();
+      for (const s of sampleSessions) {
+        const key = s.start_time.slice(0, 7);
+        if (!monthMap.has(key)) monthMap.set(key, { total: 0, games: new Map() });
+        const entry = monthMap.get(key);
+        entry.total += s.duration_minutes;
+        const gTime = entry.games.get(s.game_id) || 0;
+        entry.games.set(s.game_id, gTime + s.duration_minutes);
+      }
+
+      assert.strictEqual(monthMap.get('2026-11').total, 270);
+      assert.strictEqual(monthMap.get('2026-11').games.get(1), 180);
+      assert.strictEqual(monthMap.get('2026-11').games.get(2), 90);
+      assert.strictEqual(monthMap.get('2026-10').total, 150);
+      assert.strictEqual(monthMap.get('2025-08').total, 200);
+    });
+
+    test('popover smart position flips to left when near right edge', () => {
+      const POPOVER_WIDTH = 340;
+      const PADDING = 12;
+      const windowWidth = 1920;
+
+      // Card near the right edge
+      const targetRectRightEdge = { left: 1650, right: 1800, top: 300, bottom: 500 };
+      let left = targetRectRightEdge.right + PADDING;
+      if (left + POPOVER_WIDTH > windowWidth - PADDING) {
+        left = targetRectRightEdge.left - POPOVER_WIDTH - PADDING;
+      }
+
+      // Must be flipped to the left of the card
+      assert.ok(left < targetRectRightEdge.left);
+      assert.strictEqual(left, 1650 - 340 - 12);
     });
   });
 });

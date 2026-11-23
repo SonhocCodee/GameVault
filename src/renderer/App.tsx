@@ -11,6 +11,7 @@ import { FirstRunSetupModal } from './components/FirstRunSetupModal.js';
 import { CommunityView } from './components/CommunityView.js';
 import { AddGameDetailsModal, type PendingAddGame } from './components/AddGameDetailsModal.js';
 import { GameRowSection } from './components/GameRowSection.js';
+import { TimelineView } from './components/TimelineView.js';
 import {
   Plus,
   Gamepad2,
@@ -68,6 +69,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('playtime_desc');
+  const [libraryLayout, setLibraryLayout] = useState<'grid' | 'timeline'>('grid');
 
   // External (Steam) search — shown under the library grid when searching,
   // lets you add games played on other machines as 'Đã phá đảo' or Wishlist
@@ -538,6 +540,8 @@ export default function App() {
         totalPlaytimeMinutes={totalPlaytimeMinutes}
         completedGamesCount={completedGamesCount}
         trackerStatus={trackerStatus}
+        libraryLayout={libraryLayout}
+        onLibraryLayoutChange={setLibraryLayout}
         onOpenImportModal={() => setImportModalOpen(true)}
         onOpenSyncModal={() => setSyncModalOpen(true)}
         onOpenAddGameModal={() => setAddGameModalOpen(true)}
@@ -604,7 +608,16 @@ export default function App() {
               </div>
             ) : (
               <>
-                {statusFilter !== 'all' ? (
+                {libraryLayout === 'timeline' ? (
+                  /* Timeline Tree / Column View */
+                  <TimelineView
+                    games={games}
+                    onSelectGame={handleSelectGame}
+                    trackerStatus={trackerStatus}
+                    searchQuery={searchQuery}
+                    statusFilter={statusFilter}
+                  />
+                ) : statusFilter !== 'all' ? (
                   /* Single Status Filter Grid View */
                   <div>
                     {/* Filter Banner */}
