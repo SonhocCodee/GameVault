@@ -78,7 +78,7 @@ describe('Cloud Auth (Google OAuth loopback + Cloudflare Worker Session)', () =>
     assert.equal(challenge, expected);
   });
 
-  test('buildAuthUrl: PKCE S256, offline access, drive.appdata and photoslibrary.appendonly scope', () => {
+  test('buildAuthUrl: PKCE S256, offline access, drive.appdata and openid scope', () => {
     const url = buildAuthUrl(CONFIG, 'http://127.0.0.1:5555/callback', 'state123', 'challengeX');
     const parsed = new URL(url);
     assert.equal(parsed.origin + parsed.pathname, 'https://accounts.google.com/o/oauth2/v2/auth');
@@ -89,7 +89,6 @@ describe('Cloud Auth (Google OAuth loopback + Cloudflare Worker Session)', () =>
     assert.equal(parsed.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(parsed.searchParams.get('access_type'), 'offline');
     assert.ok(parsed.searchParams.get('scope').includes('drive.appdata'));
-    assert.ok(parsed.searchParams.get('scope').includes('photoslibrary.appendonly'));
     assert.ok(parsed.searchParams.get('scope').includes('openid'));
   });
 

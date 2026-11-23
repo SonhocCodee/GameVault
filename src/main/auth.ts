@@ -17,9 +17,9 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
-// OpenID + Profile for Worker Auth, Drive for Save Vault, Photos for screenshot/cover upload
+// OpenID + Profile for Worker Auth, Drive for Save Vault & Screenshot backup
 const OAUTH_SCOPE =
-  'openid email profile https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/photoslibrary.appendonly';
+  'openid email profile https://www.googleapis.com/auth/drive.appdata';
 
 export type FetchLike = (url: string, init?: any) => Promise<any>;
 
@@ -66,6 +66,13 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
     path.resolve(userDir, 'cloud-config.json'),
     path.resolve(process.cwd(), 'cloud-config.json'),
   ];
+  try {
+    const appPath = electron?.app?.getAppPath?.();
+    if (appPath) {
+      candidates.push(path.resolve(appPath, 'cloud-config.json'));
+    }
+  } catch {}
+
   for (const candidate of candidates) {
     try {
       if (!fs.existsSync(candidate)) continue;
@@ -83,6 +90,7 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
       // try next candidate
     }
   }
+
   return null;
 }
 
@@ -346,6 +354,131 @@ export function getAuthStatus(): AuthStatus {
   };
 }
 
+function buildSuccessHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Đăng nhập thành công — GameVault</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px;
+      background: #0e1015; color: #f1f3f7;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card {
+      background: #161821; border: 1px solid #2a2e3d; border-radius: 20px;
+      padding: 40px 32px; text-align: center; max-width: 440px; width: 100%;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.7);
+    }
+    .icon {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: rgba(16, 185, 129, 0.15); border: 2px solid rgba(16, 185, 129, 0.3);
+      display: inline-flex; align-items: center; justify-content: center; margin-bottom: 24px;
+    }
+    .icon svg { width: 40px; height: 40px; stroke: #10b981; fill: none; stroke-width: 2.5; }
+    .badge {
+      display: inline-block; background: #0e1015; border: 1px solid #2a2e3d;
+      border-radius: 20px; padding: 4px 14px; font-size: 11px; color: #10b981; font-weight: 700;
+      margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    h1 { font-size: 22px; font-weight: 800; margin: 0 0 10px; color: #ffffff; }
+    p { font-size: 13px; color: #8e95a5; line-height: 1.6; margin: 0 0 24px; }
+    .btn {
+      display: inline-block; background: #ff2a44; color: #ffffff; font-size: 13px;
+      font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 10px;
+      box-shadow: 0 6px 20px rgba(255, 42, 68, 0.35); cursor: pointer; border: none;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #ff475d; transform: translateY(-1px); }
+    .timer { font-size: 12px; color: #6b7280; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    </div>
+    <div class="badge">GameVault Cloud ✓</div>
+    <h1>Đăng nhập thành công!</h1>
+    <p>Tài khoản Google đã kết nối an toàn với GameVault.<br>Toàn bộ thư viện game và ảnh chụp sẵn sàng đồng bộ.</p>
+    <button class="btn" onclick="window.close()">Quay lại GameVault</button>
+    <div class="timer">Tab sẽ tự đóng sau <span id="sec">4</span> giây...</div>
+  </div>
+  <script>
+    let s = 4;
+    const interval = setInterval(() => {
+      s--;
+      const el = document.getElementById('sec');
+      if (el) el.innerText = s;
+      if (s <= 0) {
+        clearInterval(interval);
+        try { window.close(); } catch(e) {}
+      }
+    }, 1000);
+  </script>
+</body>
+</html>`;
+}
+
+function buildErrorHtml(errorMessage: string): string {
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Đăng nhập chưa hoàn tất — GameVault</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px;
+      background: #0e1015; color: #f1f3f7;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card {
+      background: #161821; border: 1px solid #2a2e3d; border-radius: 20px;
+      padding: 40px 32px; text-align: center; max-width: 460px; width: 100%;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.7);
+    }
+    .icon {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: rgba(244, 63, 94, 0.15); border: 2px solid rgba(244, 63, 94, 0.3);
+      display: inline-flex; align-items: center; justify-content: center; margin-bottom: 24px;
+    }
+    .icon svg { width: 38px; height: 38px; stroke: #f43f5e; fill: none; stroke-width: 2.5; }
+    h1 { font-size: 21px; font-weight: 800; margin: 0 0 10px; color: #ffffff; }
+    p { font-size: 13px; color: #8e95a5; line-height: 1.5; margin: 0 0 20px; }
+    .err-box {
+      background: #0e1015; border: 1px solid rgba(244, 63, 94, 0.35); border-radius: 12px;
+      padding: 12px 16px; font-size: 12px; color: #fca5a5; text-align: left; margin-bottom: 24px;
+      line-height: 1.5; word-break: break-word;
+    }
+    .btn {
+      display: inline-block; background: #202433; color: #f1f3f7; font-size: 13px;
+      font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 10px;
+      border: 1px solid #2a2e3d; cursor: pointer; transition: all 0.2s;
+    }
+    .btn:hover { background: #2a2e3d; color: #ffffff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+    </div>
+    <h1>Đăng nhập chưa hoàn tất</h1>
+    <div class="err-box">${errorMessage.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+    <p>Bạn có thể đóng tab này và bấm nút <strong>Đăng nhập</strong> lại trong GameVault.</p>
+    <button class="btn" onclick="window.close()">Đóng tab</button>
+  </div>
+</body>
+</html>`;
+}
+
 /**
  * Full browser login: loopback HTTP server + system browser (PKCE). Resolves
  * with the signed-in profile once Google redirects back.
@@ -400,19 +533,22 @@ export async function login(): Promise<UserProfile> {
         const returnedCode = parsed.searchParams.get('code');
         if (error) {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end('<h1>Đăng nhập bị hủy</h1><p>Bạn có thể đóng tab này.</p>');
-          reject(new Error(`Google trả về lỗi: ${error}`));
+          let friendlyMsg = `Google từ chối yêu cầu đăng nhập (${error}).`;
+          if (error === 'access_denied') {
+            friendlyMsg = 'Tài khoản chưa được thêm vào Test Users trong Google Cloud Console (hoặc app chưa chuyển sang chế độ Publish/Production).';
+          }
+          res.end(buildErrorHtml(friendlyMsg));
+          reject(new Error(friendlyMsg));
           return;
         }
         if (!returnedCode || returnedState !== state) {
-          res.writeHead(400).end('Bad state');
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(buildErrorHtml('Mã xác thực OAuth không hợp lệ hoặc phiên đăng nhập đã hết hạn. Vui lòng thử lại.'));
           reject(new Error('OAuth state không khớp (có thể do retry/CSRF)'));
           return;
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(
-          '<h1>Đăng nhập thành công ✓</h1><p>Quay lại GameVault — bạn có thể đóng tab này.</p>'
-        );
+        res.end(buildSuccessHtml());
         const redirectUri = `http://127.0.0.1:${(server.address() as any)?.port}/callback`;
         resolve({ code: returnedCode, redirectUri });
       } catch (err) {
