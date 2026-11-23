@@ -18,6 +18,9 @@ const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 function defaultFetch(): FetchLike {
+  if (typeof globalThis.fetch === 'function') {
+    return globalThis.fetch;
+  }
   const electron = require('electron');
   const netFetch = electron?.net?.fetch;
   if (typeof netFetch === 'function') {
@@ -113,17 +116,19 @@ async function uploadFile(name: string, parentId: string, content: Buffer, mimeT
     Buffer.from(`\r\n--${boundary}--`),
   ]);
 
+  const reqHeaders: Record<string, string> = {
+    ...headers,
+    'Content-Type': `multipart/related; boundary=${boundary}`,
+  };
+
   const resp = await doFetch(`${DRIVE_UPLOAD_API}?uploadType=multipart`, {
     method: 'POST',
-    headers: {
-      ...headers,
-      'Content-Type': `multipart/related; boundary=${boundary}`,
-      'Content-Length': String(body.length),
-    },
-    body: new Uint8Array(body),
+    headers: reqHeaders,
+    body: body,
   });
   if (!resp.ok) {
-    throw new Error(`Drive upload failed (${name}): ${resp.status}`);
+    const errorText = await resp.text().catch(() => '');
+    throw new Error(`Drive upload failed (${name}): ${resp.status} ${errorText}`);
   }
   const data = await resp.json();
   return data.id;
@@ -319,11 +324,15 @@ export async function uploadMediaToDrive(options: {
           continue;
         }
 
-        const filePath = path.join(localGameDir, f.name);
-        const content = fs.readFileSync(filePath);
-        await uploadFile(f.name, driveGameFolderId, content, getMimeType(f.name));
-        filesUploaded++;
-        bytesUploaded += content.length;
+        try {
+          const filePath = path.join(localGameDir, f.name);
+          const content = fs.readFileSync(filePath);
+          await uploadFile(f.name, driveGameFolderId, content, getMimeType(f.name));
+          filesUploaded++;
+          bytesUploaded += content.length;
+        } catch (fileErr: any) {
+          errors.push(`Lỗi tải ảnh ${f.name} (${gameName}): ${fileErr.message}`);
+        }
       }
 
       gamesProcessed++;
@@ -399,9 +408,13 @@ export async function downloadMediaFromDrive(options: {
         continue;
       }
 
-      const content = await downloadFile(file.id);
-      fs.writeFileSync(targetFilePath, content);
-      filesDownloaded++;
+      try {
+        const content = await downloadFile(file.id);
+        fs.writeFileSync(targetFilePath, content);
+        filesDownloaded++;
+      } catch (err: any) {
+        console.error(`Failed to download ${file.name}:`, err);
+      }
     }
 
     gamesRestored++;

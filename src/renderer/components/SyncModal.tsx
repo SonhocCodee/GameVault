@@ -152,9 +152,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       if (window.electronAPI?.uploadMediaToDrive) {
         const res: DriveMediaSyncResult = await window.electronAPI.uploadMediaToDrive();
         const mb = (res.bytesUploaded / (1024 * 1024)).toFixed(1);
-        setDriveResult(
-          `Đã sao lưu thành công ${res.filesUploaded} ảnh (${mb} MB) từ ${res.gamesProcessed} game lên Google Drive!`
-        );
+        let msg = '';
+        if (res.filesUploaded > 0) {
+          msg = `Đã sao lưu thành công ${res.filesUploaded} ảnh (${mb} MB) từ ${res.gamesProcessed} game lên Google Drive!`;
+        } else {
+          msg = `Toàn bộ ảnh từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước (không có ảnh mới cần tải lên).`;
+        }
+        if (res.errors && res.errors.length > 0) {
+          msg += ` (Có ${res.errors.length} ảnh gặp lỗi tải)`;
+        }
+        setDriveResult(msg);
         fetchQuota();
         onSuccess();
       } else {

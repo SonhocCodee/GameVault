@@ -24,6 +24,9 @@ const OAUTH_SCOPE =
 export type FetchLike = (url: string, init?: any) => Promise<any>;
 
 function defaultFetch(): FetchLike {
+  if (typeof globalThis.fetch === 'function') {
+    return globalThis.fetch;
+  }
   const netFetch = electron?.net?.fetch;
   if (typeof netFetch === 'function') {
     return netFetch.bind(electron.net);
