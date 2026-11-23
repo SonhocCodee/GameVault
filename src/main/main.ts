@@ -484,6 +484,7 @@ function registerIpcHandlers(): void {
     f6.setHotkey(updated.screenshotHotkey, updated.screenshotHotkeyVk);
     f6.setEnabled(updated.screenshotEnabled);
     f6.setPaths(updated.screenshotsDir, updated.mediaBaseDir);
+    f6.setHddMode(updated.hddMode);
 
     const tracker = getTracker();
     tracker.autoDetectNewGames = updated.autoDetectGames;
@@ -752,6 +753,7 @@ app.whenReady().then(() => {
   f6Manager.setHotkey(appSettings.screenshotHotkey, appSettings.screenshotHotkeyVk);
   f6Manager.setEnabled(appSettings.screenshotEnabled);
   f6Manager.setPaths(appSettings.screenshotsDir, appSettings.mediaBaseDir);
+  f6Manager.setHddMode(appSettings.hddMode);
   f6Manager.onScreenshotSynced = (info) => {
     mainWindow?.webContents.send('screenshot:synced', info);
   };

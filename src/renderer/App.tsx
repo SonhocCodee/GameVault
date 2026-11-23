@@ -11,6 +11,7 @@ import { FirstRunSetupModal } from './components/FirstRunSetupModal.js';
 import { CommunityView } from './components/CommunityView.js';
 import { AddGameDetailsModal, type PendingAddGame } from './components/AddGameDetailsModal.js';
 import { GameRowSection } from './components/GameRowSection.js';
+import { TimelineView } from './components/TimelineView.js';
 import {
   Plus,
   Gamepad2,
@@ -68,6 +69,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('playtime_desc');
+  const [libraryLayout, setLibraryLayout] = useState<'grid' | 'timeline'>('grid');
 
   // External (Steam) search — shown under the library grid when searching,
   // lets you add games played on other machines as 'Đã phá đảo' or Wishlist
@@ -120,6 +122,7 @@ export default function App() {
     mediaBaseDir: '',
     screenshotsDir: '',
     vaultRoot: '',
+    hddMode: true,
   });
 
   useEffect(() => {
@@ -132,6 +135,7 @@ export default function App() {
               mediaBaseDir: s.mediaBaseDir || 'E:\\Game',
               screenshotsDir: s.screenshotsDir || '',
               vaultRoot: s.vaultRoot || 'E:\\Game\\SaveVault',
+              hddMode: s.hddMode !== undefined ? s.hddMode : true,
             });
             setFirstRunOpen(true);
           }
@@ -160,6 +164,7 @@ export default function App() {
       mediaBaseDir: firstRunPaths.mediaBaseDir.trim(),
       screenshotsDir: firstRunPaths.screenshotsDir.trim(),
       vaultRoot: firstRunPaths.vaultRoot.trim(),
+      hddMode: firstRunPaths.hddMode,
       setupCompleted: true,
     });
     setFirstRunOpen(false);
@@ -538,6 +543,8 @@ export default function App() {
         totalPlaytimeMinutes={totalPlaytimeMinutes}
         completedGamesCount={completedGamesCount}
         trackerStatus={trackerStatus}
+        libraryLayout={libraryLayout}
+        onLibraryLayoutChange={setLibraryLayout}
         onOpenImportModal={() => setImportModalOpen(true)}
         onOpenSyncModal={() => setSyncModalOpen(true)}
         onOpenAddGameModal={() => setAddGameModalOpen(true)}
@@ -604,7 +611,16 @@ export default function App() {
               </div>
             ) : (
               <>
-                {statusFilter !== 'all' ? (
+                {libraryLayout === 'timeline' ? (
+                  /* Timeline Tree / Column View */
+                  <TimelineView
+                    games={games}
+                    onSelectGame={handleSelectGame}
+                    trackerStatus={trackerStatus}
+                    searchQuery={searchQuery}
+                    statusFilter={statusFilter}
+                  />
+                ) : statusFilter !== 'all' ? (
                   /* Single Status Filter Grid View */
                   <div>
                     {/* Filter Banner */}
@@ -981,6 +997,8 @@ export default function App() {
           mediaBaseDir={firstRunPaths.mediaBaseDir}
           screenshotsDir={firstRunPaths.screenshotsDir}
           vaultRoot={firstRunPaths.vaultRoot}
+          hddMode={firstRunPaths.hddMode}
+          onHddModeChange={(enabled) => setFirstRunPaths((p) => ({ ...p, hddMode: enabled }))}
           onFieldChange={(field, value) => {
             if (field === 'media') setFirstRunPaths((p) => ({ ...p, mediaBaseDir: value }));
             else if (field === 'screenshots') setFirstRunPaths((p) => ({ ...p, screenshotsDir: value }));

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { FolderOpen, Camera, Layers, Gamepad2, HardDrive } from 'lucide-react';
+import { FolderOpen, Camera, Layers, Gamepad2, HardDrive, Info, Zap } from 'lucide-react';
 
 export interface FirstRunSetupModalProps {
   mediaBaseDir: string;
   screenshotsDir: string;
   vaultRoot: string;
+  hddMode: boolean;
+  onHddModeChange: (enabled: boolean) => void;
   onFieldChange: (field: 'media' | 'screenshots' | 'vault', value: string) => void;
   onBrowseFolder: (field: 'media' | 'screenshots' | 'vault') => Promise<void>;
   onComplete: () => Promise<void>;
@@ -12,7 +14,7 @@ export interface FirstRunSetupModalProps {
 
 /**
  * One-time setup wizard shown on the very first app launch: the user picks
- * the drive/folder where game screenshots & videos are stored (plus the
+ * the drive/folder where game screenshots & videos are stored (plus HDD Mode toggle,
  * screenshot source + save-vault folders). Everything stays changeable later
  * in Settings → "Thư viện & Lưu trữ".
  */
@@ -20,6 +22,8 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
   mediaBaseDir,
   screenshotsDir,
   vaultRoot,
+  hddMode,
+  onHddModeChange,
   onFieldChange,
   onBrowseFolder,
   onComplete,
@@ -76,10 +80,10 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-2xl border border-[#2a2e3d] bg-[#0e1015] p-6 shadow-2xl shadow-black/60">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="w-full max-w-2xl rounded-2xl border border-[#2a2e3d] bg-[#0e1015] p-6 shadow-2xl shadow-black/60 my-auto">
         {/* Header */}
-        <div className="mb-1 flex items-center gap-3">
+        <div className="mb-2 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#ff2a44]/40 bg-[#ff2a44]/10">
             <HardDrive className="h-5 w-5 text-[#ff2a44]" />
           </div>
@@ -91,22 +95,100 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
           </div>
         </div>
 
+        {/* HDD Mode Toggle Card & Notice */}
+        <div className="mt-4 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div
+                className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                  hddMode
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                }`}
+              >
+                {hddMode ? <HardDrive className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-white">Chế độ HDD (HDD Mode - Lưu tạm &amp; Đồng bộ sau)</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      hddMode
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                    }`}
+                  >
+                    {hddMode ? 'Đang BẬT (Dành cho HDD)' : 'Đang TẮT (Tối ưu cho SSD)'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#8e95a5]">
+                  {hddMode
+                    ? 'Ảnh chụp lưu tạm vào ổ nhanh (SSD) rồi mới chuyển sang ổ HDD để HDD không bị quay liên tục khi chơi game.'
+                    : 'Ảnh chụp lưu thẳng vào thư mục game trong ổ đích, không qua bước lưu tạm để bảo vệ tuổi thọ SSD.'}
+                </p>
+              </div>
+            </div>
+            {/* Toggle Button */}
+            <button
+              type="button"
+              onClick={() => onHddModeChange(!hddMode)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                hddMode ? 'bg-[#ff2a44]' : 'bg-zinc-700'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  hddMode ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Advice / Notice Box */}
+          <div
+            className={`rounded-lg border p-3 text-xs leading-relaxed ${
+              hddMode
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-200/90'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200/90'
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              <Info className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">Khuyến nghị lưu trữ: </span>
+                {hddMode ? (
+                  <>
+                    Nếu thư mục lưu trữ bạn chọn là <strong>ổ cứng cơ (HDD)</strong>, hãy <strong>BẬT</strong> chế độ này để ổ HDD được ngủ yên (spin down) khi chơi game.
+                    Nếu ổ đích là <strong>SSD</strong>, bạn <strong>nên TẮT</strong> để ảnh lưu thẳng vào thư mục game, tránh việc ghi tạm rồi copy làm hao mòn tuổi thọ (TBW) của SSD vô ích.
+                  </>
+                ) : (
+                  <>
+                    Bạn đang tắt HDD Mode (chế độ trực tiếp). Rất phù hợp nếu thư mục đích nằm trên <strong>ổ SSD</strong>.
+                    Ảnh chụp sẽ được lưu thẳng vào thư mục game, chỉ cần chọn đúng 1 ổ đích bên dưới!
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Fields */}
-        <div className="mt-5 space-y-4">
+        <div className="mt-4 space-y-3.5">
           {fieldCard(
             <Gamepad2 className="h-4 w-4 text-[#ff2a44]" />,
-            'Thư mục lưu ảnh & video game:',
+            'Thư mục lưu ảnh & video game (ổ đích):',
             <>Mặc định <code className="text-white">E:\Game</code> — ảnh chụp/video sẽ tự phân loại theo từng folder game ở đây.</>,
             mediaBaseDir,
             'media'
           )}
-          {fieldCard(
-            <Camera className="h-4 w-4 text-amber-400" />,
-            'Thư mục chụp màn hình nguồn:',
-            <>Mặc định <code className="text-white">Pictures\Screenshots</code> — nơi ảnh chụp sinh ra trước khi chuyển vào thư mục game.</>,
-            screenshotsDir,
-            'screenshots'
-          )}
+          {hddMode &&
+            fieldCard(
+              <Camera className="h-4 w-4 text-amber-400" />,
+              'Thư mục chụp màn hình nguồn (lưu tạm):',
+              <>Mặc định <code className="text-white">Pictures\Screenshots</code> — nơi ảnh chụp sinh ra tạm thời trên ổ nhanh trước khi chuyển vào HDD.</>,
+              screenshotsDir,
+              'screenshots'
+            )}
           {fieldCard(
             <Layers className="h-4 w-4 text-emerald-400" />,
             'Thư mục Save Vault (sao lưu save game):',
@@ -119,9 +201,9 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
         {error && <p className="mt-3 text-xs font-semibold text-[#ff2a44]">{error}</p>}
 
         {/* Footer */}
-        <div className="mt-5 flex items-center justify-between">
+        <div className="mt-5 flex items-center justify-between pt-2 border-t border-[#2a2e3d]/60">
           <p className="text-[11px] text-[#8e95a5]">
-            Watchdog đếm giờ chơi đã sẵn sàng chạy ngầm — giờ chơi vẫn được ghi cả khi app tắt.
+            Mọi cấu hình trên đều có thể thay đổi lại bất cứ lúc nào trong Cài đặt.
           </p>
           <button
             onClick={handleStart}
