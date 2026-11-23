@@ -1,4 +1,12 @@
-import { getGameById } from './db.ts';
+import {
+  getGameById,
+  getGames,
+  getGameByTitle,
+  createGame,
+  updateGame,
+  getDeletedGames,
+  getDb,
+} from './db.ts';
 import { normalizeForMatch } from './media.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
 import type {
@@ -7,6 +15,9 @@ import type {
   Game,
   HardwareProfile,
   LeaderboardEntry,
+  LibrarySyncResponse,
+  LibrarySyncResult,
+  UserLibraryItem,
 } from '../shared/types.js';
 
 let cloudOverrides: { fetchImpl?: FetchLike; workerApiUrl?: string; projectId?: string; userDataDir?: string } = {};
@@ -238,5 +249,156 @@ export async function getUserDoc(uid: string): Promise<Record<string, any> | nul
   return {
     ...user,
     hw: { gpu: user.gpu || '', cpu: user.cpu || '', ramGb: Number(user.ramGb) || 0 },
+  };
+}
+
+export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
+  const resp = await apiFetch('/api/library', { method: 'GET' }, true);
+  if (!resp.ok) {
+    throw new Error(`Lấy danh sách thư viện từ cloud thất bại: HTTP ${resp.status}`);
+  }
+  return resp.json();
+}
+
+export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
+  const localGames = getGames();
+  const deleted = getDeletedGames();
+
+  const items: UserLibraryItem[] = [];
+
+  for (const g of localGames) {
+    items.push({
+      gameKey: computeGameKey(g),
+      title: g.title,
+      steamId: g.steam_id && g.steam_id > 0 ? g.steam_id : null,
+      coverUrl: g.cover_url || null,
+      bannerUrl: g.banner_url || null,
+      status: g.status,
+      playtimeMinutes: g.playtime_minutes || 0,
+      lastPlayed: g.last_played_at || null,
+      userScore: g.user_rating != null ? g.user_rating : null,
+      userNotes: g.notes || null,
+      isDeleted: false,
+      clientUpdatedAt: g.updated_at || new Date().toISOString(),
+    });
+  }
+
+  for (const d of deleted) {
+    items.push({
+      gameKey: `t_${normalizeForMatch(d.title)}`,
+      title: d.title,
+      status: 'backlog',
+      playtimeMinutes: 0,
+      isDeleted: true,
+      clientUpdatedAt: d.deleted_at || new Date().toISOString(),
+    });
+  }
+
+  const resp = await apiFetch(
+    '/api/library/sync',
+    {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    },
+    true
+  );
+
+  if (!resp.ok) {
+    throw new Error(`Đồng bộ thư viện game thất bại: HTTP ${resp.status}`);
+  }
+
+  const result: LibrarySyncResponse = await resp.json();
+
+  let pulled = 0;
+  let updated = 0;
+
+  const db = getDb();
+  for (const remote of result.games) {
+    if (remote.isDeleted) continue;
+
+    // Check if game exists locally by steam_id or title
+    let existing: Game | null = null;
+    if (remote.steamId && remote.steamId > 0) {
+      const row = db.prepare('SELECT * FROM games WHERE steam_id = ?').get(remote.steamId) as any;
+      if (row) existing = row;
+    }
+    if (!existing) {
+      existing = getGameByTitle(remote.title);
+    }
+
+    if (!existing) {
+      // Game exists on cloud (from another machine) but not locally
+      createGame({
+        title: remote.title,
+        status: remote.status,
+        playtime_minutes: remote.playtimeMinutes,
+        cover_url: remote.coverUrl,
+        banner_url: remote.bannerUrl,
+        steam_id: remote.steamId || -1,
+        user_rating: remote.userScore,
+        notes: remote.userNotes,
+        last_played_at: remote.lastPlayed,
+        media_folder: remote.title.replace(/[<>:"/\\|?*]/g, '').trim() || 'Unknown_Game',
+      });
+      pulled++;
+    } else {
+      // Game exists locally: reconcile status, playtime, covers
+      const patch: Partial<Game> = {};
+      let needsUpdate = false;
+
+      // Completed status rule: if remote or local is completed, it stays completed!
+      if (remote.status === 'completed' && existing.status !== 'completed') {
+        patch.status = 'completed';
+        needsUpdate = true;
+      } else if (remote.status !== existing.status && remote.clientUpdatedAt && existing.updated_at) {
+        if (new Date(remote.clientUpdatedAt) > new Date(existing.updated_at)) {
+          patch.status = remote.status;
+          needsUpdate = true;
+        }
+      }
+
+      // Playtime rule: highest playtime wins
+      if (remote.playtimeMinutes > (existing.playtime_minutes || 0)) {
+        patch.playtime_minutes = remote.playtimeMinutes;
+        needsUpdate = true;
+      }
+
+      // Covers & metadata enrichment from cloud if missing locally
+      if (!existing.cover_url && remote.coverUrl) {
+        patch.cover_url = remote.coverUrl;
+        needsUpdate = true;
+      }
+      if (!existing.banner_url && remote.bannerUrl) {
+        patch.banner_url = remote.bannerUrl;
+        needsUpdate = true;
+      }
+      if (existing.user_rating == null && remote.userScore != null) {
+        patch.user_rating = remote.userScore;
+        needsUpdate = true;
+      }
+      if (!existing.notes && remote.userNotes) {
+        patch.notes = remote.userNotes;
+        needsUpdate = true;
+      }
+      if ((!existing.steam_id || existing.steam_id <= 0) && remote.steamId && remote.steamId > 0) {
+        patch.steam_id = remote.steamId;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        updateGame(existing.id, patch);
+        updated++;
+      }
+    }
+  }
+
+  return {
+    pushed: items.length,
+    pulled,
+    updated,
+    completedCount: result.stats.completed,
+    totalCount: result.stats.total,
+    timestamp: result.syncedAt,
+    stats: result.stats,
   };
 }

@@ -2,6 +2,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { getSaveBackupById } from './db.ts';
 import { getValidGoogleAccessToken, type FetchLike } from './auth.ts';
+import { loadAppSettings } from './settings.ts';
+import { sanitizeTitleForFolder } from './media.ts';
+import type {
+  DriveMediaSyncResult,
+  DriveMediaRestoreResult,
+  DriveMediaStats,
+  DriveGameBackup,
+  DriveStorageQuota,
+  DriveMediaProgress,
+} from '../shared/types.js';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
@@ -220,4 +230,259 @@ export async function downloadBackupFromDrive(drivePath: string, vaultRoot: stri
   await walk(folderId, localDir);
 
   return { localDir, filesDownloaded };
+}
+
+// ==========================================
+// Media / Screenshot Cloud Sync via Drive
+// ==========================================
+
+const MEDIA_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
+
+function getMimeType(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  switch (ext) {
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.webp': return 'image/webp';
+    case '.bmp': return 'image/bmp';
+    case '.gif': return 'image/gif';
+    default: return 'application/octet-stream';
+  }
+}
+
+export async function uploadMediaToDrive(options: {
+  gameTitle?: string;
+  localMediaBaseDir?: string;
+  onProgress?: (progress: DriveMediaProgress) => void;
+} = {}): Promise<DriveMediaSyncResult> {
+  const baseDir = options.localMediaBaseDir || loadAppSettings().mediaBaseDir || 'E:\\Game';
+  if (!fs.existsSync(baseDir)) {
+    return { gamesProcessed: 0, filesUploaded: 0, bytesUploaded: 0, errors: [`Thư mục media ${baseDir} không tồn tại`] };
+  }
+
+  // Ensure root folder GameVault/Media in appDataFolder
+  const mediaRootId = await ensureFolderPath(['GameVault', 'Media']);
+
+  let foldersToProcess: string[] = [];
+  if (options.gameTitle) {
+    foldersToProcess = [options.gameTitle];
+  } else {
+    foldersToProcess = fs.readdirSync(baseDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  }
+
+  // Pre-calculate total files across target folders
+  let totalFiles = 0;
+  for (const gameName of foldersToProcess) {
+    const dir = path.join(baseDir, gameName);
+    if (fs.existsSync(dir)) {
+      totalFiles += fs.readdirSync(dir, { withFileTypes: true })
+        .filter((f) => f.isFile() && MEDIA_EXTS.has(path.extname(f.name).toLowerCase())).length;
+    }
+  }
+
+  let gamesProcessed = 0;
+  let filesUploaded = 0;
+  let bytesUploaded = 0;
+  let processedFiles = 0;
+  const errors: string[] = [];
+
+  for (const gameName of foldersToProcess) {
+    const localGameDir = path.join(baseDir, gameName);
+    if (!fs.existsSync(localGameDir)) continue;
+
+    try {
+      const driveGameFolderId = await findChild(mediaRootId, gameName) || await createFolder(gameName, mediaRootId);
+      const existingDriveFiles = await listFolder(driveGameFolderId);
+      const driveFileNames = new Set(existingDriveFiles.map((f) => f.name.toLowerCase()));
+
+      const localFiles = fs.readdirSync(localGameDir, { withFileTypes: true })
+        .filter((f) => f.isFile() && MEDIA_EXTS.has(path.extname(f.name).toLowerCase()));
+
+      for (const f of localFiles) {
+        processedFiles++;
+        const percent = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 100;
+        options.onProgress?.({
+          type: 'upload',
+          current: processedFiles,
+          total: totalFiles,
+          percent,
+          currentFile: f.name,
+          currentGame: gameName,
+          bytesTransferred: bytesUploaded,
+        });
+
+        if (driveFileNames.has(f.name.toLowerCase())) {
+          // Already on Drive, skip duplicate upload to save bandwidth
+          continue;
+        }
+
+        const filePath = path.join(localGameDir, f.name);
+        const content = fs.readFileSync(filePath);
+        await uploadFile(f.name, driveGameFolderId, content, getMimeType(f.name));
+        filesUploaded++;
+        bytesUploaded += content.length;
+      }
+
+      gamesProcessed++;
+    } catch (err: any) {
+      errors.push(`Lỗi khi sync ảnh game ${gameName}: ${err.message}`);
+    }
+  }
+
+  return {
+    gamesProcessed,
+    filesUploaded,
+    bytesUploaded,
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
+export async function downloadMediaFromDrive(options: {
+  gameTitle?: string;
+  localMediaBaseDir?: string;
+  onProgress?: (progress: DriveMediaProgress) => void;
+} = {}): Promise<DriveMediaRestoreResult> {
+  const baseDir = options.localMediaBaseDir || loadAppSettings().mediaBaseDir || 'E:\\Game';
+  fs.mkdirSync(baseDir, { recursive: true });
+
+  const gameVaultId = await findChild(null, 'GameVault');
+  if (!gameVaultId) {
+    return { gamesRestored: 0, filesDownloaded: 0, localBaseDir: baseDir };
+  }
+
+  const mediaRootId = await findChild(gameVaultId, 'Media');
+  if (!mediaRootId) {
+    return { gamesRestored: 0, filesDownloaded: 0, localBaseDir: baseDir };
+  }
+
+  const driveGameFolders = await listFolder(mediaRootId);
+  const targetFolders = options.gameTitle
+    ? driveGameFolders.filter((f) => f.mimeType === FOLDER_MIME && f.name.toLowerCase() === options.gameTitle!.toLowerCase())
+    : driveGameFolders.filter((f) => f.mimeType === FOLDER_MIME);
+
+  let gamesRestored = 0;
+  let filesDownloaded = 0;
+
+  // Count total drive files first
+  let totalFiles = 0;
+  const gameFolderFiles: Array<{ gameFolder: any; files: any[] }> = [];
+  for (const gameFolder of targetFolders) {
+    const driveFiles = (await listFolder(gameFolder.id)).filter((f) => f.mimeType !== FOLDER_MIME);
+    totalFiles += driveFiles.length;
+    gameFolderFiles.push({ gameFolder, files: driveFiles });
+  }
+
+  let processedFiles = 0;
+  for (const { gameFolder, files } of gameFolderFiles) {
+    const localGameDir = path.join(baseDir, gameFolder.name);
+    fs.mkdirSync(localGameDir, { recursive: true });
+
+    for (const file of files) {
+      processedFiles++;
+      const percent = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 100;
+      options.onProgress?.({
+        type: 'download',
+        current: processedFiles,
+        total: totalFiles,
+        percent,
+        currentFile: file.name,
+        currentGame: gameFolder.name,
+        bytesTransferred: 0,
+      });
+
+      const targetFilePath = path.join(localGameDir, file.name);
+      if (fs.existsSync(targetFilePath)) {
+        // Already exists locally, skip
+        continue;
+      }
+
+      const content = await downloadFile(file.id);
+      fs.writeFileSync(targetFilePath, content);
+      filesDownloaded++;
+    }
+
+    gamesRestored++;
+  }
+
+  return {
+    gamesRestored,
+    filesDownloaded,
+    localBaseDir: baseDir,
+  };
+}
+
+export async function getDriveMediaStats(): Promise<DriveMediaStats> {
+  const gameVaultId = await findChild(null, 'GameVault');
+  if (!gameVaultId) return { gamesCount: 0, filesCount: 0 };
+  const mediaRootId = await findChild(gameVaultId, 'Media');
+  if (!mediaRootId) return { gamesCount: 0, filesCount: 0 };
+
+  const gameFolders = (await listFolder(mediaRootId)).filter((f) => f.mimeType === FOLDER_MIME);
+  let filesCount = 0;
+  for (const gf of gameFolders) {
+    const files = await listFolder(gf.id);
+    filesCount += files.filter((f) => f.mimeType !== FOLDER_MIME).length;
+  }
+
+  return {
+    gamesCount: gameFolders.length,
+    filesCount,
+  };
+}
+
+export async function getDriveStorageQuota(): Promise<DriveStorageQuota> {
+  const doFetch = await driveFetch();
+  const headers = await authedHeaders();
+  const resp = await doFetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota', { headers });
+  if (!resp.ok) {
+    throw new Error(`Drive about lookup failed: ${resp.status}`);
+  }
+  const data = await resp.json();
+  const quota = data.storageQuota || {};
+  const limitBytes = Number(quota.limit) || 0;
+  const usageBytes = Number(quota.usage) || 0;
+  const usageInDriveBytes = Number(quota.usageInDrive) || 0;
+
+  const percentUsed = limitBytes > 0 ? Math.round((usageBytes / limitBytes) * 100) : 0;
+  const formattedLimit = limitBytes > 0 ? `${(limitBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : 'Không giới hạn';
+  const formattedUsage = `${(usageBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+
+  return {
+    limitBytes,
+    usageBytes,
+    usageInDriveBytes,
+    percentUsed,
+    formattedLimit,
+    formattedUsage,
+  };
+}
+
+export async function listDriveGameBackups(gameTitle: string): Promise<DriveGameBackup[]> {
+  const gameVaultId = await findChild(null, 'GameVault');
+  if (!gameVaultId) return [];
+
+  const gameEntries = await listFolder(gameVaultId);
+  const targetFolderBase = sanitizeTitleForFolder(gameTitle).toLowerCase();
+  const gameFolder = gameEntries.find((e) => {
+    if (e.mimeType !== FOLDER_MIME) return false;
+    const name = e.name.toLowerCase();
+    return name === targetFolderBase || name.startsWith(`${targetFolderBase} (`);
+  });
+  if (!gameFolder) return [];
+
+  const slots = await listFolder(gameFolder.id);
+  const results: DriveGameBackup[] = [];
+  for (const slot of slots) {
+    if (slot.mimeType === FOLDER_MIME) {
+      results.push({
+        id: slot.id,
+        slotTime: slot.name,
+        drivePath: `GameVault/${gameFolder.name}/${slot.name}`,
+      });
+    }
+  }
+  return results.sort((a, b) => b.slotTime.localeCompare(a.slotTime));
 }

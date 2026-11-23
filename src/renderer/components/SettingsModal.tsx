@@ -24,6 +24,9 @@ import {
   HardDrive,
   ShieldCheck,
   Zap,
+  UploadCloud,
+  DownloadCloud,
+  ExternalLink,
   Image as ImageIcon,
 } from 'lucide-react';
 import type { AppSettings, F6ProcessStatus, FpsStatus, HardwareInfo } from '../../shared/types.js';
@@ -32,6 +35,7 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved?: () => void;
+  onOpenSyncCenter?: () => void;
 }
 
 const POPULAR_KEYS = [
@@ -48,6 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
   onSaved,
+  onOpenSyncCenter,
 }) => {
   const [activeTab, setActiveTab] = useState<'hotkey' | 'paths' | 'tracker' | 'covers' | 'performance' | 'storage'>('hotkey');
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -62,7 +67,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [settingUpFps, setSettingUpFps] = useState<boolean>(false);
 
   // Dual Image Storage State
-  const [imageStorageProvider, setImageStorageProvider] = useState<'cloudflare_r2' | 'google_photos'>('cloudflare_r2');
+  const [imageStorageProvider, setImageStorageProvider] = useState<'cloudflare_r2' | 'google_drive' | 'google_photos'>('google_drive');
   const [customS3Enabled, setCustomS3Enabled] = useState<boolean>(false);
   const [customS3Endpoint, setCustomS3Endpoint] = useState<string>('');
   const [customS3Bucket, setCustomS3Bucket] = useState<string>('');
@@ -73,6 +78,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [googlePhotosAlbumId, setGooglePhotosAlbumId] = useState<string>('');
   const [testingStorage, setTestingStorage] = useState<boolean>(false);
   const [storageTestResult, setStorageTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Quick Action States inside Settings
+  const [syncingLibrary, setSyncingLibrary] = useState<boolean>(false);
+  const [syncingDrive, setSyncingDrive] = useState<boolean>(false);
+  const [restoringDrive, setRestoringDrive] = useState<boolean>(false);
+  const [actionResultMsg, setActionResultMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Hotkey recording mode
   const [isListeningKey, setIsListeningKey] = useState<boolean>(false);
@@ -328,6 +339,62 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setStorageTestResult({ ok: false, text: `Lỗi: ${err.message || 'Không thể kiểm tra'}` });
     } finally {
       setTestingStorage(false);
+    }
+  };
+
+  const handleQuickSyncLibrary = async () => {
+    setSyncingLibrary(true);
+    setActionResultMsg(null);
+    try {
+      if (window.electronAPI?.syncLibrary) {
+        const res = await window.electronAPI.syncLibrary();
+        setActionResultMsg({
+          ok: true,
+          text: `Đồng bộ thư viện thành công! Đã đẩy ${res.pushed} game, kéo ${res.pulled} game mới (${res.completedCount} game đã phá đảo).`,
+        });
+        if (onSaved) onSaved();
+      }
+    } catch (err: any) {
+      setActionResultMsg({ ok: false, text: err.message || 'Lỗi khi đồng bộ thư viện.' });
+    } finally {
+      setSyncingLibrary(false);
+    }
+  };
+
+  const handleQuickUploadDrive = async () => {
+    setSyncingDrive(true);
+    setActionResultMsg(null);
+    try {
+      if (window.electronAPI?.uploadMediaToDrive) {
+        const res = await window.electronAPI.uploadMediaToDrive();
+        const mb = (res.bytesUploaded / (1024 * 1024)).toFixed(1);
+        setActionResultMsg({
+          ok: true,
+          text: `Đã sao lưu ${res.filesUploaded} ảnh (${mb} MB) từ ${res.gamesProcessed} game lên Google Drive!`,
+        });
+      }
+    } catch (err: any) {
+      setActionResultMsg({ ok: false, text: err.message || 'Lỗi khi tải ảnh lên Google Drive.' });
+    } finally {
+      setSyncingDrive(false);
+    }
+  };
+
+  const handleQuickRestoreDrive = async () => {
+    setRestoringDrive(true);
+    setActionResultMsg(null);
+    try {
+      if (window.electronAPI?.downloadMediaFromDrive) {
+        const res = await window.electronAPI.downloadMediaFromDrive();
+        setActionResultMsg({
+          ok: true,
+          text: `Đã kéo thành công ${res.filesDownloaded} ảnh từ Drive về thư mục "${res.localBaseDir}"!`,
+        });
+      }
+    } catch (err: any) {
+      setActionResultMsg({ ok: false, text: err.message || 'Lỗi khi kéo ảnh từ Google Drive.' });
+    } finally {
+      setRestoringDrive(false);
     }
   };
 
@@ -1235,6 +1302,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </span>
                         <p className="text-[11px] text-[#8e95a5] mt-1">
                           Chọn nơi lưu trữ hình ảnh custom covers và ảnh chụp màn hình khi đồng bộ hoặc chia sẻ lên đám mây.
+                          (💡 Ảnh chụp screenshots cũng có thể sao lưu 1-click lên Google Drive thông qua <strong>Trung tâm Đồng bộ</strong>).
                         </p>
                       </div>
 
@@ -1274,38 +1342,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </p>
                         </div>
 
-                        {/* Option 2: Google Photos */}
+                        {/* Option 2: Google Drive cá nhân */}
                         <div
                           onClick={() => {
-                            setImageStorageProvider('google_photos');
+                            setImageStorageProvider('google_drive');
                             setStorageTestResult(null);
                           }}
                           className={`cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between ${
-                            imageStorageProvider === 'google_photos'
+                            imageStorageProvider === 'google_drive' || imageStorageProvider === 'google_photos'
                               ? 'border-[#ff2a44] bg-[#ff2a44]/10 shadow-lg shadow-[#ff2a44]/15'
                               : 'border-[#2a2e3d] bg-[#0e1015] hover:border-[#3d445a]'
                           }`}
                         >
                           <div className="flex items-start justify-between">
                             <div className="flex items-center gap-2">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
-                                <ImageIcon className="h-4 w-4" />
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                                <HardDrive className="h-4 w-4" />
                               </div>
                               <div>
-                                <div className="text-xs font-bold text-white">Google Photos cá nhân</div>
-                                <div className="text-[10px] text-blue-400 font-semibold">Dung lượng tài khoản Google</div>
+                                <div className="text-xs font-bold text-white">Google Drive cá nhân</div>
+                                <div className="text-[10px] text-emerald-400 font-semibold">15GB Riêng tư · Chuẩn gốc</div>
                               </div>
                             </div>
                             <input
                               type="radio"
                               name="storageProvider"
-                              checked={imageStorageProvider === 'google_photos'}
+                              checked={imageStorageProvider === 'google_drive' || imageStorageProvider === 'google_photos'}
                               onChange={() => {}}
                               className="mt-1 text-[#ff2a44] focus:ring-0"
                             />
                           </div>
                           <p className="mt-3 text-[11px] text-[#8e95a5] leading-relaxed">
-                            Lưu trực tiếp vào Google Photos của chính tài khoản Google bạn đã đăng nhập thông qua Google Photos Library API.
+                            Lưu trữ ảnh bìa và screenshots vào Google Drive riêng (appDataFolder). Giữ 100% chất lượng gốc và cấu trúc thư mục game, dễ dàng kéo về máy mới.
                           </p>
                         </div>
                       </div>
@@ -1438,44 +1506,94 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     )}
 
-                    {imageStorageProvider === 'google_photos' && (
+                    {(imageStorageProvider === 'google_drive' || imageStorageProvider === 'google_photos') && (
                       <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
-                        <div>
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <ImageIcon className="h-4 w-4 text-blue-400" />
-                            <span>Cấu hình Google Photos</span>
-                          </span>
-                          <p className="text-[11px] text-[#8e95a5] mt-0.5">
-                            Ứng dụng sẽ tự động sử dụng quyền Google Photos đã được cấp khi đăng nhập tài khoản Google.
-                          </p>
-                        </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <HardDrive className="h-4 w-4 text-emerald-400" />
+                              <span>Cấu hình &amp; Thao tác Google Drive</span>
+                            </span>
+                            <p className="text-[11px] text-[#8e95a5] mt-0.5">
+                              Ảnh và save game được lưu trữ vào thư mục riêng tư <code className="text-white">appDataFolder/GameVault</code> trên Google Drive của bạn.
+                            </p>
+                          </div>
 
-                        <div>
-                          <label className="text-[11px] font-semibold text-[#8e95a5]">Tên / ID Album trong Google Photos (Tùy chọn)</label>
-                          <input
-                            type="text"
-                            placeholder="Để trống nếu muốn lưu vào thư viện chung"
-                            value={googlePhotosAlbumId}
-                            onChange={(e) => setGooglePhotosAlbumId(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between pt-2">
                           <button
                             type="button"
                             onClick={handleTestStorage}
                             disabled={testingStorage}
-                            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3.5 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-blue-400 hover:text-white transition-all disabled:opacity-50"
+                            className="shrink-0 flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-emerald-400 hover:text-white transition-all disabled:opacity-50"
                           >
-                            {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />}
-                            <span>Kiểm tra quyền Google Photos</span>
+                            {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />}
+                            <span>Kiểm tra quyền Drive</span>
                           </button>
+                        </div>
 
-                          {storageTestResult && (
-                            <span className={`text-xs font-medium ${storageTestResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {storageTestResult.text}
-                            </span>
+                        {storageTestResult && (
+                          <div className={`text-xs font-medium p-2.5 rounded-lg border ${storageTestResult.ok ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-rose-400 bg-rose-500/10 border-rose-500/30'}`}>
+                            {storageTestResult.text}
+                          </div>
+                        )}
+
+                        {actionResultMsg && (
+                          <div className={`text-xs font-semibold p-2.5 rounded-lg border animate-in fade-in ${actionResultMsg.ok ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40' : 'text-rose-300 bg-rose-500/15 border-rose-500/40'}`}>
+                            {actionResultMsg.text}
+                          </div>
+                        )}
+
+                        {/* Quick 1-click sync actions right inside Settings */}
+                        <div className="pt-2 border-t border-[#2a2e3d]/80 space-y-2">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-[#8e95a5]">
+                            Thao tác đồng bộ tức thì:
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <button
+                              type="button"
+                              onClick={handleQuickSyncLibrary}
+                              disabled={syncingLibrary}
+                              className="flex items-center justify-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 text-xs font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 disabled:opacity-50 transition-all"
+                            >
+                              {syncingLibrary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                              <span>Đồng bộ Thư viện</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleQuickUploadDrive}
+                              disabled={syncingDrive}
+                              className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 disabled:opacity-50 transition-all"
+                            >
+                              {syncingDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+                              <span>Sao lưu ảnh lên Drive</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleQuickRestoreDrive}
+                              disabled={restoringDrive}
+                              className="flex items-center justify-center gap-1.5 rounded-lg border border-teal-500/40 bg-teal-500/10 p-2.5 text-xs font-bold text-teal-400 hover:bg-teal-500/20 active:scale-95 disabled:opacity-50 transition-all"
+                            >
+                              {restoringDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
+                              <span>Kéo ảnh về máy này</span>
+                            </button>
+                          </div>
+
+                          {onOpenSyncCenter && (
+                            <div className="pt-2 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onClose();
+                                  onOpenSyncCenter();
+                                }}
+                                className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 transition-colors"
+                              >
+                                <span>Mở Trung tâm Đồng bộ toàn diện &amp; gom ảnh F6</span>
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>

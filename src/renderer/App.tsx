@@ -117,6 +117,26 @@ export default function App() {
     fetchGames();
   }, [fetchGames]);
 
+  // Auto-sync library with Cloudflare D1 on launch if logged in
+  useEffect(() => {
+    const autoSync = async () => {
+      try {
+        if (window.electronAPI?.getAuthStatus && window.electronAPI?.syncLibrary) {
+          const auth = await window.electronAPI.getAuthStatus();
+          if (auth.loggedIn) {
+            const res = await window.electronAPI.syncLibrary();
+            if (res && (res.pulled > 0 || res.updated > 0)) {
+              fetchGames();
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Auto library sync skipped:', err);
+      }
+    };
+    autoSync();
+  }, [fetchGames]);
+
   // One-time setup wizard: first launch asks where screenshots & media live
   const [firstRunPaths, setFirstRunPaths] = useState({
     mediaBaseDir: '',
@@ -989,6 +1009,10 @@ export default function App() {
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         onSaved={() => fetchGames()}
+        onOpenSyncCenter={() => {
+          setSettingsModalOpen(false);
+          setSyncModalOpen(true);
+        }}
       />
 
       {/* One-time first-run storage setup wizard */}

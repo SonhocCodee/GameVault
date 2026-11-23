@@ -16,17 +16,23 @@ import {
   getSaveBackupByDir,
   countSaveBackups,
   deleteSaveBackupRow,
+  updateSaveBackupRow,
   getSetting,
   setSetting,
 } from './db.ts';
 import { sanitizeTitleForFolder, normalizeForMatch, levenshteinDistance } from './media.ts';
 import type {
+  ActiveSaveProfile,
   Game,
   SaveBackup,
   SaveBackupResult,
   SaveBackupSourceResult,
+  SaveBackupTrigger,
   SaveLocationCandidate,
+  SaveProfileInfo,
+  SaveProfileSwapResult,
   SaveRestoreResult,
+  SavesListResult,
   VaultInfo,
 } from '../shared/types.js';
 
@@ -516,7 +522,7 @@ export function detectSaveLocations(game: Game, options: DetectOptions = {}): Sa
 export function backupSavesNow(
   gameId: number,
   note?: string,
-  options: SaveManagerOptions & { trigger?: 'manual' | 'pre_restore' } = {}
+  options: SaveManagerOptions & { trigger?: SaveBackupTrigger } = {}
 ): SaveBackupResult {
   const game = getGameById(gameId);
   if (!game) {
@@ -816,7 +822,9 @@ export function reindexVault(rootPath?: string, options?: SaveManagerOptions): R
         slot_time: String(manifest.slotTime || slot),
         size_bytes: totalBytes,
         file_count: totalFiles,
-        trigger: manifest.trigger === 'pre_restore' ? 'pre_restore' : 'manual',
+        trigger: (['pre_restore', 'host_snapshot', 'my_save'] as string[]).includes(manifest.trigger)
+          ? manifest.trigger
+          : 'manual',
         note: manifest.note ?? null,
       });
       summary.backupsReindexed++;
@@ -827,14 +835,350 @@ export function reindexVault(rootPath?: string, options?: SaveManagerOptions): R
 }
 
 // ==========================================
+// Save Profile & Swapper (Host vs My Save)
+// ==========================================
+
+let gameRunningCheckOverride: ((gameId: number) => boolean) | null = null;
+
+export function setGameRunningCheck(fn: ((gameId: number) => boolean) | null): void {
+  gameRunningCheckOverride = fn;
+}
+
+export function isGameRunning(gameId: number): boolean {
+  if (gameRunningCheckOverride) {
+    return gameRunningCheckOverride(gameId);
+  }
+  try {
+    const game = getGameById(gameId);
+    if (!game) return false;
+    const trackerModule = require('./tracker.ts');
+    const getTracker = trackerModule?.getTracker;
+    if (typeof getTracker === 'function') {
+      const status = getTracker().getStatus();
+      if (status && status.isTracking) {
+        if (status.activeGameTitle === game.title) return true;
+        if (
+          game.exe_name &&
+          status.activeProcessName &&
+          status.activeProcessName.toLowerCase() === game.exe_name.toLowerCase()
+        ) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    // headless or test environment
+  }
+  return false;
+}
+
+export function getSaveProfileInfo(gameId: number): SaveProfileInfo {
+  const raw = getSetting(`save_profile_${gameId}`);
+  let parsed: any = null;
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {}
+  }
+  const isRunning = isGameRunning(gameId);
+  const backups = getSaveBackups(gameId);
+  const latestHost = backups.find((b) => b.trigger === 'host_snapshot');
+  const latestMy = backups.find((b) => b.trigger === 'my_save');
+
+  let activeProfile: ActiveSaveProfile = parsed?.activeProfile ?? null;
+  if (!activeProfile) {
+    activeProfile = latestHost ? 'my_save' : 'host';
+  }
+
+  return {
+    gameId,
+    activeProfile,
+    hostBackupId: parsed?.hostBackupId ?? latestHost?.id ?? null,
+    myBackupId: parsed?.myBackupId ?? latestMy?.id ?? null,
+    lastSwappedAt: parsed?.lastSwappedAt ?? null,
+    isGameRunning: isRunning,
+  };
+}
+
+export function setSaveProfileInfo(gameId: number, patch: Partial<SaveProfileInfo>): SaveProfileInfo {
+  const current = getSaveProfileInfo(gameId);
+  const updated: SaveProfileInfo = {
+    ...current,
+    ...patch,
+  };
+  setSetting(
+    `save_profile_${gameId}`,
+    JSON.stringify({
+      activeProfile: updated.activeProfile,
+      hostBackupId: updated.hostBackupId,
+      myBackupId: updated.myBackupId,
+      lastSwappedAt: updated.lastSwappedAt,
+    })
+  );
+  return updated;
+}
+
+export function updateSaveBackupMetadata(
+  backupId: number,
+  patch: { note?: string | null; trigger?: SaveBackupTrigger }
+): SaveBackup {
+  const updated = updateSaveBackupRow(backupId, patch);
+  if (!updated) {
+    throw new Error(`Save backup with id ${backupId} not found`);
+  }
+  try {
+    const manifestPath = path.join(updated.backup_dir, MANIFEST_FILE);
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      if (patch.note !== undefined) manifest.note = patch.note;
+      if (patch.trigger !== undefined) manifest.trigger = patch.trigger;
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    }
+  } catch {}
+  return updated;
+}
+
+/**
+ * Switch from host save to user's personal save:
+ * 1. Ensure game is not running.
+ * 2. Automatically snapshots current save folders as Host Save (if they exist and have files).
+ * 3. Restores target personal save (targetBackupId, or latest 'my_save', or latest manual backup).
+ * 4. Updates active profile to 'my_save'.
+ */
+export function switchToMySave(
+  gameId: number,
+  options: SaveManagerOptions & { targetBackupId?: number } = {}
+): SaveProfileSwapResult {
+  if (isGameRunning(gameId)) {
+    throw new Error('Game đang chạy! Vui lòng thoát game trước khi đổi file save để tránh lỗi dữ liệu.');
+  }
+
+  const game = getGameById(gameId);
+  if (!game) throw new Error(`Game with id ${gameId} not found`);
+
+  const configuredPaths = getSavePaths(gameId).filter((p) => p.enabled === 1);
+  if (configuredPaths.length === 0) {
+    throw new Error('Chưa khai báo folder save nào cho game này');
+  }
+
+  // 1. Snapshot host save if files exist
+  let hostBackupId: number | null = null;
+  const hasFiles = configuredPaths.some((p) => fs.existsSync(p.source_path) && walkStats(p.source_path).files > 0);
+  if (hasFiles) {
+    try {
+      const hostSnapshot = backupSavesNow(
+        gameId,
+        'Save gốc của máy này (Host Save - tự động sao lưu trước khi chuyển sang Save của tôi)',
+        { ...options, trigger: 'host_snapshot' }
+      );
+      hostBackupId = hostSnapshot.backupId;
+    } catch {
+      // ignore empty
+    }
+  }
+
+  // 2. Determine which backup to restore
+  const backups = getSaveBackups(gameId);
+  let targetId = options.targetBackupId;
+  if (!targetId) {
+    const mySave = backups.find((b) => b.trigger === 'my_save' && b.id !== hostBackupId);
+    if (mySave) {
+      targetId = mySave.id;
+    } else {
+      const manual = backups.find((b) => b.trigger === 'manual' && b.id !== hostBackupId);
+      if (manual) {
+        targetId = manual.id;
+      }
+    }
+  }
+
+  if (!targetId) {
+    throw new Error(
+      'Chưa có bản save cá nhân nào trong vault. Bạn có thể tạo bản sao lưu mới hoặc tải save từ Google Drive về trước.'
+    );
+  }
+
+  // 3. Restore target personal backup
+  const restoreRes = restoreSaveBackup(targetId, options);
+
+  // 4. Update profile state
+  const prevProfile = getSaveProfileInfo(gameId);
+  setSaveProfileInfo(gameId, {
+    activeProfile: 'my_save',
+    hostBackupId: hostBackupId ?? prevProfile.hostBackupId,
+    myBackupId: targetId,
+    lastSwappedAt: new Date().toISOString(),
+  });
+
+  return {
+    success: true,
+    targetProfile: 'my_save',
+    restoredBackupId: targetId,
+    safetyBackupId: restoreRes.safetyBackupId,
+    restored: restoreRes.restored,
+    errors: restoreRes.errors,
+  };
+}
+
+/**
+ * Revert from user's save back to host save (return PC to host):
+ * 1. Ensure game is not running.
+ * 2. Snapshots current save as My Save so progress isn't lost.
+ * 3. Restores host save snapshot.
+ * 4. Updates active profile to 'host'.
+ */
+export function revertToHostSave(
+  gameId: number,
+  options: SaveManagerOptions = {}
+): SaveProfileSwapResult {
+  if (isGameRunning(gameId)) {
+    throw new Error('Game đang chạy! Vui lòng thoát game trước khi hoàn trả save.');
+  }
+
+  const game = getGameById(gameId);
+  if (!game) throw new Error(`Game with id ${gameId} not found`);
+
+  // 1. Snapshot my progress
+  let myBackupId: number | null = null;
+  const configuredPaths = getSavePaths(gameId).filter((p) => p.enabled === 1);
+  const hasFiles = configuredPaths.some((p) => fs.existsSync(p.source_path) && walkStats(p.source_path).files > 0);
+  if (hasFiles) {
+    try {
+      const myBackup = backupSavesNow(
+        gameId,
+        'Tiến độ của tôi trước khi hoàn trả save cho máy này',
+        { ...options, trigger: 'my_save' }
+      );
+      myBackupId = myBackup.backupId;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Find host backup
+  const profileInfo = getSaveProfileInfo(gameId);
+  const backups = getSaveBackups(gameId);
+  let hostBackup: SaveBackup | undefined;
+
+  if (profileInfo.hostBackupId) {
+    hostBackup = backups.find((b) => b.id === profileInfo.hostBackupId);
+  }
+  if (!hostBackup) {
+    hostBackup = backups.find((b) => b.trigger === 'host_snapshot');
+  }
+  if (!hostBackup) {
+    hostBackup = backups.find((b) => (b.note || '').toLowerCase().includes('host') || (b.note || '').toLowerCase().includes('máy này'));
+  }
+
+  if (!hostBackup) {
+    throw new Error('Không tìm thấy bản snapshot save gốc của máy này để hoàn trả.');
+  }
+
+  // 3. Restore host backup
+  const restoreRes = restoreSaveBackup(hostBackup.id, options);
+
+  // 4. Update profile state
+  setSaveProfileInfo(gameId, {
+    activeProfile: 'host',
+    hostBackupId: hostBackup.id,
+    myBackupId: myBackupId ?? profileInfo.myBackupId,
+    lastSwappedAt: new Date().toISOString(),
+  });
+
+  return {
+    success: true,
+    targetProfile: 'host',
+    restoredBackupId: hostBackup.id,
+    safetyBackupId: restoreRes.safetyBackupId,
+    restored: restoreRes.restored,
+    errors: restoreRes.errors,
+  };
+}
+
+/**
+ * 1-click apply of any backup into game with profile option
+ */
+export function applySaveBackup(
+  gameId: number,
+  backupId: number,
+  asProfile?: ActiveSaveProfile,
+  options: SaveManagerOptions = {}
+): SaveProfileSwapResult {
+  if (isGameRunning(gameId)) {
+    throw new Error('Game đang chạy! Vui lòng thoát game trước khi đổi save.');
+  }
+
+  const restoreRes = restoreSaveBackup(backupId, options);
+
+  if (asProfile === 'my_save') {
+    setSaveProfileInfo(gameId, {
+      activeProfile: 'my_save',
+      myBackupId: backupId,
+      lastSwappedAt: new Date().toISOString(),
+    });
+  } else if (asProfile === 'host') {
+    setSaveProfileInfo(gameId, {
+      activeProfile: 'host',
+      hostBackupId: backupId,
+      lastSwappedAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    success: true,
+    targetProfile: (asProfile || 'custom') as any,
+    restoredBackupId: backupId,
+    safetyBackupId: restoreRes.safetyBackupId,
+    restored: restoreRes.restored,
+    errors: restoreRes.errors,
+  };
+}
+
+/**
+ * Downloads a backup from Google Drive and registers it into the vault as 'my_save'
+ */
+export async function downloadAndAdoptDriveBackup(
+  gameId: number,
+  drivePath: string,
+  options?: SaveManagerOptions
+): Promise<SaveBackup> {
+  const game = getGameById(gameId);
+  if (!game) throw new Error(`Game with id ${gameId} not found`);
+
+  const { downloadBackupFromDrive } = require('./drive.ts');
+  const { root } = resolveVaultRoot(options);
+  const result = await downloadBackupFromDrive(drivePath, root);
+
+  const manifest = readManifest(result.localDir);
+  const totalFiles = manifest?.totalFiles || result.filesDownloaded;
+  const totalBytes = manifest?.totalBytes || walkStats(result.localDir).bytes;
+  const slotTime = manifest?.slotTime || path.basename(result.localDir);
+
+  let existing = getSaveBackupByDir(result.localDir);
+  if (!existing) {
+    existing = recordSaveBackup({
+      game_id: game.id,
+      backup_dir: result.localDir,
+      slot_time: slotTime,
+      size_bytes: totalBytes,
+      file_count: totalFiles,
+      trigger: 'my_save',
+      note: manifest?.note || 'Tải về từ Google Drive (Save của tôi)',
+    });
+  }
+  return existing;
+}
+
+// ==========================================
 // High-level composition used by IPC
 // ==========================================
 
-export function getSavesList(gameId: number, options?: SaveManagerOptions) {
+export function getSavesList(gameId: number, options?: SaveManagerOptions): SavesListResult {
   return {
     paths: getSavePaths(gameId),
     backups: getSaveBackups(gameId),
     vault: getVaultInfo(options),
+    profileInfo: getSaveProfileInfo(gameId),
   };
 }
 

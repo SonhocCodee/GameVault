@@ -114,7 +114,7 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
     hddMode: hddModeStr === null ? true : hddModeStr === 'true',
     googleApiKey,
     googleCseId,
-    imageStorageProvider: provider === 'google_photos' ? 'google_photos' : 'cloudflare_r2',
+    imageStorageProvider: provider === 'cloudflare_r2' ? 'cloudflare_r2' : (provider === 'google_photos' ? 'google_photos' : 'google_drive'),
     googlePhotosAlbumId,
     customS3Config: {
       enabled: customS3Enabled,
@@ -144,20 +144,20 @@ export async function testStorageConnection(
   fetchImpl: typeof fetch = fetch,
   googleAccessToken?: string | null
 ): Promise<{ ok: boolean; error?: string }> {
-  const provider = settings?.imageStorageProvider || 'cloudflare_r2';
+  const provider = settings?.imageStorageProvider || 'google_drive';
 
-  if (provider === 'google_photos') {
+  if (provider === 'google_drive' || provider === 'google_photos') {
     if (!googleAccessToken) {
       return { ok: false, error: 'Chưa đăng nhập tài khoản Google' };
     }
     try {
-      const res = await fetchImpl('https://photoslibrary.googleapis.com/v1/albums', {
+      const res = await fetchImpl('https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&pageSize=1', {
         headers: { Authorization: `Bearer ${googleAccessToken}` },
       });
       if (res.ok) {
         return { ok: true };
       }
-      return { ok: false, error: `Google Photos connection test failed: HTTP ${res.status}` };
+      return { ok: false, error: `Google Drive connection test failed: HTTP ${res.status}` };
     } catch (err: any) {
       return { ok: false, error: err.message || 'fetch failed: network offline' };
     }
@@ -250,7 +250,9 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
 
   // Cloud & Dual Image Storage
   if (patch.imageStorageProvider !== undefined) {
-    const val = patch.imageStorageProvider === 'google_photos' ? 'google_photos' : 'cloudflare_r2';
+    const val = patch.imageStorageProvider === 'cloudflare_r2'
+      ? 'cloudflare_r2'
+      : (patch.imageStorageProvider === 'google_photos' ? 'google_photos' : 'google_drive');
     setSetting('image_storage_provider', val, customDb);
   }
   if (patch.googlePhotosAlbumId !== undefined) {

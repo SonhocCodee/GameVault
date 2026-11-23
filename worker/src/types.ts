@@ -151,6 +151,40 @@ export interface CommunityPick {
   state: 'voting' | 'playing' | 'done';
 }
 
+export type GameLibraryStatus = 'playing' | 'completed' | 'paused' | 'dropped' | 'backlog';
+
+export interface UserLibraryItem {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+  bannerUrl?: string | null;
+  status: GameLibraryStatus;
+  playtimeMinutes: number;
+  lastPlayed?: string | null;
+  userScore?: number | null;
+  userNotes?: string | null;
+  isDeleted?: boolean;
+  clientUpdatedAt?: string;
+  serverUpdatedAt?: string;
+}
+
+export interface LibrarySyncStats {
+  total: number;
+  completed: number;
+  playing: number;
+  backlog: number;
+  paused: number;
+  dropped: number;
+  totalPlaytimeMinutes: number;
+}
+
+export interface LibrarySyncResponse {
+  games: UserLibraryItem[];
+  syncedAt: string;
+  stats: LibrarySyncStats;
+}
+
 export interface RouteContext {
   params: Record<string, string>;
   url: URL;

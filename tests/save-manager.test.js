@@ -13,6 +13,7 @@ import {
   getSetting,
   setSetting,
   getSaveBackups,
+  getSaveBackupById,
 } from '../src/main/db.ts';
 import {
   resolveVaultRoot,
@@ -23,6 +24,14 @@ import {
   restoreSaveBackup,
   deleteSaveBackup,
   reindexVault,
+  getSaveProfileInfo,
+  setSaveProfileInfo,
+  switchToMySave,
+  revertToHostSave,
+  applySaveBackup,
+  updateSaveBackupMetadata,
+  setGameRunningCheck,
+  getSavesList,
 } from '../src/main/save-manager.ts';
 
 function makeTempDir(prefix) {
@@ -376,6 +385,159 @@ describe('Save Vault (backup / restore save game)', () => {
       assert.equal(getSetting('some_key'), 'value-1');
       setSetting('some_key', 'value-2');
       assert.equal(getSetting('some_key'), 'value-2');
+    });
+  });
+
+  describe('Save Profile Swapper (Host vs My Save)', () => {
+    test('full lifecycle: host save snapshot -> switch to my save -> play -> revert to host save', () => {
+      const vaultRoot = newTmp('vault');
+      const docs = newTmp('docs');
+      const game = createGame({ title: 'Cyberpunk 2077' });
+      const saveDir = path.join(docs, 'CD Projekt Red', 'Cyberpunk 2077');
+      addSavePath(game.id, saveDir);
+
+      // 1. Host machine has its own original save
+      writeSaveFile(saveDir, 'manualsave-0.dat', 'ORIGINAL_HOST_DATA_LEVEL_50');
+
+      // 2. User has a personal save backup (or previously synced)
+      writeSaveFile(saveDir, 'manualsave-0.dat', 'MY_PERSONAL_DATA_LEVEL_10');
+      const myBackup = backupSavesNow(game.id, 'My Personal Save', {
+        vaultRoot,
+        documentsDir: docs,
+        trigger: 'my_save',
+      });
+      assert.equal(myBackup.sources[0].status, 'copied');
+
+      // Put host save back onto disk before switching
+      writeSaveFile(saveDir, 'manualsave-0.dat', 'ORIGINAL_HOST_DATA_LEVEL_50');
+
+      // Initial profile state
+      const initialProfile = getSaveProfileInfo(game.id);
+      assert.equal(initialProfile.activeProfile, 'host'); // machine starts in host profile
+
+      // 3. User clicks "Switch to My Save"
+      const swapToMine = switchToMySave(game.id, {
+        vaultRoot,
+        documentsDir: docs,
+        targetBackupId: myBackup.backupId,
+      });
+
+      assert.equal(swapToMine.success, true);
+      assert.equal(swapToMine.targetProfile, 'my_save');
+
+      // Verify on-disk file is now user's save!
+      const currentSaveOnDisk = fs.readFileSync(path.join(saveDir, 'manualsave-0.dat'), 'utf-8');
+      assert.equal(currentSaveOnDisk, 'MY_PERSONAL_DATA_LEVEL_10');
+
+      // Verify a host snapshot was created and tagged
+      const profileAfterMine = getSaveProfileInfo(game.id);
+      assert.equal(profileAfterMine.activeProfile, 'my_save');
+      assert.ok(profileAfterMine.hostBackupId !== null);
+      const hostBackup = getSaveBackupById(profileAfterMine.hostBackupId);
+      assert.equal(hostBackup.trigger, 'host_snapshot');
+
+      // 4. User plays the game, advancing their progress!
+      writeSaveFile(saveDir, 'manualsave-0.dat', 'MY_PERSONAL_DATA_LEVEL_15_AFTER_PLAYING');
+
+      // 5. User prepares to return the machine, clicks "Revert to Host Save"
+      const revertResult = revertToHostSave(game.id, {
+        vaultRoot,
+        documentsDir: docs,
+      });
+
+      assert.equal(revertResult.success, true);
+      assert.equal(revertResult.targetProfile, 'host');
+
+      // Verify on-disk file has been perfectly restored to Host's original save!
+      const restoredSaveOnDisk = fs.readFileSync(path.join(saveDir, 'manualsave-0.dat'), 'utf-8');
+      assert.equal(restoredSaveOnDisk, 'ORIGINAL_HOST_DATA_LEVEL_50');
+
+      // Verify user's played progress was also preserved in a my_save snapshot
+      const allBackups = getSaveBackups(game.id);
+      const latestMySave = allBackups.find(
+        (b) => b.trigger === 'my_save' && b.id !== myBackup.backupId
+      );
+      assert.ok(latestMySave !== undefined, 'User progress before revert must be snapshotted');
+      assert.ok(latestMySave.note.includes('Tiến độ của tôi'));
+
+      // Check final profile info
+      const finalProfile = getSaveProfileInfo(game.id);
+      assert.equal(finalProfile.activeProfile, 'host');
+    });
+
+    test('blocks save swap and restore when game process is running', () => {
+      const vaultRoot = newTmp('vault');
+      const docs = newTmp('docs');
+      const game = createGame({ title: 'Running Game', exe_name: 'game.exe' });
+      const saveDir = path.join(docs, 'RunningGame', 'Saves');
+      writeSaveFile(saveDir, 'save.dat', 'progress');
+      addSavePath(game.id, saveDir);
+
+      const backup = backupSavesNow(game.id, 'backup', { vaultRoot, documentsDir: docs });
+
+      // Mock game as running
+      setGameRunningCheck((id) => id === game.id);
+
+      assert.throws(
+        () => switchToMySave(game.id, { vaultRoot, documentsDir: docs }),
+        /Game đang chạy/i
+      );
+      assert.throws(
+        () => revertToHostSave(game.id, { vaultRoot, documentsDir: docs }),
+        /Game đang chạy/i
+      );
+      assert.throws(
+        () => applySaveBackup(game.id, backup.backupId, 'my_save', { vaultRoot, documentsDir: docs }),
+        /Game đang chạy/i
+      );
+
+      // Reset mock
+      setGameRunningCheck(null);
+    });
+
+    test('updateSaveBackupMetadata updates trigger tag, note, and manifest.json', () => {
+      const vaultRoot = newTmp('vault');
+      const docs = newTmp('docs');
+      const game = createGame({ title: 'Tagged Game' });
+      const saveDir = path.join(docs, 'TaggedGame', 'Saves');
+      writeSaveFile(saveDir, 'save.dat', 'data');
+      addSavePath(game.id, saveDir);
+
+      const backup = backupSavesNow(game.id, 'Initial Note', {
+        vaultRoot,
+        documentsDir: docs,
+        trigger: 'manual',
+      });
+
+      const updated = updateSaveBackupMetadata(backup.backupId, {
+        trigger: 'host_snapshot',
+        note: 'Saved from Host PC at LAN Party',
+      });
+
+      assert.equal(updated.trigger, 'host_snapshot');
+      assert.equal(updated.note, 'Saved from Host PC at LAN Party');
+
+      // Verify row in DB
+      const row = getSaveBackupById(backup.backupId);
+      assert.equal(row.trigger, 'host_snapshot');
+      assert.equal(row.note, 'Saved from Host PC at LAN Party');
+
+      // Verify manifest.json on disk
+      const manifestPath = path.join(backup.backupDir, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      assert.equal(manifest.trigger, 'host_snapshot');
+      assert.equal(manifest.note, 'Saved from Host PC at LAN Party');
+    });
+
+    test('getSavesList returns profileInfo with active profile and status', () => {
+      const vaultRoot = newTmp('vault');
+      const docs = newTmp('docs');
+      const game = createGame({ title: 'Profile List Game' });
+
+      const list = getSavesList(game.id, { vaultRoot, documentsDir: docs });
+      assert.ok(list.profileInfo !== undefined);
+      assert.equal(list.profileInfo.gameId, game.id);
+      assert.equal(list.profileInfo.isGameRunning, false);
     });
   });
 });

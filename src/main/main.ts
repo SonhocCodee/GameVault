@@ -54,7 +54,14 @@ import {
 import { getF6CaptureManager } from './f6-capture.js';
 import { getAMDWatcher } from './amd-watcher.js';
 import { getAuthStatus, login, logout } from './auth.js';
-import { uploadBackupToDrive } from './drive.js';
+import {
+  uploadBackupToDrive,
+  uploadMediaToDrive,
+  downloadMediaFromDrive,
+  getDriveMediaStats,
+  listDriveGameBackups,
+  getDriveStorageQuota,
+} from './drive.js';
 import {
   submitReview,
   deleteMyReview,
@@ -65,6 +72,8 @@ import {
   getCurrentPick,
   votePick,
   unvotePick,
+  syncLibraryWithCloud,
+  getCloudLibrary,
 } from './cloud-db.js';
 import {
   getSavesList,
@@ -79,6 +88,14 @@ import {
   getVaultInfo,
   setVaultRoot,
   initSaveVault,
+  getSaveProfileInfo,
+  setSaveProfileInfo,
+  switchToMySave,
+  revertToHostSave,
+  applySaveBackup,
+  updateSaveBackupMetadata,
+  downloadAndAdoptDriveBackup,
+  isGameRunning,
 } from './save-manager.js';
 import { searchSaveLocationsWeb } from './save-lookup-web.js';
 import {
@@ -469,6 +486,43 @@ function registerIpcHandlers(): void {
     return setVaultRoot(rootPath);
   });
 
+  ipcMain.handle('saves:getProfileInfo', async (_event, gameId: number) => {
+    ensureSaveVault();
+    return getSaveProfileInfo(gameId);
+  });
+
+  ipcMain.handle('saves:setProfileInfo', async (_event, gameId: number, patch: any) => {
+    ensureSaveVault();
+    return setSaveProfileInfo(gameId, patch);
+  });
+
+  ipcMain.handle('saves:switchToMySave', async (_event, gameId: number, options?: { targetBackupId?: number }) => {
+    ensureSaveVault();
+    return switchToMySave(gameId, options);
+  });
+
+  ipcMain.handle('saves:revertToHostSave', async (_event, gameId: number) => {
+    ensureSaveVault();
+    return revertToHostSave(gameId);
+  });
+
+  ipcMain.handle('saves:applyBackup', async (_event, gameId: number, backupId: number, asProfile?: any) => {
+    ensureSaveVault();
+    return applySaveBackup(gameId, backupId, asProfile);
+  });
+
+  ipcMain.handle(
+    'saves:updateMetadata',
+    async (_event, backupId: number, patch: { note?: string | null; trigger?: any }) => {
+      ensureSaveVault();
+      return updateSaveBackupMetadata(backupId, patch);
+    }
+  );
+
+  ipcMain.handle('saves:isGameRunning', async (_event, gameId: number) => {
+    return isGameRunning(gameId);
+  });
+
   // Hardware Info & FPS Monitor (PresentMon — dữ liệu cho bảng xếp hạng hiệu năng)
   ipcMain.handle('hw:getInfo', async (_event, force?: boolean) => {
     return getHardwareInfo(Boolean(force));
@@ -641,6 +695,47 @@ function registerIpcHandlers(): void {
   // Drive (Save Vault lên Google Drive của người dùng — appDataFolder riêng tư)
   ipcMain.handle('drive:uploadBackup', async (_event, backupId: number) => {
     return uploadBackupToDrive(backupId);
+  });
+
+  ipcMain.handle('drive:listGameBackups', async (_event, gameTitle: string) => {
+    return listDriveGameBackups(gameTitle);
+  });
+
+  ipcMain.handle('drive:downloadCloudBackup', async (_event, gameId: number, drivePath: string) => {
+    ensureSaveVault();
+    return downloadAndAdoptDriveBackup(gameId, drivePath);
+  });
+
+  // Multi-device game library sync
+  ipcMain.handle('community:syncLibrary', async () => {
+    return syncLibraryWithCloud();
+  });
+  ipcMain.handle('community:getCloudLibrary', async () => {
+    return getCloudLibrary();
+  });
+
+  // Media (Screenshot) sync via Google Drive
+  ipcMain.handle('drive:uploadMedia', async (_event, options?: { gameTitle?: string; localMediaBaseDir?: string }) => {
+    return uploadMediaToDrive({
+      ...options,
+      onProgress: (prog) => {
+        mainWindow?.webContents.send('drive:mediaProgress', prog);
+      },
+    });
+  });
+  ipcMain.handle('drive:downloadMedia', async (_event, options?: { gameTitle?: string; localMediaBaseDir?: string }) => {
+    return downloadMediaFromDrive({
+      ...options,
+      onProgress: (prog) => {
+        mainWindow?.webContents.send('drive:mediaProgress', prog);
+      },
+    });
+  });
+  ipcMain.handle('drive:getMediaStats', async () => {
+    return getDriveMediaStats();
+  });
+  ipcMain.handle('drive:getStorageQuota', async () => {
+    return getDriveStorageQuota();
   });
 }
 

@@ -478,6 +478,15 @@ export function deleteGame(id: number): boolean {
   return result.changes > 0;
 }
 
+export function getDeletedGames(): Array<{ title: string; exe_name: string | null; deleted_at: string }> {
+  const db = getDb();
+  try {
+    return (db.prepare('SELECT title, exe_name, deleted_at FROM deleted_games').all() as any[]) || [];
+  } catch {
+    return [];
+  }
+}
+
 export function updatePlaytime(gameId: number, additionalMinutes: number): void {
   const db = getDb();
   const stmt = db.prepare(`
@@ -923,6 +932,19 @@ export function deleteSaveBackupRow(id: number): boolean {
   const db = getDb();
   const res = db.prepare('DELETE FROM save_backups WHERE id = ?').run(id);
   return res.changes > 0;
+}
+
+export function updateSaveBackupRow(
+  id: number,
+  patch: { note?: string | null; trigger?: string }
+): SaveBackup | null {
+  const db = getDb();
+  const existing = getSaveBackupById(id);
+  if (!existing) return null;
+  const note = patch.note !== undefined ? patch.note : existing.note;
+  const trigger = patch.trigger !== undefined ? patch.trigger : existing.trigger;
+  db.prepare('UPDATE save_backups SET note = ?, trigger = ? WHERE id = ?').run(note, trigger, id);
+  return getSaveBackupById(id);
 }
 
 export function countSaveBackups(): number {

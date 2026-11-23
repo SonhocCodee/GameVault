@@ -10,6 +10,7 @@ import { handleGetReviews, handleSubmitReview, handleDeleteReview } from './rout
 import { handleGetUser, handleUpdateHardware } from './routes/users.ts';
 import { handleGetCurrentPick, handleVotePick, handleUnvotePick } from './routes/picks.ts';
 import { handleImageUpload, handleImageGet } from './routes/images.ts';
+import { handleGetLibrary, handleSyncLibrary } from './routes/library.ts';
 
 export const router = new Router();
 
@@ -36,6 +37,10 @@ router.put('/api/users/me/hardware', handleUpdateHardware);
 router.get('/api/picks/current', handleGetCurrentPick);
 router.post('/api/picks/vote', handleVotePick);
 router.delete('/api/picks/vote', handleUnvotePick);
+
+// Multi-device game library sync
+router.get('/api/library', handleGetLibrary);
+router.post('/api/library/sync', handleSyncLibrary);
 
 // Images (R2)
 router.post('/api/images/upload', handleImageUpload);

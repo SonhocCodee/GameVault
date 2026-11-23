@@ -18,8 +18,14 @@ import type {
   SaveLocationCandidate,
   SavePathConfig,
   SavesListResult,
+  SaveBackup,
   SaveBackupResult,
   SaveRestoreResult,
+  SaveProfileInfo,
+  SaveProfileSwapResult,
+  ActiveSaveProfile,
+  SaveBackupTrigger,
+  DriveGameBackup,
   VaultInfo,
   WebSearchSummary,
   AppSettings,
@@ -34,6 +40,13 @@ import type {
   CloudReview,
   LeaderboardEntry,
   CommunityPick,
+  LibrarySyncResult,
+  LibrarySyncResponse,
+  DriveMediaSyncResult,
+  DriveMediaRestoreResult,
+  DriveMediaStats,
+  DriveStorageQuota,
+  DriveMediaProgress,
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
@@ -194,6 +207,33 @@ const electronAPI: ElectronAPI = {
   uploadBackupToDrive: (backupId: number): Promise<{ drivePath: string; filesUploaded: number; bytesUploaded: number }> => {
     return ipcRenderer.invoke('drive:uploadBackup', backupId);
   },
+  listDriveGameBackups: (gameTitle: string): Promise<DriveGameBackup[]> => {
+    return ipcRenderer.invoke('drive:listGameBackups', gameTitle);
+  },
+  downloadCloudBackup: (gameId: number, drivePath: string): Promise<SaveBackup> => {
+    return ipcRenderer.invoke('drive:downloadCloudBackup', gameId, drivePath);
+  },
+  switchToMySave: (gameId: number, options?: { targetBackupId?: number }): Promise<SaveProfileSwapResult> => {
+    return ipcRenderer.invoke('saves:switchToMySave', gameId, options);
+  },
+  revertToHostSave: (gameId: number): Promise<SaveProfileSwapResult> => {
+    return ipcRenderer.invoke('saves:revertToHostSave', gameId);
+  },
+  applySaveBackup: (gameId: number, backupId: number, asProfile?: ActiveSaveProfile): Promise<SaveProfileSwapResult> => {
+    return ipcRenderer.invoke('saves:applyBackup', gameId, backupId, asProfile);
+  },
+  updateSaveBackupMetadata: (backupId: number, patch: { note?: string | null; trigger?: SaveBackupTrigger }): Promise<SaveBackup> => {
+    return ipcRenderer.invoke('saves:updateMetadata', backupId, patch);
+  },
+  getSaveProfileInfo: (gameId: number): Promise<SaveProfileInfo> => {
+    return ipcRenderer.invoke('saves:getProfileInfo', gameId);
+  },
+  setSaveProfileInfo: (gameId: number, patch: Partial<SaveProfileInfo>): Promise<SaveProfileInfo> => {
+    return ipcRenderer.invoke('saves:setProfileInfo', gameId, patch);
+  },
+  isGameRunning: (gameId: number): Promise<boolean> => {
+    return ipcRenderer.invoke('saves:isGameRunning', gameId);
+  },
 
   // Cloud auth (Google login)
   getAuthStatus: (): Promise<AuthStatus> => {
@@ -233,6 +273,26 @@ const electronAPI: ElectronAPI = {
   },
   unvotePick: (): Promise<CommunityPick> => {
     return ipcRenderer.invoke('community:unvotePick');
+  },
+  syncLibrary: (): Promise<LibrarySyncResult> => {
+    return ipcRenderer.invoke('community:syncLibrary');
+  },
+  getCloudLibrary: (): Promise<LibrarySyncResponse> => {
+    return ipcRenderer.invoke('community:getCloudLibrary');
+  },
+
+  // Media Sync via Google Drive
+  uploadMediaToDrive: (options?: { gameTitle?: string; localMediaBaseDir?: string }): Promise<DriveMediaSyncResult> => {
+    return ipcRenderer.invoke('drive:uploadMedia', options);
+  },
+  downloadMediaFromDrive: (options?: { gameTitle?: string; localMediaBaseDir?: string }): Promise<DriveMediaRestoreResult> => {
+    return ipcRenderer.invoke('drive:downloadMedia', options);
+  },
+  getDriveMediaStats: (): Promise<DriveMediaStats> => {
+    return ipcRenderer.invoke('drive:getMediaStats');
+  },
+  getDriveStorageQuota: (): Promise<DriveStorageQuota> => {
+    return ipcRenderer.invoke('drive:getStorageQuota');
   },
 
   // Settings & System Controls
@@ -287,6 +347,13 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('screenshot:synced', handler);
     return () => {
       ipcRenderer.removeListener('screenshot:synced', handler);
+    };
+  },
+  onDriveMediaProgress: (callback: (progress: DriveMediaProgress) => void) => {
+    const handler = (_event: any, progress: DriveMediaProgress) => callback(progress);
+    ipcRenderer.on('drive:mediaProgress', handler);
+    return () => {
+      ipcRenderer.removeListener('drive:mediaProgress', handler);
     };
   },
 };

@@ -54,6 +54,25 @@ CREATE TABLE IF NOT EXISTS community_votes (
     CONSTRAINT unq_votes_month_uid UNIQUE(month, uid)
 );
 
+-- 5. User Library Table (Multi-Device Library Sync)
+CREATE TABLE IF NOT EXISTS user_library (
+    uid TEXT NOT NULL,
+    game_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    steam_id INTEGER,
+    cover_url TEXT,
+    banner_url TEXT,
+    status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('playing', 'completed', 'paused', 'dropped', 'backlog')),
+    playtime_minutes INTEGER NOT NULL DEFAULT 0,
+    last_played TEXT,
+    user_score REAL,
+    user_notes TEXT,
+    is_deleted INTEGER NOT NULL DEFAULT 0 CHECK(is_deleted IN (0, 1)),
+    client_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    server_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (uid, game_key)
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_ratings_game_key ON ratings(game_key);
 CREATE INDEX IF NOT EXISTS idx_ratings_uid ON ratings(uid);
@@ -61,3 +80,6 @@ CREATE INDEX IF NOT EXISTS idx_ratings_game_score ON ratings(game_key, score);
 CREATE INDEX IF NOT EXISTS idx_community_votes_month_game ON community_votes(month, game_key);
 CREATE INDEX IF NOT EXISTS idx_community_votes_uid ON community_votes(uid);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_user_library_uid ON user_library(uid);
+CREATE INDEX IF NOT EXISTS idx_user_library_status ON user_library(uid, status);
+CREATE INDEX IF NOT EXISTS idx_user_library_updated ON user_library(uid, server_updated_at);

@@ -143,7 +143,27 @@ export interface SavePathConfig {
   created_at: string;
 }
 
-export type SaveBackupTrigger = 'manual' | 'pre_restore';
+export type SaveBackupTrigger = 'manual' | 'pre_restore' | 'host_snapshot' | 'my_save';
+
+export type ActiveSaveProfile = 'host' | 'my_save' | 'custom' | null;
+
+export interface SaveProfileInfo {
+  gameId: number;
+  activeProfile: ActiveSaveProfile;
+  hostBackupId: number | null;
+  myBackupId: number | null;
+  lastSwappedAt: string | null;
+  isGameRunning: boolean;
+}
+
+export interface SaveProfileSwapResult {
+  success: boolean;
+  targetProfile: 'host' | 'my_save';
+  restoredBackupId: number;
+  safetyBackupId: number | null;
+  restored: Array<{ sourcePath: string; files: number }>;
+  errors: string[];
+}
 
 /** Một bản backup (1 folder timestamp trong vault). */
 export interface SaveBackup {
@@ -203,6 +223,13 @@ export interface SavesListResult {
   paths: SavePathConfig[];
   backups: SaveBackup[];
   vault: VaultInfo;
+  profileInfo: SaveProfileInfo;
+}
+
+export interface DriveGameBackup {
+  id: string; // drive folder id
+  slotTime: string;
+  drivePath: string; // 'GameVault/GameName/2026-11-23_110000'
 }
 
 /** Folder save tìm thấy trên web (search engine + trang kết quả). */
@@ -294,6 +321,85 @@ export interface CommunityPick {
   state: 'voting' | 'playing' | 'done';
 }
 
+export interface UserLibraryItem {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+  bannerUrl?: string | null;
+  status: GameStatus;
+  playtimeMinutes: number;
+  lastPlayed?: string | null;
+  userScore?: number | null;
+  userNotes?: string | null;
+  isDeleted?: boolean;
+  clientUpdatedAt?: string;
+  serverUpdatedAt?: string;
+}
+
+export interface LibrarySyncStats {
+  total: number;
+  completed: number;
+  playing: number;
+  backlog: number;
+  paused: number;
+  dropped: number;
+  totalPlaytimeMinutes: number;
+}
+
+export interface LibrarySyncResponse {
+  games: UserLibraryItem[];
+  syncedAt: string;
+  stats: LibrarySyncStats;
+}
+
+export interface LibrarySyncResult {
+  pushed: number;
+  pulled: number;
+  updated: number;
+  completedCount: number;
+  totalCount: number;
+  timestamp: string;
+  stats?: LibrarySyncStats;
+}
+
+export interface DriveMediaSyncResult {
+  gamesProcessed: number;
+  filesUploaded: number;
+  bytesUploaded: number;
+  errors?: string[];
+}
+
+export interface DriveMediaRestoreResult {
+  gamesRestored: number;
+  filesDownloaded: number;
+  localBaseDir: string;
+}
+
+export interface DriveMediaStats {
+  gamesCount: number;
+  filesCount: number;
+}
+
+export interface DriveStorageQuota {
+  limitBytes: number;
+  usageBytes: number;
+  usageInDriveBytes: number;
+  percentUsed: number;
+  formattedLimit: string;
+  formattedUsage: string;
+}
+
+export interface DriveMediaProgress {
+  type: 'upload' | 'download';
+  current: number;
+  total: number;
+  percent: number;
+  currentFile: string;
+  currentGame: string;
+  bytesTransferred: number;
+}
+
 export interface TrackerStatus {
   isTracking: boolean;
   activeGameTitle: string | null;
@@ -327,7 +433,7 @@ export interface IgdbConfig {
   clientSecret?: string;
 }
 
-export type ImageStorageProvider = 'cloudflare_r2' | 'google_photos';
+export type ImageStorageProvider = 'cloudflare_r2' | 'google_drive' | 'google_photos';
 
 export interface CustomS3Config {
   enabled: boolean;
@@ -491,6 +597,19 @@ export interface ElectronAPI {
   getVaultInfo(): Promise<VaultInfo>;
   setVaultRoot(rootPath: string): Promise<VaultInfo>;
   uploadBackupToDrive?(backupId: number): Promise<{ drivePath: string; filesUploaded: number; bytesUploaded: number }>;
+  listDriveGameBackups?(gameTitle: string): Promise<DriveGameBackup[]>;
+  downloadCloudBackup?(gameId: number, drivePath: string): Promise<SaveBackup>;
+  switchToMySave?(gameId: number, options?: { targetBackupId?: number }): Promise<SaveProfileSwapResult>;
+  revertToHostSave?(gameId: number): Promise<SaveProfileSwapResult>;
+  applySaveBackup?(gameId: number, backupId: number, asProfile?: ActiveSaveProfile): Promise<SaveProfileSwapResult>;
+  updateSaveBackupMetadata?(backupId: number, patch: { note?: string | null; trigger?: SaveBackupTrigger }): Promise<SaveBackup>;
+  getSaveProfileInfo?(gameId: number): Promise<SaveProfileInfo>;
+  setSaveProfileInfo?(gameId: number, patch: Partial<SaveProfileInfo>): Promise<SaveProfileInfo>;
+  isGameRunning?(gameId: number): Promise<boolean>;
+  uploadMediaToDrive?(options?: { gameTitle?: string; localMediaBaseDir?: string }): Promise<DriveMediaSyncResult>;
+  downloadMediaFromDrive?(options?: { gameTitle?: string; localMediaBaseDir?: string }): Promise<DriveMediaRestoreResult>;
+  getDriveMediaStats?(): Promise<DriveMediaStats>;
+  getDriveStorageQuota?(): Promise<DriveStorageQuota>;
 
   // Cloud auth (Google login)
   getAuthStatus(): Promise<AuthStatus>;
@@ -507,11 +626,14 @@ export interface ElectronAPI {
   getCurrentPick?(): Promise<CommunityPick | null>;
   votePick?(gameId: number): Promise<CommunityPick>;
   unvotePick?(): Promise<CommunityPick>;
+  syncLibrary?(): Promise<LibrarySyncResult>;
+  getCloudLibrary?(): Promise<LibrarySyncResponse>;
 
   // Real-time Event Subscriptions
   onGameAdded?(callback: (game: Game) => void): () => void;
   onGameUpdated?(callback: (game: Game) => void): () => void;
   onScreenshotSynced?(callback: (info: { gameTitle: string; file: string; targetPath: string }) => void): () => void;
+  onDriveMediaProgress?(callback: (progress: DriveMediaProgress) => void): () => void;
 }
 
 declare global {

@@ -14,14 +14,26 @@ import {
   X,
   RefreshCw,
   ExternalLink,
+  ArrowLeftRight,
+  CloudDownload,
+  Tag,
+  Laptop,
+  User,
+  ShieldCheck,
+  Check,
 } from 'lucide-react';
 import type {
+  ActiveSaveProfile,
+  DriveGameBackup,
   SaveBackup,
+  SaveBackupResult,
+  SaveBackupTrigger,
   SaveLocationCandidate,
   SavePathConfig,
-  SavesListResult,
-  SaveBackupResult,
+  SaveProfileInfo,
+  SaveProfileSwapResult,
   SaveRestoreResult,
+  SavesListResult,
   VaultInfo,
   WebSaveCandidate,
 } from '../../shared/types.js';
@@ -35,6 +47,15 @@ const CONFIDENCE_META: Record<string, { label: string; className: string }> = {
 const TRIGGER_LABEL: Record<string, string> = {
   manual: 'Thủ công',
   pre_restore: 'An toàn tự động',
+  host_snapshot: 'Save chủ máy',
+  my_save: 'Save của tôi',
+};
+
+const TRIGGER_STYLE: Record<string, string> = {
+  manual: 'bg-[#2a2e3d] text-[#8e95a5] border-[#2a2e3d]',
+  pre_restore: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  host_snapshot: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30 font-semibold',
+  my_save: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-semibold',
 };
 
 export function formatBytes(bytes: number): string {
@@ -75,6 +96,12 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
   const [restoreTarget, setRestoreTarget] = useState<SaveBackup | null>(null);
   const [restoreResult, setRestoreResult] = useState<SaveRestoreResult | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+
+  // Profile Swapper & Cloud State
+  const [cloudBackups, setCloudBackups] = useState<DriveGameBackup[] | null>(null);
+  const [showCloudModal, setShowCloudModal] = useState<boolean>(false);
+  const [swapResult, setSwapResult] = useState<SaveProfileSwapResult | null>(null);
+  const [tagModalBackup, setTagModalBackup] = useState<SaveBackup | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -227,6 +254,107 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
   const vault: VaultInfo | null = list?.vault ?? null;
   const paths = list?.paths ?? [];
   const backups = list?.backups ?? [];
+  const profileInfo: SaveProfileInfo | null = list?.profileInfo ?? null;
+  const isGameRunning = profileInfo?.isGameRunning ?? false;
+
+  const handleSwitchToMySave = () => {
+    if (isGameRunning) {
+      setError('Game đang chạy! Vui lòng thoát game trước khi đổi file save để tránh lỗi dữ liệu.');
+      return;
+    }
+    const mySaves = backups.filter((b) => b.trigger === 'my_save' || b.trigger === 'manual');
+    if (mySaves.length === 0) {
+      setConfirmState({
+        title: 'Chưa có bản save cá nhân trong vault',
+        message: 'Trong máy chưa có bản save nào của bạn. Bạn có muốn quét Google Drive để tải save về không?',
+        confirmLabel: 'Quét Google Drive',
+        onConfirm: () => {
+          setConfirmState(null);
+          handleFetchCloudBackups();
+        },
+      });
+      return;
+    }
+
+    setConfirmState({
+      title: 'Chuyển sang Save của tôi',
+      message:
+        'GameVault sẽ:\n1. Tự động sao lưu toàn bộ save hiện tại trên máy này (gán nhãn "Save chủ máy").\n2. Nạp bản save cá nhân của bạn vào game để sẵn sàng chơi.\n\nSau khi chơi xong, bạn có thể bấm "Hoàn trả Save" để trả lại nguyên vẹn file save cho chủ máy.',
+      confirmLabel: 'Đổi sang Save của tôi',
+      onConfirm: () =>
+        run('switchMySave', async () => {
+          setConfirmState(null);
+          const result = await window.electronAPI.switchToMySave!(gameId);
+          setSwapResult(result);
+          await refresh();
+        }),
+    });
+  };
+
+  const handleRevertToHost = () => {
+    if (isGameRunning) {
+      setError('Game đang chạy! Vui lòng thoát game trước khi hoàn trả save.');
+      return;
+    }
+
+    setConfirmState({
+      title: 'Hoàn trả Save cho máy này (Chủ máy)',
+      message:
+        'GameVault sẽ:\n1. Tự động lưu lại tiến độ bạn vừa chơi (gán nhãn "Save của tôi").\n2. Phục hồi lại đúng file save gốc ban đầu của máy này.\n\nBạn có chắc chắn muốn hoàn trả save ngay bây giờ?',
+      confirmLabel: 'Hoàn trả Save ngay',
+      onConfirm: () =>
+        run('revertHost', async () => {
+          setConfirmState(null);
+          const result = await window.electronAPI.revertToHostSave!(gameId);
+          setSwapResult(result);
+          await refresh();
+        }),
+    });
+  };
+
+  const handleFetchCloudBackups = () =>
+    run('cloudBackups', async () => {
+      const g = await window.electronAPI.getGameById(gameId);
+      const title = g?.title || '';
+      const cloudSlots = (await window.electronAPI.listDriveGameBackups?.(title)) || [];
+      setCloudBackups(cloudSlots);
+      setShowCloudModal(true);
+    });
+
+  const handleDownloadCloudBackup = (drivePath: string) =>
+    run(`dlCloud-${drivePath}`, async () => {
+      await window.electronAPI.downloadCloudBackup?.(gameId, drivePath);
+      await refresh();
+      setDriveMsg('Đã tải thành công bản save từ Google Drive vào Vault! Bạn có thể kích hoạt để chơi ngay.');
+      setShowCloudModal(false);
+    });
+
+  const handleUpdateTag = (backupId: number, trigger: SaveBackupTrigger) =>
+    run(`tag-${backupId}`, async () => {
+      await window.electronAPI.updateSaveBackupMetadata?.(backupId, { trigger });
+      setTagModalBackup(null);
+      await refresh();
+    });
+
+  const handleApplyDirect = (backup: SaveBackup, asProfile?: ActiveSaveProfile) => {
+    if (isGameRunning) {
+      setError('Game đang chạy! Vui lòng thoát game trước khi đổi file save.');
+      return;
+    }
+    const profileLabel = asProfile === 'my_save' ? 'Save của tôi' : asProfile === 'host' ? 'Save chủ máy' : 'Khác';
+    setConfirmState({
+      title: `Áp dụng bản save (${profileLabel})`,
+      message: `Nạp dữ liệu từ bản backup này vào thư mục game và đặt trạng thái hoạt động thành "${profileLabel}"?\n\n${backup.slot_time.replace('_', ' ')}\n\nGameVault sẽ tự động tạo một bản sao lưu an toàn trước khi ghi đè.`,
+      confirmLabel: 'Áp dụng ngay',
+      onConfirm: () =>
+        run(`apply-${backup.id}`, async () => {
+          setConfirmState(null);
+          const res = await window.electronAPI.applySaveBackup!(gameId, backup.id, asProfile);
+          setSwapResult(res);
+          await refresh();
+        }),
+    });
+  };
 
   return (
     <div className="mt-12 space-y-4">
@@ -277,6 +405,102 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
             {busy === 'backup' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             <span>Backup ngay</span>
           </button>
+        </div>
+      </div>
+
+      {/* Save Profile Swapper Card */}
+      <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-[#161821] to-[#161821] p-4 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div
+              className={`p-2.5 rounded-xl border ${
+                profileInfo?.activeProfile === 'my_save'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                  : profileInfo?.activeProfile === 'host'
+                  ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400'
+                  : 'bg-[#2a2e3d] border-[#373c4e] text-[#8e95a5]'
+              }`}
+            >
+              <ArrowLeftRight className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-[#8e95a5] font-medium">Hồ sơ Save trên máy:</span>
+                {profileInfo?.activeProfile === 'my_save' ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Save của tôi (Đang kích hoạt)
+                  </span>
+                ) : profileInfo?.activeProfile === 'host' ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+                    <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                    Save gốc của máy này (Chủ máy)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#2a2e3d] text-[#8e95a5]">
+                    Mặc định
+                  </span>
+                )}
+                {isGameRunning && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                    <AlertCircle className="h-3 w-3" /> Game đang chạy (thoát game để đổi save)
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-[#8e95a5]">
+                {profileInfo?.activeProfile === 'my_save'
+                  ? 'Bạn đang chơi trên dữ liệu save của bạn. Khi trả máy, hãy bấm "Hoàn trả Save" để phục hồi nguyên trạng cho chủ máy.'
+                  : 'Thư mục game hiện đang chứa save nguyên bản của máy. Bấm "Chuyển sang Save của tôi" để nạp tiến độ của bạn.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            {profileInfo?.activeProfile === 'my_save' ? (
+              <button
+                onClick={handleRevertToHost}
+                disabled={busy !== null || isGameRunning}
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition hover:brightness-110 disabled:opacity-40"
+                title="Tự động sao lưu tiến độ vừa chơi và phục hồi lại save gốc của chủ máy"
+              >
+                {busy === 'revertHost' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+                <span>Hoàn trả Save cho máy này</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleSwitchToMySave}
+                disabled={busy !== null || isGameRunning}
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition hover:brightness-110 disabled:opacity-40"
+                title="Tự động đóng băng lưu lại save của máy này và kích hoạt save của bạn"
+              >
+                {busy === 'switchMySave' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ArrowLeftRight className="h-3.5 w-3.5" />
+                )}
+                <span>Chuyển sang Save của tôi</span>
+              </button>
+            )}
+
+            <button
+              onClick={handleFetchCloudBackups}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 text-xs font-semibold text-[#8e95a5] transition hover:border-sky-400 hover:text-white disabled:opacity-50"
+              title="Quét các bản save của bạn đã lưu trên Google Drive"
+            >
+              {busy === 'cloudBackups' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CloudDownload className="h-3.5 w-3.5 text-sky-400" />
+              )}
+              <span>Tải từ Cloud Drive</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -577,29 +801,70 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
             Chưa có bản backup nào. Bấm <span className="font-semibold text-white">Backup ngay</span> để lưu trạng thái save hiện tại — xóa game xong vẫn có thể phục hồi.
           </p>
         ) : (
-          <div className="max-h-64 space-y-2 overflow-y-auto">
+          <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
             {backups.map((b) => (
               <div
                 key={b.id}
-                className="flex items-center justify-between gap-3 rounded-lg bg-[#0e1015] px-3 py-2 border border-[#2a2e3d]/50"
+                className="flex items-center justify-between gap-3 rounded-lg bg-[#0e1015] px-3 py-2.5 border border-[#2a2e3d]/50 hover:border-[#373c4e] transition"
               >
-                <div className="flex min-w-0 items-center gap-3">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <span className="shrink-0 font-mono text-xs text-[#f1f3f7]">
                     {b.slot_time.replace('_', ' ')}
                   </span>
-                  <span className="shrink-0 rounded bg-[#2a2e3d] px-2 py-0.5 text-[10px] text-[#8e95a5]">
+                  <span
+                    className={`shrink-0 rounded border px-2 py-0.5 text-[10px] ${
+                      TRIGGER_STYLE[b.trigger] || 'border-[#2a2e3d] bg-[#2a2e3d] text-[#8e95a5]'
+                    }`}
+                  >
                     {TRIGGER_LABEL[b.trigger] || b.trigger}
                   </span>
+                  {b.id === profileInfo?.hostBackupId && (
+                    <span className="shrink-0 rounded border border-indigo-500/40 bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-bold text-indigo-400" title="Bản snapshot gốc của máy này">
+                      Gốc máy
+                    </span>
+                  )}
+                  {b.id === profileInfo?.myBackupId && (
+                    <span className="shrink-0 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400" title="Bản save của tôi được nạp lần gần nhất">
+                      Của tôi
+                    </span>
+                  )}
                   {b.note && (
                     <span className="truncate text-[10px] text-[#8e95a5]/80" title={b.note}>
                       {b.note}
                     </span>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="font-mono text-[10px] text-[#8e95a5]">
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className="mr-1 font-mono text-[10px] text-[#8e95a5]">
                     {b.file_count} file · {formatBytes(b.size_bytes)}
                   </span>
+
+                  {/* Quick Apply into Game */}
+                  <button
+                    onClick={() => handleApplyDirect(b, b.trigger === 'host_snapshot' ? 'host' : 'my_save')}
+                    disabled={busy !== null || isGameRunning}
+                    className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-40"
+                    title="Nạp bản save này vào game ngay lập tức"
+                  >
+                    {busy === `apply-${b.id}` ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <ArrowLeftRight className="h-3 w-3" />
+                    )}
+                    <span>Kích hoạt</span>
+                  </button>
+
+                  {/* Change Tag */}
+                  <button
+                    onClick={() => setTagModalBackup(b)}
+                    disabled={busy !== null}
+                    className="rounded-lg p-1.5 text-[#8e95a5] transition hover:bg-[#2a2e3d] hover:text-white disabled:opacity-50"
+                    title="Đổi nhãn phân loại (Save của tôi / Save chủ máy / Thủ công)"
+                  >
+                    <Tag className="h-3.5 w-3.5" />
+                  </button>
+
+                  {/* Upload to Drive */}
                   <button
                     onClick={() => handleUploadToDrive(b)}
                     disabled={busy !== null}
@@ -612,22 +877,28 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
                       <HardDriveUpload className="h-3.5 w-3.5" />
                     )}
                   </button>
+
+                  {/* Open Folder */}
                   <button
                     onClick={() => window.electronAPI.openSaveBackupFolder(b.id)}
                     className="rounded-lg p-1.5 text-[#8e95a5] transition hover:bg-[#2a2e3d] hover:text-white"
-                    title="Mở folder backup"
+                    title="Mở folder backup trên máy"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                   </button>
+
+                  {/* Restore */}
                   <button
                     onClick={() => setRestoreTarget(b)}
                     disabled={busy !== null}
-                    className="flex items-center gap-1 rounded-lg border border-[#2a2e3d] px-2.5 py-1 text-[11px] font-semibold text-[#8e95a5] transition hover:border-emerald-500/50 hover:text-emerald-400 disabled:opacity-50"
+                    className="flex items-center gap-1 rounded-lg border border-[#2a2e3d] px-2 py-1 text-[11px] font-semibold text-[#8e95a5] transition hover:border-[#8e95a5] hover:text-white disabled:opacity-50"
                     title="Phục hồi các folder save về trạng thái của bản backup này"
                   >
                     <RotateCcw className="h-3 w-3" />
-                    Phục hồi
+                    <span>Phục hồi</span>
                   </button>
+
+                  {/* Delete */}
                   <button
                     onClick={() => handleDeleteBackup(b)}
                     disabled={busy !== null}
@@ -642,6 +913,175 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
           </div>
         )}
       </div>
+
+      {/* Tag Edit Modal */}
+      {tagModalBackup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl border border-[#2a2e3d] bg-[#161821] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Tag className="h-4 w-4 text-amber-400" />
+                <span>Đổi nhãn phân loại Save</span>
+              </h3>
+              <button
+                onClick={() => setTagModalBackup(null)}
+                className="rounded-lg p-1 text-[#8e95a5] hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs text-[#8e95a5]">
+              Chọn vai trò cho bản backup: <span className="font-mono text-white">{tagModalBackup.slot_time.replace('_', ' ')}</span>
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => handleUpdateTag(tagModalBackup.id, 'my_save')}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold transition"
+              >
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  <span>Save của tôi (My Profile)</span>
+                </div>
+                {tagModalBackup.trigger === 'my_save' && <Check className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => handleUpdateTag(tagModalBackup.id, 'host_snapshot')}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 text-xs font-semibold transition"
+              >
+                <div className="flex items-center gap-2">
+                  <Laptop className="h-4 w-4" />
+                  <span>Save chủ máy (Host Profile)</span>
+                </div>
+                {tagModalBackup.trigger === 'host_snapshot' && <Check className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => handleUpdateTag(tagModalBackup.id, 'manual')}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] text-[#8e95a5] hover:text-white text-xs font-medium transition"
+              >
+                <span>Sao lưu thủ công thông thường</span>
+                {tagModalBackup.trigger === 'manual' && <Check className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cloud Drive Backups Modal */}
+      {showCloudModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-lg rounded-2xl border border-[#2a2e3d] bg-[#161821] p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <CloudDownload className="h-5 w-5 text-sky-400" />
+                <span>Bản save trên Google Drive</span>
+              </h3>
+              <button
+                onClick={() => setShowCloudModal(false)}
+                className="rounded-lg p-1 text-[#8e95a5] hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-xs text-[#8e95a5]">
+              Danh sách các bản save đã đồng bộ trên Google Drive cá nhân của bạn. Bấm tải về để nạp vào Vault của máy này:
+            </p>
+            {cloudBackups === null || busy === 'cloudBackups' ? (
+              <div className="flex items-center justify-center py-8 text-xs text-[#8e95a5] gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
+                <span>Đang quét Google Drive...</span>
+              </div>
+            ) : cloudBackups.length === 0 ? (
+              <div className="rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-6 text-center text-xs text-[#8e95a5]">
+                Chưa có bản save nào của game này trên Google Drive. Bạn có thể bấm nút Upload ở các bản backup cục bộ để tải lên Cloud.
+              </div>
+            ) : (
+              <div className="max-h-60 space-y-2 overflow-y-auto pr-1">
+                {cloudBackups.map((cb) => (
+                  <div
+                    key={cb.id}
+                    className="flex items-center justify-between p-3 rounded-xl border border-[#2a2e3d] bg-[#0e1015]"
+                  >
+                    <div>
+                      <div className="font-mono text-xs font-semibold text-white">
+                        {cb.slotTime.replace('_', ' ')}
+                      </div>
+                      <div className="font-mono text-[10px] text-[#8e95a5] truncate max-w-xs" title={cb.drivePath}>
+                        {cb.drivePath}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDownloadCloudBackup(cb.drivePath)}
+                      disabled={busy !== null}
+                      className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-bold text-white shadow transition hover:brightness-110 disabled:opacity-50"
+                    >
+                      {busy === `dlCloud-${cb.drivePath}` ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CloudDownload className="h-3.5 w-3.5" />
+                      )}
+                      <span>Tải về Vault</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setShowCloudModal(false)}
+                className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-4 py-1.5 text-xs font-semibold text-[#8e95a5] hover:text-white"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Swap Profile Result Modal */}
+      {swapResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-[#2a2e3d] bg-[#161821] p-6 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              <span>
+                {swapResult.targetProfile === 'my_save'
+                  ? 'Đã chuyển sang Save của tôi!'
+                  : swapResult.targetProfile === 'host'
+                  ? 'Đã hoàn trả Save cho chủ máy!'
+                  : 'Đã kích hoạt save thành công!'}
+              </span>
+            </h3>
+            <p className="text-xs text-[#8e95a5] leading-relaxed">
+              {swapResult.targetProfile === 'my_save'
+                ? 'GameVault đã snapshot an toàn save của máy này và nạp bản save cá nhân của bạn vào game. Bạn có thể mở game lên và tiếp tục hành trình!'
+                : swapResult.targetProfile === 'host'
+                ? 'GameVault đã lưu lại tiến độ bạn vừa chơi và phục hồi lại đúng file save gốc ban đầu của chủ máy. Máy đã sẵn sàng trả lại cho chủ!'
+                : 'Dữ liệu save đã được nạp thành công vào game.'}
+            </p>
+            <div className="space-y-1 rounded-xl bg-[#0e1015] p-3 text-xs">
+              <div className="font-semibold text-white text-[11px] mb-1">Chi tiết phục hồi:</div>
+              {swapResult.restored.map((r, i) => (
+                <div key={i} className="truncate font-mono text-[10px] text-emerald-400" title={r.sourcePath}>
+                  ✓ {r.sourcePath} ({r.files} file)
+                </div>
+              ))}
+              {swapResult.safetyBackupId !== null && (
+                <div className="pt-1 text-[10px] text-[#8e95a5]">
+                  ✓ Đã tạo snapshot an toàn (ID #{swapResult.safetyBackupId})
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={() => setSwapResult(null)}
+                className="rounded-lg bg-emerald-600 px-5 py-1.5 text-xs font-bold text-white shadow hover:brightness-110"
+              >
+                Tuyệt vời
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Restore confirmation modal */}
       {restoreTarget && (

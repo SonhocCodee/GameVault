@@ -18,6 +18,7 @@ import {
   ChevronDown,
   LayoutGrid,
   GitCommitVertical,
+  RefreshCw,
 } from 'lucide-react';
 import type { GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
@@ -228,8 +229,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
 
-        {/* Right Section: Compact Tools Dropdown, Add Game, Settings, Auth */}
+        {/* Right Section: Prominent Sync Button, Compact Tools Dropdown, Add Game, Settings, Auth */}
         <div className="flex items-center gap-2">
+          {/* Direct Prominent Sync Button */}
+          <button
+            onClick={onOpenSyncModal}
+            className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-400 hover:border-sky-400 hover:bg-sky-500/20 hover:text-white transition-all shadow-sm active:scale-95"
+            title="Mở Trung tâm Đồng bộ (Cloud D1 & Google Drive)"
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-sky-400" />
+            <span>Đồng bộ</span>
+          </button>
+
           {/* Quick Tools Dropdown (F6 Sync, AMD Import, Steam Wishlist) */}
           <div className="relative" ref={toolsRef}>
             <button
@@ -264,12 +275,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] group"
                 >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-black transition-colors">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-sky-500/10 text-sky-400 group-hover:bg-sky-500 group-hover:text-black transition-colors">
                     <Zap className="h-3.5 w-3.5" />
                   </div>
                   <div>
-                    <div className="font-semibold text-white group-hover:text-amber-400">Đồng bộ ảnh F6</div>
-                    <div className="text-[10px] text-[#8e95a5]">Quét &amp; chuyển ảnh F6 vào E:\Game</div>
+                    <div className="font-semibold text-white group-hover:text-sky-400">Trung tâm Đồng bộ</div>
+                    <div className="text-[10px] text-[#8e95a5]">Đồng bộ Thư viện Cloud, Drive &amp; ảnh F6</div>
                   </div>
                 </button>
 
