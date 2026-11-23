@@ -17,109 +17,24 @@ import {
   getCurrentPick,
   votePick,
   unvotePick,
+  getUserDoc,
 } from '../src/main/cloud-db.ts';
 import { configureAuth, persistSession, clearSession } from '../src/main/auth.ts';
+import { createTestWorkerEnv, createTestSessionToken } from './test-helpers-cloudflare.js';
+import worker from '../worker/src/index.ts';
 
 function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `gamevault-cloud-${prefix}-`));
 }
 
-const CONFIG = {
-  oauthClientId: 'cid',
-  oauthClientSecret: 'cs',
-  firebaseApiKey: 'fkey',
-  firebaseProjectId: 'proj',
-};
-
-const MY_SESSION = {
-  firebase: {
-    idToken: 'fb-token',
-    refreshToken: 'fb-refresh',
-    expiresAt: Date.now() + 3600 * 1000, // valid — no refresh needed
-    localId: 'me-uid',
-    email: 'me@test.vn',
-    displayName: 'Toi',
-    photoUrl: 'https://photo/me',
-  },
-  google: { accessToken: 'g', refreshToken: 'g-r', expiresAt: Date.now() + 3600 * 1000, scope: 'x' },
-  updatedAt: new Date().toISOString(),
-};
-
-/** Tiny Firestore REST emulator for the shapes cloud-db.ts actually uses. */
-function firestoreEmulator({ initialDocs = {} } = {}) {
-  const calls = [];
-  const docs = { ...initialDocs }; // "projects/proj/.../documents/ratings/x" → {fields}
-  const impl = async (url, init = {}) => {
-    calls.push({ url, init });
-    const method = (init.method || 'GET').toUpperCase();
-
-    if (url.includes(':runQuery')) {
-      const query = JSON.parse(init.body || '{}');
-      const collection = query.structuredQuery?.from?.[0]?.collectionId || '';
-      const where = query.structuredQuery?.where?.fieldFilter;
-      const rows = Object.entries(docs)
-        .filter(([key, doc]) => {
-          if (!key.startsWith(`${collection}/`)) return false;
-          if (!where) return true;
-          const field = where.field.fieldPath;
-          const expected = where.value.stringValue;
-          return String(doc.fields[field]?.stringValue || '') === expected;
-        })
-        .map(([key, doc]) => ({ document: { name: `projects/proj/databases/(default)/documents/${key}`, fields: doc.fields } }));
-      return { ok: true, status: 200, json: async () => rows };
-    }
-
-    const m = /documents\/([a-zA-Z]+)\/([^:?]+)/.exec(url);
-    const collection = m?.[1];
-    const docId = m?.[2];
-
-    const key = `${collection}/${docId}`;
-    if (method === 'GET') {
-      if (!docs[key]) return { ok: false, status: 404, json: async () => ({}) };
-      return { ok: true, status: 200, json: async () => ({ name: key, fields: docs[key].fields }) };
-    }
-    if (method === 'DELETE') {
-      const existed = Boolean(docs[key]);
-      delete docs[key];
-      return { ok: existed || true, status: 200, json: async () => ({}) };
-    }
-    if (method === 'PATCH' || method === 'POST') {
-      const body = JSON.parse(init.body || '{}');
-      if (!docs[key]) docs[key] = { fields: {} };
-      const maskMatch = /updateMask\.fieldPaths=([^&]+)/.exec(url);
-      if (maskMatch) {
-        // Firestore semantics: updateMask.fieldPaths lists LEAF paths — only
-        // those leaves are written; sibling leaves survive untouched.
-        const leafPath = decodeURIComponent(maskMatch[1]).split('.');
-        let leafValue = body.fields;
-        for (const part of leafPath) {
-          if (!leafValue) break;
-          if (leafValue.mapValue) leafValue = leafValue.mapValue.fields?.[part];
-          else leafValue = leafValue[part];
-        }
-        const isDelete = leafValue && 'nullValue' in leafValue;
-        let cursor = docs[key].fields;
-        for (let i = 0; i < leafPath.length - 1; i++) {
-          const part = leafPath[i];
-          if (!cursor[part]) cursor[part] = { mapValue: { fields: {} } };
-          cursor = cursor[part].mapValue.fields;
-        }
-        const last = leafPath[leafPath.length - 1];
-        if (isDelete) delete cursor[last];
-        else cursor[last] = leafValue;
-      } else {
-        docs[key].fields = body.fields;
-      }
-      return { ok: true, status: 200, json: async () => ({ name: key, fields: docs[key].fields }) };
-    }
-    return { ok: false, status: 405, json: async () => ({}) };
-  };
-  return { impl, calls, docs };
-}
-
-describe('Cloud DB (Firestore REST + leaderboard + taste-match)', () => {
+describe('Cloud DB (Cloudflare Worker REST + D1 SQL leaderboard & picks)', () => {
   let tmpDirs = [];
-  let emulator;
+  let env;
+  let d1;
+  let r2;
+  let calls;
+  let sessionToken;
+  let userDataDir;
 
   const newTmp = (prefix) => {
     const dir = makeTempDir(prefix);
@@ -127,21 +42,81 @@ describe('Cloud DB (Firestore REST + leaderboard + taste-match)', () => {
     return dir;
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     initDb(':memory:');
     tmpDirs = [];
-    clearSession();
-    const userDataDir = newTmp('ud');
-    emulator = firestoreEmulator();
-    configureAuth({ config: CONFIG, userDataDir, fetchImpl: emulator.impl });
-    configureCloudDb({ projectId: 'proj', fetchImpl: emulator.impl, userDataDir });
-    persistSession(MY_SESSION, { userDataDir });
+    calls = [];
+    userDataDir = newTmp('ud');
+
+    const testEnv = await createTestWorkerEnv();
+    env = testEnv.env;
+    d1 = testEnv.d1;
+    r2 = testEnv.r2;
+
+    sessionToken = await createTestSessionToken(
+      { uid: 'me-uid', email: 'me@test.vn', displayName: 'Toi' },
+      env.SESSION_SECRET
+    );
+
+    // Seed my user in D1
+    await d1
+      .prepare(`INSERT INTO users (uid, email, display_name) VALUES (?, ?, ?)`)
+      .bind('me-uid', 'me@test.vn', 'Toi')
+      .run();
+
+    const fetchImpl = async (url, init = {}) => {
+      const recordedHeaders = {};
+      if (init.headers) {
+        if (typeof init.headers.forEach === 'function') {
+          init.headers.forEach((val, key) => {
+            recordedHeaders[key.toLowerCase()] = val;
+          });
+        } else {
+          for (const [k, v] of Object.entries(init.headers)) {
+            recordedHeaders[k.toLowerCase()] = v;
+          }
+        }
+      }
+      calls.push({
+        url: String(url),
+        method: (init.method || 'GET').toUpperCase(),
+        headers: recordedHeaders,
+        body: init.body,
+      });
+      const req = new Request(url, init);
+      return worker.fetch(req, env);
+    };
+
+    const config = {
+      oauthClientId: 'cid',
+      oauthClientSecret: 'cs',
+      workerApiUrl: 'http://localhost',
+    };
+
+    configureAuth({ config, userDataDir, fetchImpl });
+    configureCloudDb({ workerApiUrl: 'http://localhost', fetchImpl, userDataDir });
+
+    persistSession(
+      {
+        sessionToken,
+        expiresAt: Date.now() + 3600 * 1000,
+        user: {
+          uid: 'me-uid',
+          email: 'me@test.vn',
+          displayName: 'Toi',
+          photoUrl: 'https://photo/me',
+        },
+        google: { accessToken: 'g', refreshToken: 'g-r', expiresAt: Date.now() + 3600 * 1000, scope: 'x' },
+        updatedAt: new Date().toISOString(),
+      },
+      { userDataDir }
+    );
   });
 
   afterEach(() => {
     closeDb();
-    clearSession();
-    configureCloudDb({ fetchImpl: undefined, projectId: undefined, userDataDir: undefined });
+    clearSession({ userDataDir });
+    configureCloudDb({ fetchImpl: undefined, workerApiUrl: undefined, projectId: undefined, userDataDir: undefined });
     for (const dir of tmpDirs) {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -168,14 +143,15 @@ describe('Cloud DB (Firestore REST + leaderboard + taste-match)', () => {
     assert.equal(computeGuMatch(mine, fewShared), null, '< 3 co-rated → null');
   });
 
-  test('submitReview stores denormalized doc; getGameReviews reads it back', async () => {
+  test('submitReview stores review in D1; getGameReviews reads it back', async () => {
     const game = createGame({
       title: 'Elden Ring',
       steam_id: 1245620,
       playtime_minutes: 900,
       cover_url: 'https://cover/er.jpg',
     });
-    // Seed my user doc (hw profile) so the review embeds it
+
+    // Seed my hardware profile so the review join includes it
     await setMyHardwareProfile({ gpu: 'RTX 3050', cpu: 'Ryzen 5 5600', ramGb: 16 });
 
     const review = await submitReview(game.id, {
@@ -190,127 +166,165 @@ describe('Cloud DB (Firestore REST + leaderboard + taste-match)', () => {
     assert.equal(review.score, 9.5);
     assert.equal(review.fps, 60);
     assert.equal(review.authorHw?.gpu, 'RTX 3050');
+    assert.equal(review.authorHw?.cpu, 'Ryzen 5 5600');
+    assert.equal(review.authorHw?.ramGb, 16);
     assert.equal(review.playtimeMinutes, 900);
 
-    const docKey = 'ratings/me-uid_1245620';
-    assert.ok(emulator.docs[docKey], 'doc id = uid_gameKey');
-    assert.equal(emulator.docs[docKey].fields.gameKey.stringValue, '1245620');
+    // Verify Worker HTTP call
+    const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/api/games/1245620/reviews'));
+    assert.ok(postCall, 'POST /api/games/:gameKey/reviews called');
+    assert.equal(postCall.headers['authorization'], `Bearer ${sessionToken}`);
+    assert.equal(postCall.headers['content-type'], 'application/json');
 
     const list = await getGameReviews('1245620');
     assert.equal(list.length, 1);
     assert.equal(list[0].authorName, 'Toi');
     assert.equal(list[0].score, 9.5);
+    assert.equal(list[0].fps, 60);
+    assert.equal(list[0].authorHw?.gpu, 'RTX 3050');
   });
 
-  test('deleteMyReview removes the doc', async () => {
+  test('deleteMyReview removes the review from D1', async () => {
     const game = createGame({ title: 'Delete Target', steam_id: 42 });
     await submitReview(game.id, { score: 7, review: 'ok', dropped: false });
-    assert.ok(emulator.docs['ratings/me-uid_42']);
+
+    const beforeReviews = await getGameReviews('42');
+    assert.equal(beforeReviews.length, 1);
 
     const removed = await deleteMyReview(game.id);
     assert.equal(removed, true);
-    assert.equal(emulator.docs['ratings/me-uid_42'], undefined);
+
+    const deleteCall = calls.find((c) => c.method === 'DELETE' && c.url.includes('/api/games/42/reviews'));
+    assert.ok(deleteCall, 'DELETE /api/games/:gameKey/reviews called');
+    assert.equal(deleteCall.headers['authorization'], `Bearer ${sessionToken}`);
+
+    const afterReviews = await getGameReviews('42');
+    assert.equal(afterReviews.length, 0);
   });
 
-  test('getLeaderboard aggregates avg/dropRate and computes taste-match', async () => {
-    // Three games, three reviewers (me + 2 others); me and other1 co-rate 3
-    // games so taste-match is meaningful (≥3 shared)
+  test('getLeaderboard aggregates avg/dropRate/playtime via SQL in D1', async () => {
     const g1 = createGame({ title: 'Game One', steam_id: 11, playtime_minutes: 600 });
     const g2 = createGame({ title: 'Game Two', steam_id: 22, playtime_minutes: 120 });
     const g3 = createGame({ title: 'Game Three', steam_id: 33, playtime_minutes: 60 });
 
-    await setMyHardwareProfile({ gpu: 'RTX 3050', cpu: 'R5', ramGb: 16 });
     await submitReview(g1.id, { score: 9, review: 'hay', dropped: false });
     await submitReview(g2.id, { score: 5, review: 'tệ', dropped: true, dropReason: 'bị lag' });
     await submitReview(g3.id, { score: 7, review: 'tạm', dropped: false });
 
-    const mk = (uid, name, gameKey, score, extra = {}) => ({
-      fields: {
-        uid: { stringValue: uid },
-        gameKey: { stringValue: String(gameKey) },
-        gameTitle: { stringValue: `Game ${gameKey}` },
-        score: { integerValue: String(score) },
-        review: { stringValue: '' },
-        dropped: { booleanValue: false },
-        playtimeMinutes: { integerValue: '100' },
-        updatedAt: { stringValue: new Date().toISOString() },
-        authorName: { stringValue: name },
-        authorPhoto: { stringValue: '' },
-        ...extra,
-      },
-    });
+    // Seed other users and ratings directly into D1
+    await d1.prepare(`INSERT INTO users (uid, email, display_name) VALUES (?, ?, ?)`).bind('other1', 'o1@test.vn', 'Ban 1').run();
+    await d1.prepare(`INSERT INTO users (uid, email, display_name) VALUES (?, ?, ?)`).bind('other2', 'o2@test.vn', 'Ban 2').run();
 
-    // other1 tracks my taste closely (and does NOT drop game 22); other2 diverges
-    emulator.docs['ratings/other1_11'] = mk('other1', 'Ban 1', 11, 8);
-    emulator.docs['ratings/other1_22'] = mk('other1', 'Ban 1', 22, 4);
-    emulator.docs['ratings/other1_33'] = mk('other1', 'Ban 1', 33, 6);
-    emulator.docs['ratings/other2_11'] = mk('other2', 'Ban 2', 11, 10);
+    await d1.prepare(`
+      INSERT INTO ratings (id, uid, game_key, game_title, score, review, dropped, playtime_minutes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind('other1_11', 'other1', '11', 'Game One', 8, '', 0, 100, new Date().toISOString()).run();
+
+    await d1.prepare(`
+      INSERT INTO ratings (id, uid, game_key, game_title, score, review, dropped, playtime_minutes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind('other1_22', 'other1', '22', 'Game Two', 4, '', 0, 100, new Date().toISOString()).run();
+
+    await d1.prepare(`
+      INSERT INTO ratings (id, uid, game_key, game_title, score, review, dropped, playtime_minutes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind('other2_11', 'other2', '11', 'Game One', 10, '', 0, 100, new Date().toISOString()).run();
 
     const entries = await getLeaderboard();
     assert.equal(entries.length, 3);
 
     const gameOne = entries.find((e) => e.gameKey === '11');
+    assert.ok(gameOne);
     assert.equal(gameOne.reviewCount, 3);
-    assert.equal(gameOne.avgScore, 9); // (9+8+10)/3
+    assert.equal(gameOne.avgScore, 9); // (9 + 8 + 10) / 3
     assert.equal(gameOne.dropRate, 0);
     assert.equal(gameOne.myScore, 9);
-    assert.ok(gameOne.guMatchScore !== null && gameOne.guMatchScore >= 80, `taste-match should be high, got ${gameOne.guMatchScore}`);
 
     const gameTwo = entries.find((e) => e.gameKey === '22');
+    assert.ok(gameTwo);
     assert.equal(gameTwo.reviewCount, 2);
-    assert.equal(gameTwo.dropRate, 0.5); // me + other1 both dropped
+    assert.equal(gameTwo.dropRate, 0.5); // 1 dropped out of 2
   });
 
-  test('votePick merges only my field; concurrent votes survive', async () => {
+  test('votePick casts vote in D1, unvotePick removes vote', async () => {
     const game = createGame({ title: 'Club Game', steam_id: 77 });
-    emulator.docs['picks/2099-01'] = {
-      fields: {
-        month: { stringValue: '2099-01' },
-        gameKey: { stringValue: '88' },
-        gameTitle: { stringValue: 'Other Game' },
-        state: { stringValue: 'voting' },
-        votes: { mapValue: { fields: { otherUid: { stringValue: '88' } } } },
-      },
-    };
 
-    // Note: votePick uses current month — seed that key dynamically
+    // Seed another user's vote directly in D1
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    emulator.docs[`picks/${month}`] = {
-      fields: {
-        month: { stringValue: month },
-        gameKey: { stringValue: '88' },
-        gameTitle: { stringValue: 'Other Game' },
-        state: { stringValue: 'voting' },
-        votes: { mapValue: { fields: { otherUid: { stringValue: '88' } } } },
-      },
-    };
+    await d1.prepare(`
+      INSERT INTO community_votes (id, month, uid, game_key, game_title, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(`${month}_otherUid`, month, 'otherUid', '88', 'Other Game', now.toISOString()).run();
 
     const result = await votePick(game);
     assert.equal(result.votes['me-uid'], '77');
-    assert.equal(result.votes['otherUid'], '88', 'other user\'s vote must survive the merge');
+    assert.equal(result.votes['otherUid'], '88', "other user's vote survives concurrently");
 
-    const merged = await getCurrentPick();
-    assert.equal(merged.votes['me-uid'], '77');
+    const voteCall = calls.find((c) => c.method === 'POST' && c.url.includes('/api/picks/vote'));
+    assert.ok(voteCall);
+    assert.equal(voteCall.headers['authorization'], `Bearer ${sessionToken}`);
 
-    await unvotePick();
-    const after = await getCurrentPick();
-    assert.equal(after.votes['me-uid'], undefined, 'my vote removed');
-    assert.equal(after.votes['otherUid'], '88');
-  });
+    const current = await getCurrentPick();
+    assert.ok(current);
+    assert.equal(current.votes['me-uid'], '77');
 
-  test('votePick creates the pick doc when nobody voted yet', async () => {
-    const game = createGame({ title: 'First Pick', steam_id: 99 });
-    const result = await votePick(game);
-    assert.equal(result.votes['me-uid'], '99');
-    assert.equal(result.state, 'voting');
+    const unvoteResult = await unvotePick();
+    assert.equal(unvoteResult.votes['me-uid'], undefined, 'my vote removed');
+    assert.equal(unvoteResult.votes['otherUid'], '88');
+
+    const afterUnvote = await getCurrentPick();
+    assert.equal(afterUnvote.votes['me-uid'], undefined);
+    assert.equal(afterUnvote.votes['otherUid'], '88');
   });
 
   test('getMyHardwareProfile returns null when unset, object after set', async () => {
     assert.equal(await getMyHardwareProfile(), null);
+
     const saved = await setMyHardwareProfile({ gpu: 'GTX 1050', cpu: 'i5', ramGb: 8 });
     assert.equal(saved.gpu, 'GTX 1050');
+    assert.equal(saved.cpu, 'i5');
+    assert.equal(saved.ramGb, 8);
+
+    const putCall = calls.find((c) => c.method === 'PUT' && c.url.includes('/api/users/me/hardware'));
+    assert.ok(putCall);
+    assert.equal(putCall.headers['authorization'], `Bearer ${sessionToken}`);
+
     const loaded = await getMyHardwareProfile();
+    assert.ok(loaded);
+    assert.equal(loaded.gpu, 'GTX 1050');
     assert.equal(loaded.ramGb, 8);
+  });
+
+  test('getUserDoc returns user profile with .hw compatibility object', async () => {
+    await setMyHardwareProfile({ gpu: 'RTX 4090', cpu: 'i9-14900K', ramGb: 64 });
+
+    const doc = await getUserDoc('me-uid');
+    assert.ok(doc);
+    assert.equal(doc.uid, 'me-uid');
+    assert.equal(doc.gpu, 'RTX 4090');
+    assert.equal(doc.hw?.gpu, 'RTX 4090');
+    assert.equal(doc.hw?.cpu, 'i9-14900K');
+    assert.equal(doc.hw?.ramGb, 64);
+  });
+
+  test('unauthenticated mutations reject with error', async () => {
+    clearSession({ userDataDir });
+    const game = createGame({ title: 'Auth Required Game', steam_id: 101 });
+
+    await assert.rejects(
+      () => submitReview(game.id, { score: 8, review: 'hay', dropped: false }),
+      /Chưa đăng nhập/
+    );
+
+    await assert.rejects(
+      () => votePick(game),
+      /Chưa đăng nhập/
+    );
+
+    await assert.rejects(
+      () => setMyHardwareProfile({ gpu: 'g', cpu: 'c', ramGb: 16 }),
+      /Chưa đăng nhập/
+    );
   });
 });

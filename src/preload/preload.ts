@@ -242,6 +242,9 @@ const electronAPI: ElectronAPI = {
   saveSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => {
     return ipcRenderer.invoke('settings:save', settings);
   },
+  testStorageConnection: (settings?: Partial<AppSettings>): Promise<{ ok: boolean; error?: string }> => {
+    return ipcRenderer.invoke('settings:testStorageConnection', settings);
+  },
   browseFolder: (defaultPath?: string): Promise<string | null> => {
     return ipcRenderer.invoke('settings:browseFolder', defaultPath);
   },

@@ -74,6 +74,17 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
   const googleApiKey = getSetting('google_api_key', customDb) || '';
   const googleCseId = getSetting('google_cse_id', customDb) || '';
 
+  // Cloud & Dual Image Storage
+  const provider = getSetting('image_storage_provider', customDb) || 'cloudflare_r2';
+  const customS3Enabled = getSetting('custom_s3_enabled', customDb) === 'true';
+  const customS3Endpoint = getSetting('custom_s3_endpoint', customDb) || '';
+  const customS3Bucket = getSetting('custom_s3_bucket', customDb) || '';
+  const customS3AccessKeyId = getSetting('custom_s3_access_key_id', customDb) || '';
+  const customS3SecretAccessKey = getSetting('custom_s3_secret_access_key', customDb) || '';
+  const customS3Region = getSetting('custom_s3_region', customDb) || 'auto';
+  const customS3PublicUrlBase = getSetting('custom_s3_public_url_base', customDb) || '';
+  const googlePhotosAlbumId = getSetting('google_photos_album_id', customDb) || '';
+
   const vk = screenshotHotkeyVkStr
     ? parseInt(screenshotHotkeyVkStr, 10)
     : (VK_MAP[screenshotHotkey] || DEFAULT_HOTKEY_VK);
@@ -99,7 +110,77 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
     playtimeWatchEnabled: playtimeWatchStr === null ? true : playtimeWatchStr === 'true',
     googleApiKey,
     googleCseId,
+    imageStorageProvider: provider === 'google_photos' ? 'google_photos' : 'cloudflare_r2',
+    googlePhotosAlbumId,
+    customS3Config: {
+      enabled: customS3Enabled,
+      endpoint: customS3Endpoint,
+      bucket: customS3Bucket,
+      accessKeyId: customS3AccessKeyId,
+      secretAccessKey: customS3SecretAccessKey,
+      region: customS3Region,
+      publicUrlBase: customS3PublicUrlBase,
+    },
   };
+}
+
+export const MASK_SECRET = '••••••••';
+
+export function maskSettingsSecrets(settings: AppSettings): AppSettings {
+  const copy: AppSettings = JSON.parse(JSON.stringify(settings));
+  if (copy.customS3Config && copy.customS3Config.secretAccessKey) {
+    copy.customS3Config.hasSecretKey = true;
+    copy.customS3Config.secretAccessKey = MASK_SECRET;
+  }
+  return copy;
+}
+
+export async function testStorageConnection(
+  settings: Partial<AppSettings>,
+  fetchImpl: typeof fetch = fetch,
+  googleAccessToken?: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  const provider = settings?.imageStorageProvider || 'cloudflare_r2';
+
+  if (provider === 'google_photos') {
+    if (!googleAccessToken) {
+      return { ok: false, error: 'Chưa đăng nhập tài khoản Google' };
+    }
+    try {
+      const res = await fetchImpl('https://photoslibrary.googleapis.com/v1/albums', {
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+      });
+      if (res.ok) {
+        return { ok: true };
+      }
+      return { ok: false, error: `Google Photos connection test failed: HTTP ${res.status}` };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'fetch failed: network offline' };
+    }
+  }
+
+  // Cloudflare R2 / Custom S3
+  if (settings?.customS3Config?.enabled) {
+    const s3 = settings.customS3Config;
+    if (!s3.endpoint || !s3.bucket || !s3.accessKeyId) {
+      return { ok: false, error: 'Vui lòng điền đủ Endpoint, Bucket và Access Key ID' };
+    }
+    try {
+      // Lightweight test probe using HEAD/GET or simple fetch to endpoint
+      const cleanEndpoint = s3.endpoint.replace(/\/+$/, '');
+      const res = await fetchImpl(`${cleanEndpoint}/${s3.bucket}`, { method: 'HEAD' });
+      // S3 HEAD on bucket usually returns 200, 403 (needs auth) or 404 (wrong bucket)
+      if (res.status === 404) {
+        return { ok: false, error: `Bucket "${s3.bucket}" không tồn tại (HTTP 404)` };
+      }
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err.message || 'Không thể kết nối tới S3 Endpoint' };
+    }
+  }
+
+  // Default shared R2
+  return { ok: true };
 }
 
 /**
@@ -158,6 +239,42 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
   }
   if (patch.googleCseId !== undefined) {
     setSetting('google_cse_id', patch.googleCseId, customDb);
+  }
+
+  // Cloud & Dual Image Storage
+  if (patch.imageStorageProvider !== undefined) {
+    const val = patch.imageStorageProvider === 'google_photos' ? 'google_photos' : 'cloudflare_r2';
+    setSetting('image_storage_provider', val, customDb);
+  }
+  if (patch.googlePhotosAlbumId !== undefined) {
+    setSetting('google_photos_album_id', patch.googlePhotosAlbumId, customDb);
+  }
+  if (patch.customS3Config !== undefined) {
+    const s3 = patch.customS3Config;
+    if (s3.enabled !== undefined) {
+      setSetting('custom_s3_enabled', s3.enabled ? 'true' : 'false', customDb);
+    }
+    if (s3.endpoint !== undefined) {
+      setSetting('custom_s3_endpoint', (s3.endpoint || '').trim(), customDb);
+    }
+    if (s3.bucket !== undefined) {
+      setSetting('custom_s3_bucket', (s3.bucket || '').trim(), customDb);
+    }
+    if (s3.accessKeyId !== undefined) {
+      setSetting('custom_s3_access_key_id', (s3.accessKeyId || '').trim(), customDb);
+    }
+    if (s3.secretAccessKey !== undefined) {
+      const secret = (s3.secretAccessKey || '').trim();
+      if (secret && secret !== MASK_SECRET) {
+        setSetting('custom_s3_secret_access_key', secret, customDb);
+      }
+    }
+    if (s3.region !== undefined) {
+      setSetting('custom_s3_region', (s3.region || '').trim() || 'auto', customDb);
+    }
+    if (s3.publicUrlBase !== undefined) {
+      setSetting('custom_s3_public_url_base', (s3.publicUrlBase || '').trim(), customDb);
+    }
   }
 
   return loadAppSettings(customDb);

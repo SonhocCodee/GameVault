@@ -1,6 +1,5 @@
 {
   "oauthClientId": "XXXX.apps.googleusercontent.com",
   "oauthClientSecret": "GOCSPX-XXXX",
-  "firebaseApiKey": "AIzaXXXX",
-  "firebaseProjectId": "ten-project-firebase"
+  "workerApiUrl": "http://127.0.0.1:8787"
 }

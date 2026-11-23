@@ -84,6 +84,8 @@ import { searchSaveLocationsWeb } from './save-lookup-web.js';
 import {
   loadAppSettings,
   saveAppSettings,
+  maskSettingsSecrets,
+  testStorageConnection,
   getF6ProcessStatus,
   toggleF6Process,
   toggleF6Startup,
@@ -473,7 +475,7 @@ function registerIpcHandlers(): void {
 
   // Settings & System Preferences
   ipcMain.handle('settings:get', async () => {
-    return loadAppSettings();
+    return maskSettingsSecrets(loadAppSettings());
   });
 
   ipcMain.handle('settings:save', async (_event, patch: Partial<AppSettings>) => {
@@ -508,7 +510,18 @@ function registerIpcHandlers(): void {
     const ptWatch = getPlaytimeWatchImporter();
     ptWatch.autoRegisterGames = updated.autoDetectGames;
 
-    return updated;
+    return maskSettingsSecrets(updated);
+  });
+
+  ipcMain.handle('settings:testStorageConnection', async (_event, settingsPatch?: Partial<AppSettings>) => {
+    const current = loadAppSettings();
+    const merged = { ...current, ...(settingsPatch || {}) };
+    let googleToken: string | null = null;
+    try {
+      const { getValidGoogleAccessToken } = await import('./auth.js');
+      googleToken = await getValidGoogleAccessToken();
+    } catch {}
+    return testStorageConnection(merged, fetch, googleToken);
   });
 
   ipcMain.handle('settings:toggleAppStartup', async (_event, enable: boolean) => {

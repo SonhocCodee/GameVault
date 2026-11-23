@@ -16,10 +16,10 @@ const TOKEN_EXPIRY_SLACK_MS = 60 * 1000;
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
-const FIREBASE_IDP_URL = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp';
-const FIREBASE_REFRESH_URL = 'https://securetoken.googleapis.com/v1/token';
 
-const OAUTH_SCOPE = 'openid email profile https://www.googleapis.com/auth/drive.appdata';
+// OpenID + Profile for Worker Auth, Drive for Save Vault, Photos for screenshot/cover upload
+const OAUTH_SCOPE =
+  'openid email profile https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/photoslibrary.appendonly';
 
 export type FetchLike = (url: string, init?: any) => Promise<any>;
 
@@ -70,12 +70,13 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
     try {
       if (!fs.existsSync(candidate)) continue;
       const parsed = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
-      if (parsed?.oauthClientId && parsed?.oauthClientSecret && parsed?.firebaseApiKey) {
+      if (parsed?.oauthClientId && parsed?.oauthClientSecret) {
         return {
           oauthClientId: String(parsed.oauthClientId),
           oauthClientSecret: String(parsed.oauthClientSecret),
-          firebaseApiKey: String(parsed.firebaseApiKey),
-          firebaseProjectId: String(parsed.firebaseProjectId || ''),
+          workerApiUrl: parsed.workerApiUrl ? String(parsed.workerApiUrl).replace(/\/+$/, '') : undefined,
+          firebaseApiKey: parsed.firebaseApiKey ? String(parsed.firebaseApiKey) : undefined,
+          firebaseProjectId: parsed.firebaseProjectId ? String(parsed.firebaseProjectId) : undefined,
         };
       }
     } catch {
@@ -85,12 +86,27 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
   return null;
 }
 
+export function getWorkerBaseUrl(config?: CloudConfig | null): string {
+  const url = config?.workerApiUrl || 'http://127.0.0.1:8787';
+  return url.replace(/\/+$/, '');
+}
+
 // ==========================================
 // Session persistence (atomic write, covers.ts convention)
 // ==========================================
 
 export interface AuthSession {
-  firebase: {
+  sessionToken: string;
+  expiresAt: number;
+  user: UserProfile;
+  google: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    scope: string;
+    idToken?: string;
+  };
+  firebase?: {
     idToken: string;
     refreshToken: string;
     expiresAt: number;
@@ -98,12 +114,6 @@ export interface AuthSession {
     email: string;
     displayName: string;
     photoUrl: string;
-  };
-  google: {
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-    scope: string;
   };
   updatedAt: string;
 }
@@ -117,8 +127,30 @@ export function loadSession(options?: AuthOptions): AuthSession | null {
     const file = sessionPath(options);
     if (!fs.existsSync(file)) return null;
     const session = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    if (!session?.firebase?.refreshToken || !session?.firebase?.localId) return null;
-    return session as AuthSession;
+    if (session?.sessionToken && session?.user?.uid) {
+      return session as AuthSession;
+    }
+    if (session?.firebase?.idToken && session?.firebase?.localId) {
+      return {
+        sessionToken: session.sessionToken || session.firebase.idToken,
+        expiresAt: session.expiresAt || session.firebase.expiresAt || Date.now() + 3600 * 1000,
+        user: session.user || {
+          uid: session.firebase.localId,
+          email: session.firebase.email || '',
+          displayName: session.firebase.displayName || session.firebase.email || '',
+          photoUrl: session.firebase.photoUrl || '',
+        },
+        google: session.google || {
+          accessToken: '',
+          refreshToken: '',
+          expiresAt: 0,
+          scope: '',
+        },
+        firebase: session.firebase,
+        updatedAt: session.updatedAt || new Date().toISOString(),
+      };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -209,76 +241,11 @@ export async function exchangeCodeForTokens(
   };
 }
 
-export interface FirebaseSignInResult {
-  idToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  localId: string;
-  email: string;
-  displayName: string;
-  photoUrl: string;
-}
-
-export async function signInToFirebase(
-  config: CloudConfig,
-  googleIdToken: string,
-  fetchImpl: FetchLike = defaultFetch()
-): Promise<FirebaseSignInResult> {
-  const resp = await fetchImpl(`${FIREBASE_IDP_URL}?key=${config.firebaseApiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      postBody: `id_token=${encodeURIComponent(googleIdToken)}&providerId=google.com`,
-      requestUri: 'http://localhost',
-      returnIdpCredential: true,
-      returnSecureToken: true,
-    }),
-  });
-  const data = await resp.json();
-  if (!resp.ok || !data?.idToken) {
-    throw new Error(`Firebase sign-in failed: ${data?.error?.message || resp.status}`);
-  }
-  return {
-    idToken: data.idToken,
-    refreshToken: data.refreshToken,
-    expiresAt: Date.now() + Number(data.expiresIn || 3600) * 1000,
-    localId: data.localId,
-    email: data.email || '',
-    displayName: data.displayName || '',
-    photoUrl: data.photoUrl || '',
-  };
-}
-
-export async function refreshFirebaseToken(
+export async function refreshGoogleTokens(
   config: CloudConfig,
   refreshToken: string,
   fetchImpl: FetchLike = defaultFetch()
-): Promise<{ idToken: string; refreshToken: string; expiresAt: number; localId: string }> {
-  const resp = await fetchImpl(`${FIREBASE_REFRESH_URL}?key=${config.firebaseApiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }).toString(),
-  });
-  const data = await resp.json();
-  if (!resp.ok || !data?.id_token) {
-    throw new Error(`Firebase refresh failed: ${data?.error?.message || resp.status}`);
-  }
-  return {
-    idToken: data.id_token,
-    refreshToken: data.refresh_token || refreshToken,
-    expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000,
-    localId: data.user_id,
-  };
-}
-
-export async function refreshGoogleAccessToken(
-  config: CloudConfig,
-  refreshToken: string,
-  fetchImpl: FetchLike = defaultFetch()
-): Promise<{ accessToken: string; expiresAt: number }> {
+): Promise<{ accessToken: string; expiresAt: number; idToken?: string }> {
   const resp = await fetchImpl(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -296,6 +263,37 @@ export async function refreshGoogleAccessToken(
   return {
     accessToken: data.access_token,
     expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000,
+    idToken: data.id_token,
+  };
+}
+
+export async function refreshGoogleAccessToken(
+  config: CloudConfig,
+  refreshToken: string,
+  fetchImpl: FetchLike = defaultFetch()
+): Promise<{ accessToken: string; expiresAt: number }> {
+  return refreshGoogleTokens(config, refreshToken, fetchImpl);
+}
+
+export async function exchangeGoogleIdTokenForSession(
+  config: CloudConfig,
+  idToken: string,
+  fetchImpl: FetchLike = defaultFetch()
+): Promise<{ token: string; expiresAt: number; user: UserProfile }> {
+  const baseUrl = getWorkerBaseUrl(config);
+  const resp = await fetchImpl(`${baseUrl}/api/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  const data = await resp.json();
+  if (!resp.ok || !data?.token) {
+    throw new Error(`Worker auth exchange failed: ${data?.error || resp.status}`);
+  }
+  return {
+    token: data.token,
+    expiresAt: Number(data.expiresAt),
+    user: data.user,
   };
 }
 
@@ -323,9 +321,7 @@ function getFetch(): FetchLike {
 function requireConfig(): CloudConfig {
   const config = authOptions.config || loadCloudConfig(authOptions);
   if (!config) {
-    throw new Error(
-      'Chưa cấu hình cloud-config.json (oauthClientId, oauthClientSecret, firebaseApiKey). Xem SETUP.md.'
-    );
+    throw new Error('Chưa cấu hình cloud-config.json (oauthClientId, oauthClientSecret). Xem SETUP.md.');
   }
   return config;
 }
@@ -345,14 +341,7 @@ export function getAuthStatus(): AuthStatus {
   const config = authOptions.config || loadCloudConfig(authOptions);
   return {
     loggedIn: session !== null,
-    profile: session
-      ? {
-          uid: session.firebase.localId,
-          email: session.firebase.email,
-          displayName: session.firebase.displayName || session.firebase.email,
-          photoUrl: session.firebase.photoUrl,
-        }
-      : null,
+    profile: session ? session.user : null,
     configPresent: config !== null,
   };
 }
@@ -373,16 +362,42 @@ export async function login(): Promise<UserProfile> {
   const state = crypto.randomBytes(16).toString('base64url');
 
   const codeResult = await new Promise<{ code: string; redirectUri: string }>((resolve, reject) => {
+    let timer: NodeJS.Timeout | null = null;
+    let serverClosed = false;
+
+    const closeServerLater = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (!serverClosed) {
+        serverClosed = true;
+        setTimeout(() => {
+          try {
+            server.close();
+          } catch {}
+        }, 300);
+      }
+    };
+
     const server = http.createServer((req, res) => {
+      let parsed: URL;
       try {
-        const url = new URL(req.url || '/', 'http://127.0.0.1');
-        if (url.pathname !== '/callback') {
-          res.writeHead(404).end();
-          return;
-        }
-        const error = url.searchParams.get('error');
-        const returnedState = url.searchParams.get('state');
-        const returnedCode = url.searchParams.get('code');
+        parsed = new URL(req.url || '/', 'http://127.0.0.1');
+      } catch {
+        res.writeHead(400).end();
+        return;
+      }
+
+      if (!req.url || !parsed.pathname.endsWith('/callback')) {
+        res.writeHead(404).end();
+        return;
+      }
+
+      try {
+        const error = parsed.searchParams.get('error');
+        const returnedState = parsed.searchParams.get('state');
+        const returnedCode = parsed.searchParams.get('code');
         if (error) {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end('<h1>Đăng nhập bị hủy</h1><p>Bạn có thể đóng tab này.</p>');
@@ -404,14 +419,28 @@ export async function login(): Promise<UserProfile> {
         reject(err as Error);
       } finally {
         // Give the browser a beat to receive the response before closing
-        setTimeout(() => server.close(), 300);
+        closeServerLater();
       }
     });
 
-    server.on('error', (err) => reject(new Error(`Không mở được server loopback: ${err.message}`)));
+    server.on('error', (err) => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      reject(new Error(`Không mở được server loopback: ${err.message}`));
+    });
+
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
       if (!address || typeof address === 'string') {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        try {
+          server.close();
+        } catch {}
         reject(new Error('Loopback server không nhận được port'));
         return;
       }
@@ -424,8 +453,10 @@ export async function login(): Promise<UserProfile> {
       }
     });
 
-    const timer = setTimeout(() => {
-      server.close();
+    timer = setTimeout(() => {
+      try {
+        server.close();
+      } catch {}
       reject(new Error('Hết thời gian chờ đăng nhập (5 phút)'));
     }, LOGIN_TIMEOUT_MS);
     timer.unref?.();
@@ -439,57 +470,102 @@ export async function login(): Promise<UserProfile> {
     fetchImpl
   );
 
-  const firebase = await signInToFirebase(config, tokens.idToken, fetchImpl);
+  const workerAuth = await exchangeGoogleIdTokenForSession(config, tokens.idToken, fetchImpl);
+
   const session: AuthSession = {
-    firebase,
+    sessionToken: workerAuth.token,
+    expiresAt: workerAuth.expiresAt,
+    user: workerAuth.user,
     google: {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.expiresAt,
       scope: tokens.scope,
+      idToken: tokens.idToken,
+    },
+    firebase: {
+      idToken: workerAuth.token,
+      refreshToken: tokens.refreshToken,
+      expiresAt: workerAuth.expiresAt,
+      localId: workerAuth.user.uid,
+      email: workerAuth.user.email,
+      displayName: workerAuth.user.displayName,
+      photoUrl: workerAuth.user.photoUrl,
     },
     updatedAt: new Date().toISOString(),
   };
   persistSession(session, authOptions);
-  return {
-    uid: firebase.localId,
-    email: firebase.email,
-    displayName: firebase.displayName || firebase.email,
-    photoUrl: firebase.photoUrl,
-  };
+
+  return workerAuth.user;
 }
 
 /**
- * Returns a Firebase ID token that is guaranteed valid for the next minute,
- * refreshing it through Google's securetoken endpoint when needed.
+ * Returns a Worker session token that is guaranteed valid for the next minute,
+ * refreshing it through Google's refresh endpoint and re-exchanging with Worker when needed.
  */
-export async function getValidFirebaseToken(): Promise<string> {
+export async function getValidSessionToken(): Promise<string> {
   const config = requireConfig();
   const session = loadSession(authOptions);
   if (!session) {
     throw new Error('Chưa đăng nhập');
   }
-  if (session.firebase.expiresAt - TOKEN_EXPIRY_SLACK_MS > Date.now()) {
-    return session.firebase.idToken;
+  if (session.expiresAt - TOKEN_EXPIRY_SLACK_MS > Date.now()) {
+    return session.sessionToken;
   }
+
   const fetchImpl = getFetch();
-  const refreshed = await refreshFirebaseToken(config, session.firebase.refreshToken, fetchImpl);
+  let idToken = session.google.idToken;
+  let refreshedGoogle: { accessToken: string; expiresAt: number; idToken?: string } | null = null;
+
+  if (session.google.refreshToken) {
+    try {
+      refreshedGoogle = await refreshGoogleTokens(config, session.google.refreshToken, fetchImpl);
+      if (refreshedGoogle.idToken) {
+        idToken = refreshedGoogle.idToken;
+      }
+    } catch (err) {
+      console.warn('[auth] Google token refresh failed during session refresh:', err);
+    }
+  }
+
+  if (!idToken) {
+    throw new Error('Phiên đăng nhập đã hết hạn — vui lòng đăng nhập lại');
+  }
+
+  const workerAuth = await exchangeGoogleIdTokenForSession(config, idToken, fetchImpl);
   const updated: AuthSession = {
     ...session,
+    sessionToken: workerAuth.token,
+    expiresAt: workerAuth.expiresAt,
+    user: workerAuth.user,
+    google: {
+      ...session.google,
+      ...(refreshedGoogle
+        ? {
+            accessToken: refreshedGoogle.accessToken,
+            expiresAt: refreshedGoogle.expiresAt,
+            idToken: refreshedGoogle.idToken || session.google.idToken,
+          }
+        : {}),
+    },
     firebase: {
-      ...session.firebase,
-      idToken: refreshed.idToken,
-      refreshToken: refreshed.refreshToken,
-      expiresAt: refreshed.expiresAt,
-      localId: refreshed.localId || session.firebase.localId,
+      idToken: workerAuth.token,
+      refreshToken: session.google.refreshToken,
+      expiresAt: workerAuth.expiresAt,
+      localId: workerAuth.user.uid,
+      email: workerAuth.user.email,
+      displayName: workerAuth.user.displayName,
+      photoUrl: workerAuth.user.photoUrl,
     },
     updatedAt: new Date().toISOString(),
   };
   persistSession(updated, authOptions);
-  return updated.firebase.idToken;
+  return updated.sessionToken;
 }
 
-/** Google access token for Drive API calls (Phase 4), refreshed on demand. */
+export const getValidFirebaseToken = getValidSessionToken;
+
+/** Google access token for Drive and Google Photos API calls, refreshed on demand. */
 export async function getValidGoogleAccessToken(): Promise<string> {
   const config = requireConfig();
   const session = loadSession(authOptions);
@@ -500,13 +576,18 @@ export async function getValidGoogleAccessToken(): Promise<string> {
     return session.google.accessToken;
   }
   if (!session.google.refreshToken) {
-    throw new Error('Không có Google refresh token — đăng nhập lại để cấp quyền Drive');
+    throw new Error('Không có Google refresh token — đăng nhập lại để cấp quyền');
   }
   const fetchImpl = getFetch();
-  const refreshed = await refreshGoogleAccessToken(config, session.google.refreshToken, fetchImpl);
+  const refreshed = await refreshGoogleTokens(config, session.google.refreshToken, fetchImpl);
   const updated: AuthSession = {
     ...session,
-    google: { ...session.google, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt },
+    google: {
+      ...session.google,
+      accessToken: refreshed.accessToken,
+      expiresAt: refreshed.expiresAt,
+      ...(refreshed.idToken ? { idToken: refreshed.idToken } : {}),
+    },
     updatedAt: new Date().toISOString(),
   };
   persistSession(updated, authOptions);

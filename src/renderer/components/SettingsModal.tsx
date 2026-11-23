@@ -20,6 +20,10 @@ import {
   Activity,
   CheckCircle2,
   Loader2,
+  Cloud,
+  HardDrive,
+  ShieldCheck,
+  Image as ImageIcon,
 } from 'lucide-react';
 import type { AppSettings, F6ProcessStatus, FpsStatus, HardwareInfo } from '../../shared/types.js';
 
@@ -44,7 +48,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onSaved,
 }) => {
-  const [activeTab, setActiveTab] = useState<'hotkey' | 'paths' | 'tracker' | 'covers' | 'performance'>('hotkey');
+  const [activeTab, setActiveTab] = useState<'hotkey' | 'paths' | 'tracker' | 'covers' | 'performance' | 'storage'>('hotkey');
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [f6Process, setF6Process] = useState<F6ProcessStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -55,6 +59,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [fpsStatus, setFpsStatus] = useState<FpsStatus | null>(null);
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfo | null>(null);
   const [settingUpFps, setSettingUpFps] = useState<boolean>(false);
+
+  // Dual Image Storage State
+  const [imageStorageProvider, setImageStorageProvider] = useState<'cloudflare_r2' | 'google_photos'>('cloudflare_r2');
+  const [customS3Enabled, setCustomS3Enabled] = useState<boolean>(false);
+  const [customS3Endpoint, setCustomS3Endpoint] = useState<string>('');
+  const [customS3Bucket, setCustomS3Bucket] = useState<string>('');
+  const [customS3AccessKeyId, setCustomS3AccessKeyId] = useState<string>('');
+  const [customS3SecretAccessKey, setCustomS3SecretAccessKey] = useState<string>('');
+  const [customS3Region, setCustomS3Region] = useState<string>('auto');
+  const [customS3PublicUrlBase, setCustomS3PublicUrlBase] = useState<string>('');
+  const [googlePhotosAlbumId, setGooglePhotosAlbumId] = useState<string>('');
+  const [testingStorage, setTestingStorage] = useState<boolean>(false);
+  const [storageTestResult, setStorageTestResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Hotkey recording mode
   const [isListeningKey, setIsListeningKey] = useState<boolean>(false);
@@ -103,6 +120,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setAutoEnrichCovers(data.autoEnrichCovers);
         setGoogleApiKey(data.googleApiKey || '');
         setGoogleCseId(data.googleCseId || '');
+
+        if (data.imageStorageProvider) setImageStorageProvider(data.imageStorageProvider);
+        if (data.googlePhotosAlbumId) setGooglePhotosAlbumId(data.googlePhotosAlbumId);
+        if (data.customS3Config) {
+          setCustomS3Enabled(Boolean(data.customS3Config.enabled));
+          setCustomS3Endpoint(data.customS3Config.endpoint || '');
+          setCustomS3Bucket(data.customS3Config.bucket || '');
+          setCustomS3AccessKeyId(data.customS3Config.accessKeyId || '');
+          setCustomS3SecretAccessKey(data.customS3Config.secretAccessKey || '');
+          setCustomS3Region(data.customS3Config.region || 'auto');
+          setCustomS3PublicUrlBase(data.customS3Config.publicUrlBase || '');
+        }
       }
 
       if (window.electronAPI?.getF6ProcessStatus) {
@@ -244,6 +273,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           autoEnrichCovers,
           googleApiKey: googleApiKey.trim(),
           googleCseId: googleCseId.trim(),
+          imageStorageProvider,
+          googlePhotosAlbumId: googlePhotosAlbumId.trim(),
+          customS3Config: {
+            enabled: customS3Enabled,
+            endpoint: customS3Endpoint.trim(),
+            bucket: customS3Bucket.trim(),
+            accessKeyId: customS3AccessKeyId.trim(),
+            secretAccessKey: customS3SecretAccessKey.trim(),
+            region: customS3Region.trim() || 'auto',
+            publicUrlBase: customS3PublicUrlBase.trim(),
+          },
         });
         setSettings(updated);
         setStatusMsg({ type: 'success', text: '✅ Đã lưu cài đặt thành công!' });
@@ -254,6 +294,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setStatusMsg({ type: 'error', text: `Lỗi lưu cài đặt: ${err.message || 'Không xác định'}` });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestStorage = async () => {
+    if (!window.electronAPI?.testStorageConnection) return;
+    setTestingStorage(true);
+    setStorageTestResult(null);
+    try {
+      const res = await window.electronAPI.testStorageConnection({
+        imageStorageProvider,
+        googlePhotosAlbumId: googlePhotosAlbumId.trim(),
+        customS3Config: {
+          enabled: customS3Enabled,
+          endpoint: customS3Endpoint.trim(),
+          bucket: customS3Bucket.trim(),
+          accessKeyId: customS3AccessKeyId.trim(),
+          secretAccessKey: customS3SecretAccessKey.trim(),
+          region: customS3Region.trim() || 'auto',
+          publicUrlBase: customS3PublicUrlBase.trim(),
+        },
+      });
+      if (res.ok) {
+        setStorageTestResult({ ok: true, text: 'Kết nối thành công!' });
+      } else {
+        setStorageTestResult({ ok: false, text: `Lỗi kết nối: ${res.error || 'Thất bại'}` });
+      }
+    } catch (err: any) {
+      setStorageTestResult({ ok: false, text: `Lỗi: ${err.message || 'Không thể kiểm tra'}` });
+    } finally {
+      setTestingStorage(false);
     }
   };
 
@@ -419,6 +489,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <Activity className="h-4 w-4" />
               <span>Hiệu năng &amp; FPS</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('storage')}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-xs font-semibold transition-all ${
+                activeTab === 'storage'
+                  ? 'bg-[#ff2a44] text-white shadow-md shadow-[#ff2a44]/20'
+                  : 'text-[#8e95a5] hover:bg-[#1a1d28] hover:text-white'
+              }`}
+            >
+              <Cloud className="h-4 w-4" />
+              <span>Lưu trữ ảnh &amp; Cloud</span>
             </button>
           </div>
 
@@ -1055,6 +1137,266 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {/* TAB 6: DUAL IMAGE STORAGE & CLOUD */}
+                {activeTab === 'storage' && (
+                  <div className="space-y-6">
+                    {/* Provider Selection Card */}
+                    <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
+                      <div>
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Cloud className="h-4 w-4 text-[#ff2a44]" />
+                          <span>Dịch vụ lưu trữ ảnh bìa &amp; Screenshots</span>
+                        </span>
+                        <p className="text-[11px] text-[#8e95a5] mt-1">
+                          Chọn nơi lưu trữ hình ảnh custom covers và ảnh chụp màn hình khi đồng bộ hoặc chia sẻ lên đám mây.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Option 1: Cloudflare R2 */}
+                        <div
+                          onClick={() => {
+                            setImageStorageProvider('cloudflare_r2');
+                            setStorageTestResult(null);
+                          }}
+                          className={`cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between ${
+                            imageStorageProvider === 'cloudflare_r2'
+                              ? 'border-[#ff2a44] bg-[#ff2a44]/10 shadow-lg shadow-[#ff2a44]/15'
+                              : 'border-[#2a2e3d] bg-[#0e1015] hover:border-[#3d445a]'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500/20 text-orange-400">
+                                <Cloud className="h-4 w-4" />
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-white">Cloudflare R2</div>
+                                <div className="text-[10px] text-emerald-400 font-semibold">Tốc độ cao · 0đ Egress</div>
+                              </div>
+                            </div>
+                            <input
+                              type="radio"
+                              name="storageProvider"
+                              checked={imageStorageProvider === 'cloudflare_r2'}
+                              onChange={() => {}}
+                              className="mt-1 text-[#ff2a44] focus:ring-0"
+                            />
+                          </div>
+                          <p className="mt-3 text-[11px] text-[#8e95a5] leading-relaxed">
+                            Mặc định dùng bucket R2 10GB miễn phí của app qua Cloudflare Worker, hoặc hỗ trợ tài khoản Cloudflare R2 riêng.
+                          </p>
+                        </div>
+
+                        {/* Option 2: Google Photos */}
+                        <div
+                          onClick={() => {
+                            setImageStorageProvider('google_photos');
+                            setStorageTestResult(null);
+                          }}
+                          className={`cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between ${
+                            imageStorageProvider === 'google_photos'
+                              ? 'border-[#ff2a44] bg-[#ff2a44]/10 shadow-lg shadow-[#ff2a44]/15'
+                              : 'border-[#2a2e3d] bg-[#0e1015] hover:border-[#3d445a]'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
+                                <ImageIcon className="h-4 w-4" />
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-white">Google Photos cá nhân</div>
+                                <div className="text-[10px] text-blue-400 font-semibold">Dung lượng tài khoản Google</div>
+                              </div>
+                            </div>
+                            <input
+                              type="radio"
+                              name="storageProvider"
+                              checked={imageStorageProvider === 'google_photos'}
+                              onChange={() => {}}
+                              className="mt-1 text-[#ff2a44] focus:ring-0"
+                            />
+                          </div>
+                          <p className="mt-3 text-[11px] text-[#8e95a5] leading-relaxed">
+                            Lưu trực tiếp vào Google Photos của chính tài khoản Google bạn đã đăng nhập thông qua Google Photos Library API.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Conditional Settings based on Provider */}
+                    {imageStorageProvider === 'cloudflare_r2' && (
+                      <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <HardDrive className="h-4 w-4 text-[#ff2a44]" />
+                              <span>Cấu hình tài khoản Cloudflare R2 / S3 riêng</span>
+                            </span>
+                            <p className="text-[11px] text-[#8e95a5] mt-0.5">
+                              {customS3Enabled
+                                ? 'Đang dùng tài khoản S3/R2 cá nhân của bạn.'
+                                : 'Mặc định: Sử dụng bucket R2 10GB chung của app do developer cung cấp (không cần cài đặt gì thêm).'}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setCustomS3Enabled(!customS3Enabled)}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                              customS3Enabled ? 'bg-[#ff2a44]' : 'bg-[#2a2e3d]'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                customS3Enabled ? 'translate-x-6' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {customS3Enabled && (
+                          <div className="space-y-3 pt-2 border-t border-[#2a2e3d]">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] font-semibold text-[#8e95a5]">S3 / R2 Endpoint URL *</label>
+                                <input
+                                  type="text"
+                                  placeholder="https://<account_id>.r2.cloudflarestorage.com"
+                                  value={customS3Endpoint}
+                                  onChange={(e) => setCustomS3Endpoint(e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] font-semibold text-[#8e95a5]">Bucket Name *</label>
+                                <input
+                                  type="text"
+                                  placeholder="game-vault-covers"
+                                  value={customS3Bucket}
+                                  onChange={(e) => setCustomS3Bucket(e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] font-semibold text-[#8e95a5]">Access Key ID *</label>
+                                <input
+                                  type="text"
+                                  placeholder="AKIA..."
+                                  value={customS3AccessKeyId}
+                                  onChange={(e) => setCustomS3AccessKeyId(e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] font-semibold text-[#8e95a5]">Secret Access Key *</label>
+                                <input
+                                  type="password"
+                                  placeholder="••••••••"
+                                  value={customS3SecretAccessKey}
+                                  onChange={(e) => setCustomS3SecretAccessKey(e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-[11px] font-semibold text-[#8e95a5]">Region (Mặc định: auto)</label>
+                                <input
+                                  type="text"
+                                  placeholder="auto"
+                                  value={customS3Region}
+                                  onChange={(e) => setCustomS3Region(e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] font-semibold text-[#8e95a5]">Public URL Base (Tùy chọn)</label>
+                                <input
+                                  type="text"
+                                  placeholder="https://cdn.yourdomain.com"
+                                  value={customS3PublicUrlBase}
+                                  onChange={(e) => setCustomS3PublicUrlBase(e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between pt-2">
+                          <button
+                            type="button"
+                            onClick={handleTestStorage}
+                            disabled={testingStorage}
+                            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3.5 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-[#ff2a44] hover:text-white transition-all disabled:opacity-50"
+                          >
+                            {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />}
+                            <span>Kiểm tra kết nối {customS3Enabled ? 'S3' : 'R2 chung'}</span>
+                          </button>
+
+                          {storageTestResult && (
+                            <span className={`text-xs font-medium ${storageTestResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {storageTestResult.text}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {imageStorageProvider === 'google_photos' && (
+                      <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
+                        <div>
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <ImageIcon className="h-4 w-4 text-blue-400" />
+                            <span>Cấu hình Google Photos</span>
+                          </span>
+                          <p className="text-[11px] text-[#8e95a5] mt-0.5">
+                            Ứng dụng sẽ tự động sử dụng quyền Google Photos đã được cấp khi đăng nhập tài khoản Google.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-semibold text-[#8e95a5]">Tên / ID Album trong Google Photos (Tùy chọn)</label>
+                          <input
+                            type="text"
+                            placeholder="Để trống nếu muốn lưu vào thư viện chung"
+                            value={googlePhotosAlbumId}
+                            onChange={(e) => setGooglePhotosAlbumId(e.target.value)}
+                            className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2">
+                          <button
+                            type="button"
+                            onClick={handleTestStorage}
+                            disabled={testingStorage}
+                            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3.5 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-blue-400 hover:text-white transition-all disabled:opacity-50"
+                          >
+                            {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />}
+                            <span>Kiểm tra quyền Google Photos</span>
+                          </button>
+
+                          {storageTestResult && (
+                            <span className={`text-xs font-medium ${storageTestResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {storageTestResult.text}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </>

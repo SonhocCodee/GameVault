@@ -247,10 +247,11 @@ export interface AuthStatus {
 }
 
 export interface CloudConfig {
+  workerApiUrl?: string;
   oauthClientId: string;
   oauthClientSecret: string;
-  firebaseApiKey: string;
-  firebaseProjectId: string;
+  firebaseApiKey?: string;
+  firebaseProjectId?: string;
 }
 
 /** Một review công khai trên Firestore (collection `ratings`). */
@@ -326,6 +327,19 @@ export interface IgdbConfig {
   clientSecret?: string;
 }
 
+export type ImageStorageProvider = 'cloudflare_r2' | 'google_photos';
+
+export interface CustomS3Config {
+  enabled: boolean;
+  endpoint: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  region?: string;
+  publicUrlBase?: string;
+  hasSecretKey?: boolean;
+}
+
 export interface AppSettings {
   screenshotEnabled: boolean;
   screenshotHotkey: string;
@@ -347,6 +361,12 @@ export interface AppSettings {
   playtimeWatchEnabled: boolean;
   googleApiKey: string;
   googleCseId: string;
+  /** Image Storage Provider: 'cloudflare_r2' (default) or 'google_photos' */
+  imageStorageProvider?: ImageStorageProvider;
+  /** Custom Cloudflare R2 / S3 config if user configures their own credentials */
+  customS3Config?: CustomS3Config;
+  /** Optional Google Photos album ID */
+  googlePhotosAlbumId?: string;
 }
 
 export interface PlaytimeWatchStatus {
@@ -445,6 +465,7 @@ export interface ElectronAPI {
   // Settings & System Controls
   getSettings?(): Promise<AppSettings>;
   saveSettings?(settings: Partial<AppSettings>): Promise<AppSettings>;
+  testStorageConnection?(settings?: Partial<AppSettings>): Promise<{ ok: boolean; error?: string }>;
   browseFolder?(defaultPath?: string): Promise<string | null>;
   getF6ProcessStatus?(): Promise<F6ProcessStatus>;
   toggleF6Process?(start: boolean): Promise<boolean>;
