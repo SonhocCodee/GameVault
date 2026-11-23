@@ -84,11 +84,11 @@ async function ensureFolderPath(segments: string[]): Promise<string> {
   return parent as string;
 }
 
-async function listFolder(folderId: string): Promise<Array<{ id: string; name: string; mimeType: string }>> {
+async function listFolder(folderId: string): Promise<Array<{ id: string; name: string; mimeType: string; size?: string }>> {
   const doFetch = await driveFetch();
   const headers = await authedHeaders();
   const q = `'${folderId}' in parents and trashed = false`;
-  const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType)&spaces=appDataFolder&pageSize=200`;
+  const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,size)&spaces=appDataFolder&pageSize=200`;
   const resp = await doFetch(url, { headers });
   if (!resp.ok) {
     throw new Error(`Drive list failed: ${resp.status}`);
@@ -256,6 +256,27 @@ function getMimeType(filename: string): string {
   }
 }
 
+function formatTransferSpeed(bytesPerSec: number): string {
+  if (bytesPerSec <= 0) return '0 KB/s';
+  if (bytesPerSec < 1024 * 1024) {
+    return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  }
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
+function formatDualSize(transferred: number, total: number): { formattedTransferred: string; formattedTotal: string } {
+  if (total >= 1024 * 1024 * 1024) {
+    return {
+      formattedTransferred: `${(transferred / (1024 * 1024 * 1024)).toFixed(2)} GB`,
+      formattedTotal: `${(total / (1024 * 1024 * 1024)).toFixed(2)} GB`,
+    };
+  }
+  return {
+    formattedTransferred: `${(transferred / (1024 * 1024)).toFixed(1)} MB`,
+    formattedTotal: `${(total / (1024 * 1024)).toFixed(1)} MB`,
+  };
+}
+
 export interface ActiveMediaSyncStatus {
   isRunning: boolean;
   type?: 'upload' | 'download';
@@ -322,13 +343,20 @@ export async function uploadMediaToDrive(options: {
         .map((d) => d.name);
     }
 
-    // Pre-calculate total files across target folders
+    // Pre-calculate total files and total bytes across target folders
     let totalFiles = 0;
+    let totalBytes = 0;
     for (const gameName of foldersToProcess) {
       const dir = path.join(baseDir, gameName);
       if (fs.existsSync(dir)) {
-        totalFiles += fs.readdirSync(dir, { withFileTypes: true })
-          .filter((f) => f.isFile() && MEDIA_EXTS.has(path.extname(f.name).toLowerCase())).length;
+        const files = fs.readdirSync(dir, { withFileTypes: true })
+          .filter((f) => f.isFile() && MEDIA_EXTS.has(path.extname(f.name).toLowerCase()));
+        totalFiles += files.length;
+        for (const f of files) {
+          try {
+            totalBytes += fs.statSync(path.join(dir, f.name)).size;
+          } catch {}
+        }
       }
     }
 
@@ -337,6 +365,48 @@ export async function uploadMediaToDrive(options: {
     let bytesUploaded = 0;
     let processedFiles = 0;
     const errors: string[] = [];
+
+    const syncStartTime = Date.now();
+    let lastSpeedSampleTime = syncStartTime;
+    let lastBytesSample = 0;
+    let currentSpeed = 0;
+
+    const emitUploadProgress = (currentFileName: string, currentGameName: string) => {
+      const now = Date.now();
+      const elapsedSinceSample = (now - lastSpeedSampleTime) / 1000;
+      if (elapsedSinceSample >= 0.3) {
+        const bytesDelta = bytesUploaded - lastBytesSample;
+        currentSpeed = Math.max(0, bytesDelta / elapsedSinceSample);
+        lastSpeedSampleTime = now;
+        lastBytesSample = bytesUploaded;
+      } else if (currentSpeed === 0 && (now - syncStartTime) > 300) {
+        currentSpeed = bytesUploaded / ((now - syncStartTime) / 1000);
+      }
+
+      const { formattedTransferred, formattedTotal } = formatDualSize(bytesUploaded, totalBytes);
+      const percent = totalBytes > 0
+        ? Math.min(100, Math.round((bytesUploaded / totalBytes) * 100))
+        : (totalFiles > 0 ? Math.min(100, Math.round((processedFiles / totalFiles) * 100)) : 100);
+
+      const prog: DriveMediaProgress = {
+        type: 'upload',
+        current: processedFiles,
+        total: totalFiles,
+        percent,
+        currentFile: currentFileName,
+        currentGame: currentGameName,
+        bytesTransferred: bytesUploaded,
+        totalBytes,
+        speedBytesPerSec: Math.round(currentSpeed),
+        formattedSpeed: formatTransferSpeed(currentSpeed),
+        formattedTransferred,
+        formattedTotal,
+      };
+      if (activeMediaSync) {
+        activeMediaSync.progress = prog;
+      }
+      options.onProgress?.(prog);
+    };
 
     for (const gameName of foldersToProcess) {
       const localGameDir = path.join(baseDir, gameName);
@@ -352,20 +422,7 @@ export async function uploadMediaToDrive(options: {
 
         for (const f of localFiles) {
           processedFiles++;
-          const percent = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 100;
-          const prog: DriveMediaProgress = {
-            type: 'upload',
-            current: processedFiles,
-            total: totalFiles,
-            percent,
-            currentFile: f.name,
-            currentGame: gameName,
-            bytesTransferred: bytesUploaded,
-          };
-          if (activeMediaSync) {
-            activeMediaSync.progress = prog;
-          }
-          options.onProgress?.(prog);
+          emitUploadProgress(f.name, gameName);
 
           if (driveFileNames.has(f.name.toLowerCase())) {
             // Already on Drive, skip duplicate upload to save bandwidth
@@ -378,6 +435,7 @@ export async function uploadMediaToDrive(options: {
             await uploadFile(f.name, driveGameFolderId, content, getMimeType(f.name));
             filesUploaded++;
             bytesUploaded += content.length;
+            emitUploadProgress(f.name, gameName);
           } catch (fileErr: any) {
             errors.push(`Lỗi tải ảnh ${f.name} (${gameName}): ${fileErr.message}`);
           }
@@ -441,37 +499,71 @@ export async function downloadMediaFromDrive(options: {
 
     let gamesRestored = 0;
     let filesDownloaded = 0;
+    let bytesDownloaded = 0;
 
-    // Count total drive files first
+    // Count total drive files and total bytes first
     let totalFiles = 0;
+    let totalBytes = 0;
     const gameFolderFiles: Array<{ gameFolder: any; files: any[] }> = [];
     for (const gameFolder of targetFolders) {
       const driveFiles = (await listFolder(gameFolder.id)).filter((f) => f.mimeType !== FOLDER_MIME);
       totalFiles += driveFiles.length;
+      for (const f of driveFiles) {
+        totalBytes += Number(f.size || 0);
+      }
       gameFolderFiles.push({ gameFolder, files: driveFiles });
     }
 
     let processedFiles = 0;
+    const syncStartTime = Date.now();
+    let lastSpeedSampleTime = syncStartTime;
+    let lastBytesSample = 0;
+    let currentSpeed = 0;
+
+    const emitDownloadProgress = (currentFileName: string, currentGameName: string) => {
+      const now = Date.now();
+      const elapsedSinceSample = (now - lastSpeedSampleTime) / 1000;
+      if (elapsedSinceSample >= 0.3) {
+        const bytesDelta = bytesDownloaded - lastBytesSample;
+        currentSpeed = Math.max(0, bytesDelta / elapsedSinceSample);
+        lastSpeedSampleTime = now;
+        lastBytesSample = bytesDownloaded;
+      } else if (currentSpeed === 0 && (now - syncStartTime) > 300) {
+        currentSpeed = bytesDownloaded / ((now - syncStartTime) / 1000);
+      }
+
+      const { formattedTransferred, formattedTotal } = formatDualSize(bytesDownloaded, totalBytes);
+      const percent = totalBytes > 0
+        ? Math.min(100, Math.round((bytesDownloaded / totalBytes) * 100))
+        : (totalFiles > 0 ? Math.min(100, Math.round((processedFiles / totalFiles) * 100)) : 100);
+
+      const prog: DriveMediaProgress = {
+        type: 'download',
+        current: processedFiles,
+        total: totalFiles,
+        percent,
+        currentFile: currentFileName,
+        currentGame: currentGameName,
+        bytesTransferred: bytesDownloaded,
+        totalBytes,
+        speedBytesPerSec: Math.round(currentSpeed),
+        formattedSpeed: formatTransferSpeed(currentSpeed),
+        formattedTransferred,
+        formattedTotal,
+      };
+      if (activeMediaSync) {
+        activeMediaSync.progress = prog;
+      }
+      options.onProgress?.(prog);
+    };
+
     for (const { gameFolder, files } of gameFolderFiles) {
       const localGameDir = path.join(baseDir, gameFolder.name);
       fs.mkdirSync(localGameDir, { recursive: true });
 
       for (const file of files) {
         processedFiles++;
-        const percent = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 100;
-        const prog: DriveMediaProgress = {
-          type: 'download',
-          current: processedFiles,
-          total: totalFiles,
-          percent,
-          currentFile: file.name,
-          currentGame: gameFolder.name,
-          bytesTransferred: 0,
-        };
-        if (activeMediaSync) {
-          activeMediaSync.progress = prog;
-        }
-        options.onProgress?.(prog);
+        emitDownloadProgress(file.name, gameFolder.name);
 
         const targetFilePath = path.join(localGameDir, file.name);
         if (fs.existsSync(targetFilePath)) {
@@ -483,6 +575,8 @@ export async function downloadMediaFromDrive(options: {
           const content = await downloadFile(file.id);
           fs.writeFileSync(targetFilePath, content);
           filesDownloaded++;
+          bytesDownloaded += content.length;
+          emitDownloadProgress(file.name, gameFolder.name);
         } catch (err: any) {
           console.error(`Failed to download ${file.name}:`, err);
         }

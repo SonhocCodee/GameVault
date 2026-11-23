@@ -398,6 +398,11 @@ export interface DriveMediaProgress {
   currentFile: string;
   currentGame: string;
   bytesTransferred: number;
+  totalBytes?: number;
+  speedBytesPerSec?: number;
+  formattedSpeed?: string;
+  formattedTransferred?: string;
+  formattedTotal?: string;
 }
 
 export interface ActiveMediaSyncStatus {

@@ -598,22 +598,31 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                     {driveProgress ? (
                       <>
                         <div className="flex items-center justify-between">
-                          <span className="text-white font-semibold truncate max-w-[70%]">
+                          <span className="text-white font-semibold truncate max-w-[58%]">
                             🎮 {driveProgress.currentGame}
                           </span>
-                          <span className="font-mono font-bold text-emerald-300 shrink-0">
-                            Ảnh {driveProgress.current} / {driveProgress.total}
-                          </span>
+                          <div className="flex items-center gap-2 font-mono shrink-0">
+                            {driveProgress.formattedSpeed && (
+                              <span className="text-teal-300 font-bold bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/30 text-[10px]">
+                                ⚡ {driveProgress.formattedSpeed}
+                              </span>
+                            )}
+                            <span className="font-bold text-emerald-300 text-xs">
+                              {driveProgress.current} / {driveProgress.total} ảnh
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between text-[10px] text-[#8e95a5]">
-                          <span className="font-mono truncate max-w-[75%]" title={driveProgress.currentFile}>
+                        <div className="flex items-center justify-between text-[10px] text-[#8e95a5] pt-0.5">
+                          <span className="font-mono truncate max-w-[52%]" title={driveProgress.currentFile}>
                             📄 {driveProgress.currentFile}
                           </span>
-                          {driveProgress.bytesTransferred > 0 && (
-                            <span className="font-mono text-emerald-400/90 font-semibold">
-                              {(driveProgress.bytesTransferred / (1024 * 1024)).toFixed(1)} MB đã chuyển
-                            </span>
-                          )}
+                          <span className="font-mono font-bold text-emerald-400 shrink-0">
+                            {driveProgress.formattedTransferred && driveProgress.formattedTotal
+                              ? `${driveProgress.formattedTransferred} / ${driveProgress.formattedTotal}`
+                              : driveProgress.bytesTransferred > 0
+                              ? `${(driveProgress.bytesTransferred / (1024 * 1024)).toFixed(1)} MB`
+                              : ''}
+                          </span>
                         </div>
                       </>
                     ) : (
@@ -666,7 +675,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <span className="text-[10px] font-normal text-[#8e95a5]">
                     {driveUploading
                       ? driveProgress
-                        ? `Đang đẩy: ${driveProgress.percent}% (${driveProgress.current}/${driveProgress.total} ảnh) • ${driveProgress.currentGame}`
+                        ? `Đang đẩy: ${driveProgress.percent}% (${driveProgress.formattedTransferred || `${driveProgress.current}/${driveProgress.total} ảnh`}) • ${driveProgress.formattedSpeed || ''}`
                         : 'Đang đẩy ảnh lên Drive...'
                       : 'Quét E:\\Game và đẩy ảnh mới lên'}
                   </span>
@@ -686,7 +695,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <span className="text-[10px] font-normal text-[#8e95a5]">
                     {driveDownloading
                       ? driveProgress
-                        ? `Đang kéo: ${driveProgress.percent}% (${driveProgress.current}/${driveProgress.total} ảnh)`
+                        ? `Đang kéo: ${driveProgress.percent}% (${driveProgress.formattedTransferred || `${driveProgress.current}/${driveProgress.total} ảnh`}) • ${driveProgress.formattedSpeed || ''}`
                         : 'Đang tải ảnh từ Drive về...'
                       : 'Tải về thư mục E:\\Game máy này'}
                   </span>
