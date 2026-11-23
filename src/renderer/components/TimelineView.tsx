@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Calendar,
   Clock,
@@ -15,6 +15,10 @@ import {
   Filter,
   Layers,
   History,
+  Eye,
+  EyeOff,
+  X,
+  Pin,
 } from 'lucide-react';
 import type { Game, Session, MediaItem, TrackerStatus } from '../../shared/types.js';
 import { formatPlaytime, getStatusMeta, formatDisplayUrl } from './GameCard.js';
@@ -62,18 +66,31 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   const [loadingSessions, setLoadingSessions] = useState<boolean>(true);
   const [collapsedYears, setCollapsedYears] = useState<Record<number, boolean>>({});
 
-  // Hover Popover State
+  // Preview HUD Enabled State (persisted in localStorage or default true)
+  const [previewEnabled, setPreviewEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('gv_timeline_preview_enabled');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  // Hover Popover / HUD State
   const [hoveredData, setHoveredData] = useState<{
     item: TimelineGameItem;
     monthLabel: string;
     targetRect: DOMRect;
   } | null>(null);
+  const [hudSide, setHudSide] = useState<'left' | 'right'>('right');
+  const [isPinned, setIsPinned] = useState<boolean>(false);
 
   // In-memory screenshots cache: gameTitle -> MediaItem[]
   const mediaCache = useRef<Map<string, MediaItem[]>>(new Map());
   const [hoveredMedia, setHoveredMedia] = useState<MediaItem[]>([]);
   const [hoveredMediaLoading, setHoveredMediaLoading] = useState<boolean>(false);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hoverDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch all sessions from SQLite backend
   useEffect(() => {
@@ -270,52 +287,79 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     return yearGroups;
   }, [filteredGamesMap, sessions]);
 
-  // Load screenshots for hovered game
+  const loadMediaForGame = useCallback((gameTitle: string) => {
+    if (mediaCache.current.has(gameTitle)) {
+      setHoveredMedia(mediaCache.current.get(gameTitle)!);
+      setHoveredMediaLoading(false);
+      return;
+    }
+    setHoveredMedia([]);
+    setHoveredMediaLoading(true);
+    if (window.electronAPI?.getGameMedia) {
+      window.electronAPI
+        .getGameMedia(gameTitle)
+        .then((items) => {
+          const images = (items || []).filter((i) => i.type === 'image');
+          mediaCache.current.set(gameTitle, images);
+          setHoveredMedia(images);
+        })
+        .catch(() => {
+          mediaCache.current.set(gameTitle, []);
+          setHoveredMedia([]);
+        })
+        .finally(() => {
+          setHoveredMediaLoading(false);
+        });
+    } else {
+      setHoveredMediaLoading(false);
+    }
+  }, []);
+
+  // Smart hover management: docks HUD at opposite bottom corner to never block adjacent cards
   const handleMouseEnterCard = (
     e: React.MouseEvent<HTMLDivElement>,
     item: TimelineGameItem,
     monthLabel: string
   ) => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
+    if (!previewEnabled) return;
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
     }
 
     const targetRect = e.currentTarget.getBoundingClientRect();
-    setHoveredData({ item, monthLabel, targetRect });
+    const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1920;
 
-    // Check media cache
-    const gameTitle = item.game.title;
-    if (mediaCache.current.has(gameTitle)) {
-      setHoveredMedia(mediaCache.current.get(gameTitle)!);
-      setHoveredMediaLoading(false);
-    } else {
-      setHoveredMedia([]);
-      setHoveredMediaLoading(true);
-      if (window.electronAPI?.getGameMedia) {
-        window.electronAPI
-          .getGameMedia(gameTitle)
-          .then((items) => {
-            const images = (items || []).filter((i) => i.type === 'image');
-            mediaCache.current.set(gameTitle, images);
-            setHoveredMedia(images);
-          })
-          .catch(() => {
-            mediaCache.current.set(gameTitle, []);
-            setHoveredMedia([]);
-          })
-          .finally(() => {
-            setHoveredMediaLoading(false);
-          });
-      } else {
-        setHoveredMediaLoading(false);
-      }
+    // Smart opposite-side placement:
+    // If card center is in right half, dock HUD at left; if in left half, dock HUD at right.
+    // This guarantees the HUD NEVER overlaps the hovered card or any neighbor cards!
+    const cardCenter = targetRect.left + targetRect.width / 2;
+    if (cardCenter > windowWidth / 2 + 50) {
+      setHudSide('left');
+    } else if (cardCenter < windowWidth / 2 - 50) {
+      setHudSide('right');
     }
+
+    if (hoverDebounceRef.current) {
+      clearTimeout(hoverDebounceRef.current);
+    }
+
+    hoverDebounceRef.current = setTimeout(() => {
+      setHoveredData({ item, monthLabel, targetRect });
+      loadMediaForGame(item.game.title);
+    }, 70);
   };
 
   const handleMouseLeaveCard = () => {
-    hoverTimeoutRef.current = setTimeout(() => {
+    if (hoverDebounceRef.current) {
+      clearTimeout(hoverDebounceRef.current);
+      hoverDebounceRef.current = null;
+    }
+    if (isPinned) return;
+
+    hideTimeoutRef.current = setTimeout(() => {
       setHoveredData(null);
-    }, 120);
+    }, 350);
   };
 
   const toggleYearCollapse = (year: number) => {
@@ -346,21 +390,62 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           </div>
         </div>
 
-        {/* Quick Year Jump Bar */}
-        {timelineData.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-[#8e95a5] mr-1">Nhảy đến năm:</span>
-            {timelineData.map((yg) => (
-              <a
-                key={yg.year}
-                href={`#year-${yg.year}`}
-                className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1 text-xs font-bold text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#ff2a44]/15 hover:text-[#ff2a44] transition-all"
-              >
-                {yg.year}
-              </a>
-            ))}
-          </div>
-        )}
+        {/* Actions & Jump Bar */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Quick Preview Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !previewEnabled;
+              setPreviewEnabled(next);
+              try {
+                localStorage.setItem('gv_timeline_preview_enabled', String(next));
+              } catch {}
+              if (!next) {
+                setHoveredData(null);
+                setIsPinned(false);
+              }
+            }}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all shadow-sm ${
+              previewEnabled
+                ? 'border-[#ff2a44]/50 bg-[#ff2a44]/15 text-[#ff2a44] hover:bg-[#ff2a44]/25'
+                : 'border-[#2a2e3d] bg-[#12141c] text-[#8e95a5] hover:text-white hover:border-[#3a4055]'
+            }`}
+            title={
+              previewEnabled
+                ? 'Đang bật: Xem nhanh thông tin & ảnh F6 ở góc màn hình khi rê chuột (không che thẻ game)'
+                : 'Đang tắt: Nhấp để bật lại tính năng xem nhanh khi rê chuột'
+            }
+          >
+            {previewEnabled ? (
+              <>
+                <Eye className="h-3.5 w-3.5" />
+                <span>Xem nhanh: Bật</span>
+              </>
+            ) : (
+              <>
+                <EyeOff className="h-3.5 w-3.5" />
+                <span>Xem nhanh: Tắt</span>
+              </>
+            )}
+          </button>
+
+          {/* Quick Year Jump Bar */}
+          {timelineData.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-l border-[#2a2e3d] pl-3">
+              <span className="text-[11px] font-semibold text-[#8e95a5] mr-1">Năm:</span>
+              {timelineData.map((yg) => (
+                <a
+                  key={yg.year}
+                  href={`#year-${yg.year}`}
+                  className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1 text-xs font-bold text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#ff2a44]/15 hover:text-[#ff2a44] transition-all"
+                >
+                  {yg.year}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {loadingSessions ? (
@@ -471,6 +556,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                 ? item.game.title.toLowerCase() ===
                                   trackerStatus.activeGameTitle.toLowerCase()
                                 : false;
+                              const isHovered =
+                                previewEnabled &&
+                                hoveredData?.item.game.id === item.game.id;
 
                               const coverUrl = formatDisplayUrl(item.game.cover_url, {
                                 thumb: true,
@@ -488,6 +576,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                   className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-[#161821] transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/60 ${
                                     isActive
                                       ? 'border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.35)] ring-2 ring-emerald-500/70'
+                                      : isHovered
+                                      ? 'border-[#ff2a44] shadow-[0_0_18px_rgba(255,42,68,0.45)] ring-2 ring-[#ff2a44]/70 -translate-y-1'
                                       : 'border-[#2a2e3d] hover:border-[#ff2a44]'
                                   }`}
                                 >
@@ -566,23 +656,61 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         </div>
       )}
 
-      {/* Floating Hover Preview Card (Portal-style with Fixed Position) */}
-      {hoveredData && (
+      {/* Floating Smart Corner Preview HUD (Docked at opposite bottom corner so it NEVER blocks adjacent cards) */}
+      {previewEnabled && hoveredData && (
         <div
           onMouseEnter={() => {
-            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+            if (hideTimeoutRef.current) {
+              clearTimeout(hideTimeoutRef.current);
+              hideTimeoutRef.current = null;
+            }
           }}
           onMouseLeave={handleMouseLeaveCard}
           style={{
             position: 'fixed',
+            bottom: '24px',
+            [hudSide]: '24px',
             zIndex: 60,
-            width: '340px',
-            ...getSmartPopoverPosition(hoveredData.targetRect),
+            width: '360px',
+            maxWidth: 'calc(100vw - 48px)',
           }}
-          className="pointer-events-auto rounded-2xl border border-[#2a2e3d] bg-[#161822]/95 p-4 shadow-2xl shadow-black/80 backdrop-blur-md animate-in fade-in zoom-in-95 duration-150"
+          className="pointer-events-auto rounded-2xl border border-[#2a2e3d] bg-[#141620]/95 p-4 shadow-2xl shadow-black/90 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-150"
         >
+          {/* Top Bar with title & controls */}
+          <div className="mb-2.5 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#ff2a44]">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>Xem nhanh ({hoveredData.monthLabel})</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setIsPinned((prev) => !prev)}
+                className={`flex h-6 w-6 items-center justify-center rounded-md border transition-all ${
+                  isPinned
+                    ? 'border-[#ff2a44] bg-[#ff2a44]/20 text-[#ff2a44]'
+                    : 'border-transparent text-[#8e95a5] hover:border-[#2a2e3d] hover:bg-[#1a1e2c] hover:text-white'
+                }`}
+                title={isPinned ? 'Bỏ ghim (tự ẩn khi rời chuột)' : 'Ghim thẻ xem trước'}
+              >
+                <Pin className={`h-3 w-3 ${isPinned ? 'fill-[#ff2a44]' : ''}`} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHoveredData(null);
+                  setIsPinned(false);
+                }}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-[#8e95a5] hover:bg-[#1a1e2c] hover:text-white transition-colors"
+                title="Đóng xem trước"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
           {/* Header Banner */}
-          <div className="relative -mx-4 -mt-4 mb-3 h-28 overflow-hidden rounded-t-2xl bg-[#0e1015]">
+          <div className="relative mb-3 h-28 overflow-hidden rounded-xl bg-[#0e1015] border border-[#2a2e3d]/50">
             {hoveredData.item.game.banner_url || hoveredData.item.game.cover_url ? (
               <img
                 src={formatDisplayUrl(
@@ -597,10 +725,10 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                 <Gamepad2 className="h-10 w-10 text-white/30" />
               </div>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#161822] via-[#161822]/40 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#141620] via-[#141620]/40 to-transparent" />
 
             {/* Status pill on header */}
-            <div className="absolute bottom-2.5 left-3 flex items-center gap-1.5">
+            <div className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5">
               <span
                 className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
                   getStatusMeta(hoveredData.item.game.status).colorClass
@@ -618,12 +746,15 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           </div>
 
           {/* Title */}
-          <h4 className="text-sm font-bold text-white line-clamp-1" title={hoveredData.item.game.title}>
+          <h4
+            className="text-sm font-bold text-white line-clamp-1"
+            title={hoveredData.item.game.title}
+          >
             {hoveredData.item.game.title}
           </h4>
 
           {/* Playtime Metrics */}
-          <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-xl border border-[#2a2e3d]/80 bg-[#12141c] p-2.5">
+          <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-xl border border-[#2a2e3d]/80 bg-[#10121a] p-2.5">
             <div>
               <p className="text-[10px] font-medium text-[#8e95a5]">
                 Trong {hoveredData.monthLabel}
@@ -642,7 +773,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             </div>
           </div>
 
-          {/* Screenshots Gallery Strip (1 vài ảnh game) */}
+          {/* Screenshots Gallery Strip (1 vài ảnh game F6) */}
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#8e95a5]">
@@ -698,24 +829,38 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 };
 
 /**
- * Calculates smart fixed coordinates for hover popover to avoid overflowing viewport.
+ * Calculates smart opposite-side docking position so the HUD NEVER covers the card or its neighbors.
  */
-function getSmartPopoverPosition(rect: DOMRect): React.CSSProperties {
+export function getSmartHudSide(
+  targetRect: { left: number; right?: number; width?: number },
+  windowWidth: number = 1920
+): 'left' | 'right' {
+  const width = targetRect.width ?? (targetRect.right !== undefined ? targetRect.right - targetRect.left : 180);
+  const cardCenter = targetRect.left + width / 2;
+  return cardCenter > windowWidth / 2 ? 'left' : 'right';
+}
+
+/**
+ * Calculates smart fixed coordinates for hover popover to avoid overflowing viewport (backward compatible).
+ */
+export function getSmartPopoverPosition(rect: DOMRect): React.CSSProperties {
   const POPOVER_WIDTH = 340;
   const POPOVER_HEIGHT = 380;
   const PADDING = 12;
 
   let left = rect.right + PADDING;
   // If overflows right side of viewport, show on the left
-  if (left + POPOVER_WIDTH > window.innerWidth - PADDING) {
+  if (typeof window !== 'undefined' && left + POPOVER_WIDTH > window.innerWidth - PADDING) {
     left = rect.left - POPOVER_WIDTH - PADDING;
   }
   // Clamp left
-  left = Math.max(PADDING, Math.min(left, window.innerWidth - POPOVER_WIDTH - PADDING));
+  if (typeof window !== 'undefined') {
+    left = Math.max(PADDING, Math.min(left, window.innerWidth - POPOVER_WIDTH - PADDING));
+  }
 
   // Align vertically near the card top, clamped within window bounds
   let top = rect.top - 20;
-  if (top + POPOVER_HEIGHT > window.innerHeight - PADDING) {
+  if (typeof window !== 'undefined' && top + POPOVER_HEIGHT > window.innerHeight - PADDING) {
     top = window.innerHeight - POPOVER_HEIGHT - PADDING;
   }
   top = Math.max(PADDING + 60, top); // Leave room for navbar

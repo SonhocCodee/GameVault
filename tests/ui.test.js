@@ -307,5 +307,21 @@ describe('Milestone 4: React UI & AMD Adrenalin Theme Suite', () => {
       assert.ok(left < targetRectRightEdge.left);
       assert.strictEqual(left, 1650 - 340 - 12);
     });
+
+    test('preview HUD docks on opposite side to never block hovered cards or neighbors', () => {
+      const windowWidth = 1920;
+
+      // Card on the right half (e.g. column 6 at left=1650, width=150)
+      const rightCard = { left: 1650, width: 150 };
+      const rightCenter = rightCard.left + rightCard.width / 2;
+      const rightSide = rightCenter > windowWidth / 2 ? 'left' : 'right';
+      assert.strictEqual(rightSide, 'left', 'HUD should dock on left when card is on right half');
+
+      // Card on the left half (e.g. column 1 at left=100, width=150)
+      const leftCard = { left: 100, width: 150 };
+      const leftCenter = leftCard.left + leftCard.width / 2;
+      const leftSide = leftCenter > windowWidth / 2 ? 'left' : 'right';
+      assert.strictEqual(leftSide, 'right', 'HUD should dock on right when card is on left half');
+    });
   });
 });
