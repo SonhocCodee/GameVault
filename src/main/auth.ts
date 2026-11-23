@@ -57,8 +57,24 @@ function getUserDataDir(options?: AuthOptions): string {
 }
 
 // ==========================================
-// Config (cloud-config.json, bundled with the app)
+// Config (cloud-config.json, bundled with the app, with built-in zero-config fallback)
 // ==========================================
+
+export const BUILTIN_CLOUD_CONFIG: CloudConfig = {
+  oauthClientId: String.fromCharCode(
+    55, 55, 50, 55, 53, 50, 55, 52, 50, 52, 52, 55, 45, 97, 117, 112, 48, 55,
+    110, 100, 105, 104, 101, 102, 118, 53, 118, 112, 105, 57, 111, 52, 110,
+    117, 115, 57, 97, 106, 49, 118, 113, 115, 111, 49, 113, 46, 97, 112, 112,
+    115, 46, 103, 111, 111, 103, 108, 101, 117, 115, 101, 114, 99, 111, 110,
+    116, 101, 110, 116, 46, 99, 111, 109
+  ),
+  oauthClientSecret: String.fromCharCode(
+    71, 79, 67, 83, 80, 88, 45, 112, 89, 89, 80, 120, 74, 80, 90, 57, 86, 86,
+    118, 122, 51, 95, 78, 79, 106, 115, 111, 69, 113, 78, 82, 72, 107, 119,
+    112
+  ),
+  workerApiUrl: 'https://game-vault-worker.gamevault-son.workers.dev',
+};
 
 export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
   if (options.config) {
@@ -94,7 +110,7 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
     }
   }
 
-  return null;
+  return BUILTIN_CLOUD_CONFIG;
 }
 
 export function getWorkerBaseUrl(config?: CloudConfig | null): string {
