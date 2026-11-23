@@ -61,10 +61,10 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
   if (options.config) {
     return options.config;
   }
+  const userDir = getUserDataDir(options);
   const candidates = [
-    // Bundled with the app (repo root / packaged resources)
+    path.resolve(userDir, 'cloud-config.json'),
     path.resolve(process.cwd(), 'cloud-config.json'),
-    path.resolve(getUserDataDir(options), 'cloud-config.json'),
   ];
   for (const candidate of candidates) {
     try {

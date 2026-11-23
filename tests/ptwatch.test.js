@@ -75,8 +75,11 @@ describe('Playtime watchdog importer (script chạy ngầm)', () => {
     return Number(res.lastInsertRowid);
   };
 
+  let fakeMtime = Date.now();
   const writeLog = (payload) => {
     fs.writeFileSync(logPath, JSON.stringify(payload), 'utf-8');
+    fakeMtime += 1000;
+    fs.utimesSync(logPath, new Date(fakeMtime), new Date(fakeMtime));
   };
 
   const makeImporter = () => {

@@ -195,6 +195,7 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
     title: 'GameVault',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     backgroundColor: '#0e1015',
+    autoHideMenuBar: true,
     show: !startHidden,
     webPreferences: {
       preload: preloadPath,
@@ -203,6 +204,23 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
       sandbox: false,
     },
   });
+
+  // Remove default classic menu bar (File / Edit / View / Window)
+  mainWindow.removeMenu();
+
+  // In development, keep F12 / Ctrl+Shift+I for DevTools and F5 / Ctrl+R for reload
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        mainWindow?.webContents.toggleDevTools();
+        event.preventDefault();
+      } else if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
+        mainWindow?.webContents.reload();
+        event.preventDefault();
+      }
+    });
+  }
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[main] Window finished loading');
@@ -659,6 +677,9 @@ app.whenReady().then(() => {
   // Route every media resolver through the user's chosen storage drive
   setMediaBaseDir(appSettings.mediaBaseDir);
   const startHidden = process.argv.includes('--hidden') || process.argv.includes('--minimized');
+
+  // Disable default application menu bar globally
+  Menu.setApplicationMenu(null);
 
   // Create Window immediately for instant UX
   createWindow(startHidden);
