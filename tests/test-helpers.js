@@ -84,6 +84,13 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS deleted_games (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    exe_name TEXT DEFAULT NULL,
+    deleted_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 `;
 
 export function createTestDb(dbPath = ':memory:') {

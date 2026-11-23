@@ -1,10 +1,11 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { getDb, recalculatePlaytime } from './db.ts';
 import { extractTitleFromExe } from './importer.ts';
 import { ensureGameFolder, sanitizeTitleForFolder } from './media.ts';
-import { searchSteamCovers } from './covers.ts';
+import { searchSteamCovers, detectSteamAppIdFromExe, resolveSteamAppId, CURATED_STEAM_APP_IDS } from './covers.ts';
 import type { TrackerStatus, Game } from '../shared/types.js';
 
 // Native Win32 API binding via koffi for zero-impact polling (0.0001ms / 0.000004% CPU)
@@ -118,6 +119,139 @@ export interface ProcessPollResult {
   session?: ActiveSessionInfo;
 }
 
+/** Known game platform directory patterns */
+export const GAME_PLATFORM_DIR_REGEX = /\\(steamapps\\common|epic games|gog games|gog galaxy\\games|xboxgames|modifiablewindowsapps|ubisoft\\ubisoft game launcher\\games|origin games|ea games|battle\.net|riot games|rpcs3|yuzu|ryujinx|cemu|pcsx2|ppsspp|dolphin|citra|vita3k)\\/i;
+
+/** General user gaming library folder patterns (e.g. D:\Games, E:\Game, C:\Gaming, D:\Tro Choi) */
+export const USER_GAME_DIR_REGEX = /(?:^[a-zA-Z]:\\(?:games?|gaming|tro choi|my games)\b|\\(?:games?|gaming|my games)\\[^\\]+\\)/i;
+
+/** Common installer / updater / tool executables to skip even within game folders */
+export const INSTALLER_OR_TOOL_EXE_REGEX = /^(unins\d*|setup|installer?|updater?|crashpad_handler|crashreporter|unitycrashhandler.*|vc_redist.*|dxsetup|easyanticheat.*|battleye.*)\.exe$/i;
+
+/** Core game SDK / runtime files to look for in the executable's directory */
+export const GAME_SDK_FINGERPRINTS = [
+  'steam_api.dll',
+  'steam_api64.dll',
+  'steam_appid.txt',
+  'galaxy.dll',
+  'galaxy64.dll',
+  'EOSSDK-Win64-Shipping.dll',
+  'UnityPlayer.dll',
+  'mono-2.0-bdwgc.dll',
+  'bink2w64.dll',
+  'binkw32.dll',
+  'binkw64.dll',
+];
+
+/**
+ * Intelligent game verification heuristic (dynamic, non-hardcoded).
+ * Determines if an unknown executable is genuinely a game without relying on an infinite blacklist of desktop apps.
+ */
+export function isLikelyGame(
+  foregroundExe: string,
+  exePath?: string | null,
+  db?: DatabaseSync
+): boolean {
+  if (!foregroundExe || !foregroundExe.toLowerCase().endsWith('.exe')) {
+    return false;
+  }
+
+  // 1. Skip obvious installers, updaters, crash reporters, anticheat launchers
+  if (INSTALLER_OR_TOOL_EXE_REGEX.test(foregroundExe)) {
+    return false;
+  }
+
+  const cleanTitle = extractTitleFromExe(exePath || foregroundExe);
+
+  // 2. Check if user explicitly deleted or dismissed this game before
+  if (db) {
+    try {
+      const deleted = db
+        .prepare('SELECT 1 FROM deleted_games WHERE exe_name = ? COLLATE NOCASE OR title = ? COLLATE NOCASE LIMIT 1')
+        .get(foregroundExe, cleanTitle);
+      if (deleted) {
+        return false;
+      }
+    } catch {}
+  }
+
+  // If we have an executable path, run positive game structural checks
+  if (exePath) {
+    const normalizedPath = path.normalize(exePath);
+
+    // 3. Positive check: Executable is inside a recognized gaming platform or user game directory
+    if (GAME_PLATFORM_DIR_REGEX.test(normalizedPath) || USER_GAME_DIR_REGEX.test(normalizedPath)) {
+      return true;
+    }
+
+    // 4. Positive check: Unreal Engine naming or directory conventions
+    const lowerExe = foregroundExe.toLowerCase();
+    if (lowerExe.endsWith('-win64-shipping.exe') || lowerExe.endsWith('-win32-shipping.exe')) {
+      return true;
+    }
+    if (/\\binaries\\(win64|win32)\\/i.test(normalizedPath)) {
+      return true;
+    }
+
+    // 5. Positive check: Steam AppID detected from game directory
+    try {
+      const detectedSteamId = detectSteamAppIdFromExe(exePath);
+      if (detectedSteamId && detectedSteamId > 0) {
+        return true;
+      }
+    } catch {}
+
+    // 6. Positive check: Game Engine & Platform SDK files in the directory
+    try {
+      const dir = path.dirname(exePath);
+      for (const sdkFile of GAME_SDK_FINGERPRINTS) {
+        if (fs.existsSync(path.join(dir, sdkFile))) {
+          return true;
+        }
+      }
+
+      // Unity directory convention: <GameName>_Data folder
+      const baseName = path.basename(exePath, path.extname(exePath));
+      if (fs.existsSync(path.join(dir, `${baseName}_Data`))) {
+        return true;
+      }
+
+      // Godot package convention: <GameName>.pck
+      if (fs.existsSync(path.join(dir, `${baseName}.pck`))) {
+        return true;
+      }
+
+      // Also check parent directory for game SDKs (games commonly put binaries in bin/ or x64/)
+      const parentDir = path.dirname(dir);
+      if (parentDir && parentDir !== dir) {
+        for (const sdkFile of GAME_SDK_FINGERPRINTS) {
+          if (fs.existsSync(path.join(parentDir, sdkFile))) {
+            return true;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 7. Positive check: Matches curated Steam dictionary or resolved Steam AppID
+  if (cleanTitle) {
+    const key = cleanTitle.toLowerCase().trim();
+    if (CURATED_STEAM_APP_IDS[key]) {
+      return true;
+    }
+    try {
+      const resolved = resolveSteamAppId(cleanTitle);
+      if (resolved && resolved > 0) {
+        return true;
+      }
+    } catch {}
+  }
+
+  // Default negative: Standard desktop software (e.g. PuTTY, Office, Postman, Notepad, browsers)
+  // fails all positive game indicators and is safely ignored without hardcoding.
+  return false;
+}
+
 /**
  * Zero-Impact Background Playtime Tracking Engine.
  * Periodically queries Windows foreground window, matches against registered games,
@@ -136,6 +270,28 @@ export class PlaytimeTracker {
   // FPS capture hooks (wired to FpsMonitor in main.ts)
   public onSessionStarted?: (info: ActiveSessionInfo) => void;
   public onSessionClosed?: (result: CloseSessionResult) => void;
+
+  private verifiedGamePathCache: Set<string> = new Set<string>();
+  private nonGamePathCache: Set<string> = new Set<string>();
+
+  /**
+   * Fast memoized check for whether an unknown executable should be candidate for auto-registration.
+   */
+  public isLikelyGameCandidate(foregroundExe: string, exePath?: string | null): boolean {
+    const key = (exePath || foregroundExe).toLowerCase().trim();
+    if (this.verifiedGamePathCache.has(key)) return true;
+    if (this.nonGamePathCache.has(key)) return false;
+
+    const likely = isLikelyGame(foregroundExe, exePath, this.db);
+    if (likely) {
+      if (this.verifiedGamePathCache.size > 500) this.verifiedGamePathCache.clear();
+      this.verifiedGamePathCache.add(key);
+    } else {
+      if (this.nonGamePathCache.size > 500) this.nonGamePathCache.clear();
+      this.nonGamePathCache.add(key);
+    }
+    return likely;
+  }
 
   /**
    * A session closed by the unfocused-grace loop is resumed (same row) when the
@@ -389,6 +545,16 @@ export class PlaytimeTracker {
         return null;
       }
 
+      // Check if user previously deleted or dismissed this game
+      try {
+        const deleted = this.db
+          .prepare('SELECT 1 FROM deleted_games WHERE exe_name = ? COLLATE NOCASE OR title = ? COLLATE NOCASE LIMIT 1')
+          .get(foregroundExe, cleanTitle);
+        if (deleted) {
+          return null;
+        }
+      } catch {}
+
       // Check if title already exists (case-insensitive)
       const existing = this.db
         .prepare('SELECT * FROM games WHERE title = ? COLLATE NOCASE')
@@ -424,13 +590,17 @@ export class PlaytimeTracker {
         return { ...promoted, exe_name: foregroundExe };
       }
 
+      // Positively verify that this unknown executable is genuinely a game
+      if (!this.isLikelyGameCandidate(foregroundExe, exePath)) {
+        return null;
+      }
+
       const mediaFolder = sanitizeTitleForFolder(cleanTitle);
 
       // Detect steam appid if available from exe directory
       let detectedSteamId = -1;
       if (exePath) {
         try {
-          const { detectSteamAppIdFromExe } = require('./covers.ts');
           const id = detectSteamAppIdFromExe(exePath);
           if (id) detectedSteamId = id;
         } catch {}
@@ -558,7 +728,9 @@ export class PlaytimeTracker {
     // Auto-detection & registration for new games
     if (!activeGame && this.autoDetectNewGames) {
       if (!this.isSystemProcess(foregroundExe) && !this.isPathIgnored(exePath)) {
-        activeGame = this.autoRegisterNewGame(foregroundExe, exePath);
+        if (this.isLikelyGameCandidate(foregroundExe, exePath)) {
+          activeGame = this.autoRegisterNewGame(foregroundExe, exePath);
+        }
       }
     }
 

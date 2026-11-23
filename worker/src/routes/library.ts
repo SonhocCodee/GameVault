@@ -130,8 +130,16 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
     ON CONFLICT(uid, game_key) DO UPDATE SET
       title = excluded.title,
       steam_id = COALESCE(excluded.steam_id, user_library.steam_id),
-      cover_url = COALESCE(excluded.cover_url, user_library.cover_url),
-      banner_url = COALESCE(excluded.banner_url, user_library.banner_url),
+      cover_url = CASE
+        WHEN excluded.cover_url IS NOT NULL AND (excluded.cover_url LIKE 'http://%' OR excluded.cover_url LIKE 'https://%') THEN excluded.cover_url
+        WHEN user_library.cover_url LIKE 'http://%' OR user_library.cover_url LIKE 'https://%' THEN user_library.cover_url
+        ELSE NULL
+      END,
+      banner_url = CASE
+        WHEN excluded.banner_url IS NOT NULL AND (excluded.banner_url LIKE 'http://%' OR excluded.banner_url LIKE 'https://%') THEN excluded.banner_url
+        WHEN user_library.banner_url LIKE 'http://%' OR user_library.banner_url LIKE 'https://%' THEN user_library.banner_url
+        ELSE NULL
+      END,
       status = CASE
         WHEN excluded.is_deleted = 1 THEN user_library.status
         WHEN excluded.status = 'completed' OR user_library.status = 'completed' THEN 'completed'
@@ -164,8 +172,8 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
     const gameKey = item.gameKey.trim();
     const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : 'Unknown Game';
     const steamId = item.steamId != null && !isNaN(Number(item.steamId)) ? Number(item.steamId) : null;
-    const coverUrl = typeof item.coverUrl === 'string' && item.coverUrl.trim() ? item.coverUrl.trim() : null;
-    const bannerUrl = typeof item.bannerUrl === 'string' && item.bannerUrl.trim() ? item.bannerUrl.trim() : null;
+    const coverUrl = typeof item.coverUrl === 'string' && item.coverUrl.trim() && (item.coverUrl.startsWith('http://') || item.coverUrl.startsWith('https://')) ? item.coverUrl.trim() : null;
+    const bannerUrl = typeof item.bannerUrl === 'string' && item.bannerUrl.trim() && (item.bannerUrl.startsWith('http://') || item.bannerUrl.startsWith('https://')) ? item.bannerUrl.trim() : null;
     const status: GameLibraryStatus = VALID_STATUSES.has(item.status) ? item.status : 'backlog';
     const playtimeMinutes = Math.max(0, Math.floor(Number(item.playtimeMinutes) || 0));
     const lastPlayed = typeof item.lastPlayed === 'string' && item.lastPlayed.trim() ? item.lastPlayed.trim() : null;

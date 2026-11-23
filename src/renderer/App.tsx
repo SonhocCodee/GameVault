@@ -64,6 +64,31 @@ export default function App() {
   const [view, setView] = useState<'library' | 'detail' | 'community'>('library');
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 4500);
+  }, []);
+
+  const handleEnrichCovers = async () => {
+    try {
+      showToast('🔍 Đang tìm nạp ảnh bìa cho các game còn thiếu...');
+      if (window.electronAPI?.enrichCovers) {
+        const count = await window.electronAPI.enrichCovers();
+        await fetchGames();
+        if (count > 0) {
+          showToast(`✅ Đã tìm nạp thành công ảnh bìa cho ${count} game!`);
+        } else {
+          showToast('✨ Toàn bộ game đã có ảnh bìa đầy đủ.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Enrich covers failed:', err);
+      showToast(`❌ Lỗi tìm nạp ảnh bìa: ${err?.message || 'Không xác định'}`);
+    }
+  };
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -258,13 +283,6 @@ export default function App() {
 
   // Real-time Event Subscriptions (Auto Game Detected & F6 Screenshot Synced)
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
-    const showToast = (msg: string) => {
-      setToastMsg(msg);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setToastMsg(null), 4500);
-    };
-
     const unsubGame = window.electronAPI?.onGameAdded?.((newGame) => {
       fetchGames();
       showToast(`🎮 Đã tự động thêm game: ${newGame.title} & tạo folder E:\\Game\\${newGame.media_folder || newGame.title}`);
@@ -281,12 +299,11 @@ export default function App() {
     });
 
     return () => {
-      if (timer) clearTimeout(timer);
       if (unsubGame) unsubGame();
       if (unsubUpdated) unsubUpdated();
       if (unsubShot) unsubShot();
     };
-  }, [fetchGames]);
+  }, [fetchGames, showToast]);
 
   // Global ESC key handling for library return
   useEffect(() => {
@@ -570,6 +587,7 @@ export default function App() {
         onOpenAddGameModal={() => setAddGameModalOpen(true)}
         onOpenWishlistModal={() => setWishlistModalOpen(true)}
         onOpenSettingsModal={() => setSettingsModalOpen(true)}
+        onEnrichCovers={handleEnrichCovers}
         onOpenCommunity={() => {
           setView('community');
           window.scrollTo({ top: 0 });

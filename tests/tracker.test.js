@@ -1,8 +1,10 @@
 import test, { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestDb, createTempDirectory, cleanupTempDirectory } from './test-helpers.js';
-import { PlaytimeTracker, recoverStaleSessions } from '../src/main/tracker.ts';
+import { PlaytimeTracker, recoverStaleSessions, isLikelyGame } from '../src/main/tracker.ts';
 
 describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
   let db;
@@ -411,6 +413,75 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
       assert.equal(session.is_running, 0);
 
       tracker.stop();
+    });
+  });
+
+  // INTELLIGENT GAME VERIFICATION (NON-HARDCODED)
+  describe('Intelligent Game Verification (Non-Hardcoded)', () => {
+    it('rejects general desktop utilities without game markers (PuTTY, mRemoteNG, VS Code)', () => {
+      // PuTTY and mRemoteNG in Program Files
+      assert.equal(isLikelyGame('PuTTYNG.exe', 'C:\\Program Files (x86)\\mRemoteNG\\PuTTYNG.exe', db), false);
+      assert.equal(isLikelyGame('mRemoteNG.exe', 'C:\\Program Files (x86)\\mRemoteNG\\mRemoteNG.exe', db), false);
+      assert.equal(isLikelyGame('putty.exe', 'C:\\Users\\User\\Downloads\\putty.exe', db), false);
+      assert.equal(isLikelyGame('Code.exe', 'C:\\Users\\User\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe', db), false);
+      assert.equal(isLikelyGame('notepad++.exe', 'C:\\Program Files\\Notepad++\\notepad++.exe', db), false);
+    });
+
+    it('positively identifies games in standard gaming platforms & folders', () => {
+      // Steam
+      assert.equal(isLikelyGame('sekiro.exe', 'D:\\SteamLibrary\\steamapps\\common\\Sekiro\\sekiro.exe', db), true);
+      // Epic Games
+      assert.equal(isLikelyGame('AlanWake2.exe', 'E:\\Epic Games\\AlanWake2\\AlanWake2.exe', db), true);
+      // GOG Games
+      assert.equal(isLikelyGame('Witcher3.exe', 'C:\\GOG Games\\The Witcher 3\\bin\\x64\\witcher3.exe', db), true);
+      // User Games directory (D:\Games, E:\Game)
+      assert.equal(isLikelyGame('EldenRing.exe', 'D:\\Games\\Elden Ring\\Game\\eldenring.exe', db), true);
+      assert.equal(isLikelyGame('game.exe', 'E:\\Game\\BlackMythWukong\\game.exe', db), true);
+    });
+
+    it('positively identifies Unreal Engine game binaries by convention', () => {
+      assert.equal(isLikelyGame('Shooter-Win64-Shipping.exe', 'F:\\MyProject\\Binaries\\Win64\\Shooter-Win64-Shipping.exe', db), true);
+    });
+
+    it('positively identifies games by SDK runtime presence (UnityPlayer.dll, steam_api64.dll)', () => {
+      const gameFolder = path.join(tempDir, 'IndieUnityGame');
+      fs.mkdirSync(gameFolder, { recursive: true });
+      fs.writeFileSync(path.join(gameFolder, 'UnityPlayer.dll'), '');
+      const gameExe = path.join(gameFolder, 'mygame.exe');
+      fs.writeFileSync(gameExe, '');
+
+      assert.equal(isLikelyGame('mygame.exe', gameExe, db), true);
+
+      const steamFolder = path.join(tempDir, 'CustomSteamGame');
+      fs.mkdirSync(steamFolder, { recursive: true });
+      fs.writeFileSync(path.join(steamFolder, 'steam_api64.dll'), '');
+      const steamExe = path.join(steamFolder, 'custom.exe');
+      fs.writeFileSync(steamExe, '');
+
+      assert.equal(isLikelyGame('custom.exe', steamExe, db), true);
+    });
+
+    it('honors deleted_games tombstone to prevent resurrection', () => {
+      db.prepare('INSERT INTO deleted_games (title, exe_name) VALUES (?, ?)').run('Test Game', 'testgame.exe');
+
+      assert.equal(isLikelyGame('testgame.exe', 'D:\\Games\\Test Game\\testgame.exe', db), false);
+    });
+
+    it('prevents PlaytimeTracker from auto-registering non-game apps when focused', () => {
+      const tracker = new PlaytimeTracker(db, { autoDetectNewGames: true });
+
+      const pollRes = tracker.handleProcessPoll(
+        'PuTTYNG.exe',
+        54321,
+        new Date(),
+        'C:\\Program Files (x86)\\mRemoteNG\\PuTTYNG.exe'
+      );
+
+      assert.equal(pollRes.action, 'idle');
+      assert.equal(tracker.activeSession, null);
+
+      const registered = db.prepare("SELECT * FROM games WHERE exe_name = 'PuTTYNG.exe'").get();
+      assert.equal(registered, undefined);
     });
   });
 });

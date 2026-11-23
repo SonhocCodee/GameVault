@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import {
   getGameById,
   getGames,
@@ -8,6 +9,7 @@ import {
   getDb,
 } from './db.ts';
 import { normalizeForMatch } from './media.ts';
+import { autoEnrichAllGameCovers } from './covers.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
 import type {
   CloudReview,
@@ -261,18 +263,54 @@ export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
 }
 
 export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
+  const db = getDb();
+
+  // 1. Sanitize local paths in DB (reset local/non-HTTP paths to NULL so canonical web covers are enriched)
+  try {
+    const allGames = db.prepare('SELECT id, cover_url, banner_url FROM games').all() as any[];
+    for (const g of allGames) {
+      let changed = false;
+      let newCover = g.cover_url;
+      let newBanner = g.banner_url;
+      if (g.cover_url && !g.cover_url.startsWith('http://') && !g.cover_url.startsWith('https://')) {
+        newCover = null;
+        changed = true;
+      }
+      if (g.banner_url && !g.banner_url.startsWith('http://') && !g.banner_url.startsWith('https://')) {
+        newBanner = null;
+        changed = true;
+      }
+      if (changed) {
+        db.prepare("UPDATE games SET cover_url = ?, banner_url = ?, updated_at = datetime('now', 'localtime') WHERE id = ?").run(newCover, newBanner, g.id);
+      }
+    }
+  } catch (err) {
+    console.warn('Pre-sync local path sanitization warning:', err);
+  }
+
+  // 2. Pre-sync auto-enrichment: resolve covers for games lacking artwork before upload
+  try {
+    await autoEnrichAllGameCovers(db);
+  } catch (err) {
+    console.warn('Pre-sync autoEnrich warning:', err);
+  }
+
   const localGames = getGames();
   const deleted = getDeletedGames();
 
   const items: UserLibraryItem[] = [];
 
   for (const g of localGames) {
+    // Only upload valid HTTP/HTTPS URLs to the cloud. Never upload local machine file paths!
+    const isCoverHttp = g.cover_url && (g.cover_url.startsWith('http://') || g.cover_url.startsWith('https://'));
+    const isBannerHttp = g.banner_url && (g.banner_url.startsWith('http://') || g.banner_url.startsWith('https://'));
+
     items.push({
       gameKey: computeGameKey(g),
       title: g.title,
       steamId: g.steam_id && g.steam_id > 0 ? g.steam_id : null,
-      coverUrl: g.cover_url || null,
-      bannerUrl: g.banner_url || null,
+      coverUrl: isCoverHttp ? g.cover_url : null,
+      bannerUrl: isBannerHttp ? g.banner_url : null,
       status: g.status,
       playtimeMinutes: g.playtime_minutes || 0,
       lastPlayed: g.last_played_at || null,
@@ -312,9 +350,21 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
   let pulled = 0;
   let updated = 0;
 
-  const db = getDb();
   for (const remote of result.games) {
     if (remote.isDeleted) continue;
+
+    // Validate remote cover/banner: must be canonical HTTP/HTTPS URLs
+    const isRemoteCoverValid = remote.coverUrl && (
+      remote.coverUrl.startsWith('http://') ||
+      remote.coverUrl.startsWith('https://')
+    );
+    const validRemoteCover = isRemoteCoverValid ? remote.coverUrl : null;
+
+    const isRemoteBannerValid = remote.bannerUrl && (
+      remote.bannerUrl.startsWith('http://') ||
+      remote.bannerUrl.startsWith('https://')
+    );
+    const validRemoteBanner = isRemoteBannerValid ? remote.bannerUrl : null;
 
     // Check if game exists locally by steam_id or title
     let existing: Game | null = null;
@@ -332,8 +382,8 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         title: remote.title,
         status: remote.status,
         playtime_minutes: remote.playtimeMinutes,
-        cover_url: remote.coverUrl,
-        banner_url: remote.bannerUrl,
+        cover_url: validRemoteCover,
+        banner_url: validRemoteBanner,
         steam_id: remote.steamId || -1,
         user_rating: remote.userScore,
         notes: remote.userNotes,
@@ -364,12 +414,12 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
       }
 
       // Covers & metadata enrichment from cloud if missing locally
-      if (!existing.cover_url && remote.coverUrl) {
-        patch.cover_url = remote.coverUrl;
+      if (!existing.cover_url && validRemoteCover) {
+        patch.cover_url = validRemoteCover;
         needsUpdate = true;
       }
-      if (!existing.banner_url && remote.bannerUrl) {
-        patch.banner_url = remote.bannerUrl;
+      if (!existing.banner_url && validRemoteBanner) {
+        patch.banner_url = validRemoteBanner;
         needsUpdate = true;
       }
       if (existing.user_rating == null && remote.userScore != null) {
@@ -390,6 +440,13 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         updated++;
       }
     }
+  }
+
+  // 3. Post-sync auto-enrichment: resolve covers for any games that are still missing art
+  try {
+    await autoEnrichAllGameCovers(db);
+  } catch (err) {
+    console.warn('Post-sync autoEnrich warning:', err);
   }
 
   return {

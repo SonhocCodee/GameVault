@@ -20,6 +20,7 @@ import {
   GitCommitVertical,
   RefreshCw,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import type { GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
@@ -45,6 +46,7 @@ export interface NavbarProps {
   onOpenWishlistModal?: () => void;
   onOpenSettingsModal?: () => void;
   onOpenCommunity?: () => void;
+  onEnrichCovers?: () => void | Promise<void>;
   libraryLayout?: 'grid' | 'timeline';
   onLibraryLayoutChange?: (layout: 'grid' | 'timeline') => void;
 }
@@ -86,6 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenWishlistModal,
   onOpenSettingsModal,
   onOpenCommunity,
+  onEnrichCovers,
   libraryLayout = 'grid',
   onLibraryLayoutChange,
 }) => {
@@ -244,11 +247,11 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
 
         {/* Right Section: Prominent Sync Button, Compact Tools Dropdown, Add Game, Settings, Auth */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Direct Prominent Sync Button */}
           <button
             onClick={onOpenSyncModal}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-all shadow-sm active:scale-95 ${
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0 whitespace-nowrap ${
               isSyncingMedia
                 ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300 animate-pulse'
                 : 'border-sky-500/40 bg-sky-500/10 text-sky-400 hover:border-sky-400 hover:bg-sky-500/20 hover:text-white'
@@ -269,10 +272,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Quick Tools Dropdown (F6 Sync, AMD Import, Steam Wishlist) */}
-          <div className="relative" ref={toolsRef}>
+          <div className="relative shrink-0" ref={toolsRef}>
             <button
               onClick={() => setToolsOpen(!toolsOpen)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-all shrink-0 whitespace-nowrap ${
                 toolsOpen
                   ? 'border-[#ff2a44] bg-[#202433] text-white ring-1 ring-[#ff2a44]/40'
                   : 'border-[#2a2e3d] bg-[#161821] text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#1f2230] hover:text-[#ff2a44]'
@@ -327,6 +330,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 </button>
 
+                {onEnrichCovers && (
+                  <button
+                    onClick={async () => {
+                      setToolsOpen(false);
+                      await onEnrichCovers();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] group"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-black transition-colors">
+                      <Sparkles className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white group-hover:text-amber-400">Tìm nạp ảnh bìa (Enrich)</div>
+                      <div className="text-[10px] text-[#8e95a5]">Tự động tải ảnh game còn thiếu</div>
+                    </div>
+                  </button>
+                )}
+
                 {onOpenWishlistModal && (
                   <button
                     onClick={() => {
@@ -351,7 +372,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Primary Action Button: Thêm game */}
           <button
             onClick={onOpenAddGameModal}
-            className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#ff2a44] to-[#e02424] px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-[#ff2a44]/25 transition-all hover:brightness-110 active:scale-95"
+            className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#ff2a44] to-[#e02424] px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-[#ff2a44]/25 transition-all hover:brightness-110 active:scale-95 shrink-0 whitespace-nowrap"
             title="Thêm trò chơi mới thủ công"
           >
             <Plus className="h-4 w-4" />
@@ -362,7 +383,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {onOpenSettingsModal && (
             <button
               onClick={onOpenSettingsModal}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2a2e3d] bg-[#161821] text-[#8e95a5] hover:border-[#ff2a44] hover:bg-[#1f2230] hover:text-white transition-all"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2a2e3d] bg-[#161821] text-[#8e95a5] hover:border-[#ff2a44] hover:bg-[#1f2230] hover:text-white transition-all shrink-0"
               title="Cài đặt hệ thống, phím tắt chụp màn hình và thư mục lưu trữ"
             >
               <Settings className="h-4 w-4" />
@@ -370,114 +391,127 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* Google login / avatar */}
-          <AuthBadge />
+          <div className="shrink-0">
+            <AuthBadge />
+          </div>
         </div>
       </div>
 
       {/* Secondary Bar: Filter Tabs, Sorter & Statistics - ONLY IN LIBRARY VIEW */}
       {isLibrary && (
-        <div className="mx-auto flex max-w-7xl items-center justify-between border-t border-[#2a2e3d]/60 px-6 py-2 animate-in fade-in duration-150">
-          {/* Status Filter Tabs */}
-          <div className="flex items-center gap-1">
-            {STATUS_TABS.map((tab) => {
-              const isActive = statusFilter === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => onStatusFilterChange(tab.id)}
-                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${
-                    isActive
-                      ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
-                      : 'text-[#8e95a5] hover:bg-[#161821] hover:text-[#f1f3f7]'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+        <div className="border-t border-[#2a2e3d]/60 bg-[#0e1015]/40 backdrop-blur-sm">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-2 overflow-x-auto no-scrollbar animate-in fade-in duration-150 min-w-0">
+            {/* Status Filter Tabs */}
+            <div className="flex items-center gap-1 shrink-0">
+              {STATUS_TABS.map((tab) => {
+                const isActive = statusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => onStatusFilterChange(tab.id)}
+                    className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                      isActive
+                        ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                        : 'text-[#8e95a5] hover:bg-[#161821] hover:text-[#f1f3f7]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* Right Section: Sort dropdown & Live Stats */}
-          <div className="flex items-center gap-5 text-xs text-[#8e95a5]">
-            {/* Active Process / Tracker Status */}
-            <div className="hidden lg:flex items-center gap-2 border-r border-[#2a2e3d] pr-4">
-              {trackerStatus?.activeGameTitle ? (
-                <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                  </span>
-                  <span>Đang chơi: <strong className="text-white">{trackerStatus.activeGameTitle}</strong></span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-[#8e95a5]">
-                  <Activity className="h-3.5 w-3.5 text-[#8e95a5]" />
-                  <span>Zero-Impact Tracker: Sẵn sàng</span>
+            {/* Right Section: Sort dropdown & Live Stats */}
+            <div className="flex items-center gap-3 xl:gap-4 text-xs text-[#8e95a5] shrink-0">
+              {/* Active Process / Tracker Status */}
+              <div className="hidden xl:flex items-center gap-2 border-r border-[#2a2e3d] pr-4 shrink-0">
+                {trackerStatus?.activeGameTitle ? (
+                  <div
+                    className="flex items-center gap-1.5 text-emerald-400 font-medium whitespace-nowrap"
+                    title={`Đang chơi: ${trackerStatus.activeGameTitle}`}
+                  >
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                    </span>
+                    <span className="truncate max-w-[130px] 2xl:max-w-[200px]">
+                      Đang chơi: <strong className="text-white font-semibold">{trackerStatus.activeGameTitle}</strong>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-[#8e95a5] whitespace-nowrap">
+                    <Activity className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
+                    <span>Tracker: Sẵn sàng</span>
+                  </div>
+                )}
+              </div>
+
+              {/* View Mode Switcher: Grid vs Timeline Tree */}
+              {onLibraryLayoutChange && (
+                <div className="flex items-center rounded-lg border border-[#2a2e3d] bg-[#161821] p-0.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onLibraryLayoutChange('grid')}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all shrink-0 whitespace-nowrap ${
+                      libraryLayout === 'grid'
+                        ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                        : 'text-[#8e95a5] hover:bg-[#202433] hover:text-[#f1f3f7]'
+                    }`}
+                    title="Chế độ xem dạng thẻ / danh mục"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5 shrink-0" />
+                    <span className="hidden xl:inline whitespace-nowrap">Dạng thẻ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onLibraryLayoutChange('timeline')}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all shrink-0 whitespace-nowrap ${
+                      libraryLayout === 'timeline'
+                        ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                        : 'text-[#8e95a5] hover:bg-[#202433] hover:text-[#f1f3f7]'
+                    }`}
+                    title="Chế độ xem dòng thời gian theo từng tháng/năm"
+                  >
+                    <GitCommitVertical className="h-3.5 w-3.5 shrink-0" />
+                    <span className="hidden xl:inline whitespace-nowrap">Dòng thời gian</span>
+                  </button>
                 </div>
               )}
-            </div>
 
-            {/* View Mode Switcher: Grid vs Timeline Tree */}
-            {onLibraryLayoutChange && (
-              <div className="flex items-center rounded-lg border border-[#2a2e3d] bg-[#161821] p-0.5">
-                <button
-                  type="button"
-                  onClick={() => onLibraryLayoutChange('grid')}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
-                    libraryLayout === 'grid'
-                      ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
-                      : 'text-[#8e95a5] hover:bg-[#202433] hover:text-[#f1f3f7]'
-                  }`}
-                  title="Chế độ xem dạng thẻ / danh mục"
+              {/* Sorter */}
+              <div className="flex items-center gap-2 shrink-0">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => onSortChange(e.target.value)}
+                  className="cursor-pointer rounded-md border border-[#2a2e3d] bg-[#161821] px-2.5 py-1 text-xs text-[#f1f3f7] outline-none transition-colors hover:border-[#ff2a44] focus:border-[#ff2a44] shrink-0 whitespace-nowrap"
                 >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Dạng thẻ</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onLibraryLayoutChange('timeline')}
-                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
-                    libraryLayout === 'timeline'
-                      ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
-                      : 'text-[#8e95a5] hover:bg-[#202433] hover:text-[#f1f3f7]'
-                  }`}
-                  title="Chế độ xem dòng thời gian theo từng tháng/năm"
-                >
-                  <GitCommitVertical className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Dòng thời gian</span>
-                </button>
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id} className="bg-[#161821] text-[#f1f3f7]">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
 
-            {/* Sorter */}
-            <div className="flex items-center gap-2">
-              <SlidersHorizontal className="h-3.5 w-3.5 text-[#8e95a5]" />
-              <select
-                value={sortBy}
-                onChange={(e) => onSortChange(e.target.value)}
-                className="cursor-pointer rounded-md border border-[#2a2e3d] bg-[#161821] px-2.5 py-1 text-xs text-[#f1f3f7] outline-none transition-colors hover:border-[#ff2a44] focus:border-[#ff2a44]"
-              >
-                {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id} className="bg-[#161821] text-[#f1f3f7]">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Library Stats */}
-            <div className="flex items-center gap-4 pl-2 font-medium">
-              <div className="flex items-center gap-1.5" title="Tổng số trò chơi">
-                <Library className="h-3.5 w-3.5 text-[#8e95a5]" />
-                <span className="text-[#f1f3f7] font-bold">{totalGames}</span> game
-              </div>
-              <div className="flex items-center gap-1.5" title="Tổng thời gian chơi tích lũy">
-                <Clock className="h-3.5 w-3.5 text-[#ff2a44]" />
-                <span className="text-[#f1f3f7] font-bold">{totalHours}</span> giờ
-              </div>
-              <div className="flex items-center gap-1.5" title="Số game đã phá đảo">
-                <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                <span className="text-[#f1f3f7] font-bold">{completedGamesCount}</span> phá đảo
+              {/* Library Stats */}
+              <div className="hidden lg:flex items-center gap-3.5 pl-2 font-medium shrink-0 whitespace-nowrap border-l border-[#2a2e3d]/60">
+                <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap" title={`Tổng số trò chơi: ${totalGames} game`}>
+                  <Library className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
+                  <span className="text-[#f1f3f7] font-bold">{totalGames}</span>
+                  <span className="hidden xl:inline text-[#8e95a5]">game</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap" title={`Tổng thời gian chơi tích lũy: ${totalHours} giờ`}>
+                  <Clock className="h-3.5 w-3.5 text-[#ff2a44] shrink-0" />
+                  <span className="text-[#f1f3f7] font-bold">{totalHours}</span>
+                  <span className="hidden xl:inline text-[#8e95a5]">giờ</span>
+                  <span className="xl:hidden text-[#8e95a5]">h</span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap" title={`Số game đã phá đảo: ${completedGamesCount} game`}>
+                  <Trophy className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  <span className="text-[#f1f3f7] font-bold">{completedGamesCount}</span>
+                  <span className="hidden xl:inline text-[#8e95a5]">phá đảo</span>
+                </div>
               </div>
             </div>
           </div>

@@ -112,6 +112,12 @@ export const CURATED_STEAM_APP_IDS: Record<string, number> = {
   'project_plague': 2277560,
   'tbh: task bar hero': 3678970,
   'tbh task bar hero': 3678970,
+  'task bar hero': 3678970,
+  'beast of reincarnation': 2001760,
+  'beastofreincarnation': 2001760,
+  'crosshair': 1874980,
+  'crosshair v2': 1874980,
+  'crosshair-v2': 1874980,
   'bombanana! demo': 4747510,
   'how to fish': 4001890,
   'mimesis': 2827200,
@@ -135,36 +141,44 @@ export const NON_STEAM_COVERS: Record<string, { poster: string; banner: string }
     banner: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3764200/library_hero.jpg'
   },
   'liên minh huyền thoại': {
-    poster: 'https://cdn1.epicgames.com/offer/24b9b5e323bc40eea252a10cdd3b2f10/EGS_LeagueofLegends_RiotGames_S2_1200x1600-7ae610f443b09eb23e803e670d8a57ec',
-    banner: 'https://cdn1.epicgames.com/offer/24b9b5e323bc40eea252a10cdd3b2f10/EGS_LeagueofLegends_RiotGames_S1_2560x1440-804791e8432a63273eef2507efbc4e6e'
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/coc99o.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/coc99o.jpg'
   },
   'league of legends': {
-    poster: 'https://cdn1.epicgames.com/offer/24b9b5e323bc40eea252a10cdd3b2f10/EGS_LeagueofLegends_RiotGames_S2_1200x1600-7ae610f443b09eb23e803e670d8a57ec',
-    banner: 'https://cdn1.epicgames.com/offer/24b9b5e323bc40eea252a10cdd3b2f10/EGS_LeagueofLegends_RiotGames_S1_2560x1440-804791e8432a63273eef2507efbc4e6e'
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/coc99o.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/coc99o.jpg'
   },
   'valorant': {
-    poster: 'https://cdn1.epicgames.com/offer/cbd5b3d313a54b1ca500e261a3407c58/EGS_VALORANT_RiotGames_S2_1200x1600-474be60580327f29a00a2ea94c7b5a86',
-    banner: 'https://cdn1.epicgames.com/offer/cbd5b3d313a54b1ca500e261a3407c58/EGS_VALORANT_RiotGames_S1_2560x1440-025516f4cb4fb155dd5d96a60395780a'
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/cocqbp.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/cocqbp.jpg'
   },
   'bloodborne': {
-    poster: 'https://cdn2.steamgriddb.com/grid/6d9de8a97fb84537a236d95e8dfc4f70.png',
-    banner: 'https://cdn2.steamgriddb.com/hero/6d9de8a97fb84537a236d95e8dfc4f70.png'
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/cob99l.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/cob99l.jpg'
+  },
+  'roblox': {
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/cociyw.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/cociyw.jpg'
   },
   'roblox player': {
-    poster: 'https://images.rbxcdn.com/f04473ef7c0c16999a0ff3c35f9919f2.png',
-    banner: 'https://images.rbxcdn.com/1393661be4910e3d2319ef58df73a9eb.jpg'
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/cociyw.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/cociyw.jpg'
   },
   'roblox player beta': {
-    poster: 'https://images.rbxcdn.com/f04473ef7c0c16999a0ff3c35f9919f2.png',
-    banner: 'https://images.rbxcdn.com/1393661be4910e3d2319ef58df73a9eb.jpg'
+    poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/cociyw.jpg',
+    banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/cociyw.jpg'
   },
   'the legend of zelda - breath of the wild': {
     poster: 'https://images.igdb.com/igdb/image/upload/t_cover_big/co3p2d.png',
     banner: 'https://images.igdb.com/igdb/image/upload/t_1080p/sc6t4c.jpg'
   },
   'crosshair': {
-    poster: 'https://cdn1.epicgames.com/spt-assets/7fbf2f8a48b843d1a337836371cf7381/crosshair-v2-1f7x2.png',
-    banner: 'https://cdn1.epicgames.com/spt-assets/7fbf2f8a48b843d1a337836371cf7381/crosshair-v2-1718z.png'
+    poster: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1874980/library_600x900_2x.jpg',
+    banner: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1874980/library_hero.jpg'
+  },
+  'crosshair v2': {
+    poster: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1874980/library_600x900_2x.jpg',
+    banner: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1874980/library_hero.jpg'
   }
 };
 
@@ -974,27 +988,34 @@ export async function fetchWikipediaPoster(
   const fetchImpl = opts.fetchImpl || fetch;
   const headers = { 'User-Agent': 'GameVault/1.0 (game library tracker)' };
   try {
-    const u1 = `${WIKI_API}?action=query&format=json&prop=images&imlimit=20&redirects=1&titles=${encodeURIComponent(clean)}`;
-    const r1 = await timedFetch(u1, fetchImpl, SEARCH_TIMEOUT_MS, { method: 'GET', headers });
-    if (!r1 || !r1.ok) return null;
-    const j1 = await r1.json();
-    const page = Object.values(j1?.query?.pages || {})[0] as any;
-    const files = (page?.images || [])
-      .map((i: any) => i?.title)
-      .filter((t: any) => typeof t === 'string');
-    const cover =
-      files.find((f: string) => /cover|box ?art/i.test(f)) ||
-      files.find((f: string) => /\.(jpe?g|png)$/i.test(f));
-    if (!cover) return null;
+    const titlesToTry = [clean];
+    const expanded = clean.replace(/([a-z])([A-Z0-9])/g, '$1 $2').trim();
+    if (expanded !== clean) titlesToTry.push(expanded);
 
-    const u2 = `${WIKI_API}?action=query&format=json&prop=imageinfo&iiprop=url&iiurlwidth=600&redirects=1&titles=${encodeURIComponent(cover)}`;
-    const r2 = await timedFetch(u2, fetchImpl, SEARCH_TIMEOUT_MS, { method: 'GET', headers });
-    if (!r2 || !r2.ok) return null;
-    const j2 = await r2.json();
-    const p2 = Object.values(j2?.query?.pages || {})[0] as any;
-    const url = p2?.imageinfo?.[0]?.thumburl;
-    if (typeof url !== 'string' || !/^https?:\/\/upload\.wikimedia\.org\//i.test(url)) return null;
-    return url.split('?')[0];
+    for (const titleCandidate of titlesToTry) {
+      const u1 = `${WIKI_API}?action=query&format=json&prop=images&imlimit=20&redirects=1&titles=${encodeURIComponent(titleCandidate)}`;
+      const r1 = await timedFetch(u1, fetchImpl, SEARCH_TIMEOUT_MS, { method: 'GET', headers });
+      if (!r1 || !r1.ok) continue;
+      const j1 = await r1.json();
+      const page = Object.values(j1?.query?.pages || {})[0] as any;
+      const files = (page?.images || [])
+        .map((i: any) => i?.title)
+        .filter((t: any) => typeof t === 'string');
+      const cover =
+        files.find((f: string) => /cover|box ?art|key ?art|poster/i.test(f)) ||
+        files.find((f: string) => /\.(jpe?g|png)$/i.test(f));
+      if (!cover) continue;
+
+      const u2 = `${WIKI_API}?action=query&format=json&prop=imageinfo&iiprop=url&iiurlwidth=600&redirects=1&titles=${encodeURIComponent(cover)}`;
+      const r2 = await timedFetch(u2, fetchImpl, SEARCH_TIMEOUT_MS, { method: 'GET', headers });
+      if (!r2 || !r2.ok) continue;
+      const j2 = await r2.json();
+      const p2 = Object.values(j2?.query?.pages || {})[0] as any;
+      const url = p2?.imageinfo?.[0]?.thumburl;
+      if (typeof url !== 'string' || !/^https?:\/\/upload\.wikimedia\.org\//i.test(url)) continue;
+      return url.split('?')[0];
+    }
+    return null;
   } catch {
     return null;
   }
@@ -1359,7 +1380,13 @@ export function sanitizeSteamId(id?: number | null): number | null {
  * "sekiro - Shortcut" → "sekiro".
  */
 function cleanTitleForLookup(title: string): string {
-  return (title || '').replace(/\s*[—–-]\s*shortcut\s*$/i, '').trim();
+  let cleaned = (title || '')
+    .replace(/\s*[—–-]\s*shortcut\s*$/i, '')
+    .replace(/\s*[—–-]\s*client\s*$/i, '')
+    .replace(/\s+client$/i, '')
+    .replace(/\s+player(\s+beta)?$/i, '')
+    .trim();
+  return cleaned;
 }
 
 /**
@@ -1653,7 +1680,9 @@ async function resolveWebCoversForGame(
     } catch {}
   }
 
-  return { poster: art.posterUrl, banner: art.bannerUrl, verified: art.verified };
+  const poster = art.posterUrl || art.bannerUrl;
+  const banner = art.bannerUrl || art.posterUrl;
+  return { poster, banner, verified: art.verified };
 }
 
 /** HEAD-checks any URL, treating network errors as unhealthy. */
@@ -1675,30 +1704,27 @@ async function isUrlHealthy(url: string, opts: LiveResolveOptions): Promise<bool
 }
 
 /**
- * Repairs saved Steam CDN cover URLs that no longer resolve (404), e.g.
- * URLs written blindly before verification existed. Re-resolves through
- * the full chain and replaces a dead field only with a VERIFIED URL —
- * never guesses while offline and never touches non-steamstatic URLs
- * (user-added covers) or local file paths.
+ * Repairs saved remote cover URLs that no longer resolve (404/403), e.g.
+ * dead Steam CDN URLs or old expired Epic/rbxcdn assets.
  */
-async function repairDeadSteamStaticCovers(db: any, opts: LiveResolveOptions): Promise<number> {
+async function repairDeadWebCovers(db: any, opts: LiveResolveOptions): Promise<number> {
   const throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
   let repaired = 0;
   try {
     const rows = db
       .prepare(
         `SELECT id, title, exe_path, steam_id, cover_url, banner_url FROM games
-         WHERE (cover_url IS NOT NULL AND cover_url != '' AND cover_url LIKE '%steamstatic%')
-            OR (banner_url IS NOT NULL AND banner_url != '' AND banner_url LIKE '%steamstatic%')`
+         WHERE (cover_url IS NOT NULL AND cover_url != '' AND (cover_url LIKE '%steamstatic%' OR cover_url LIKE '%epicgames%' OR cover_url LIKE '%rbxcdn%'))
+            OR (banner_url IS NOT NULL AND banner_url != '' AND (banner_url LIKE '%steamstatic%' OR banner_url LIKE '%epicgames%' OR banner_url LIKE '%rbxcdn%'))`
       )
       .all() as any[];
 
     for (const g of rows) {
       const deadFields: Array<'cover_url' | 'banner_url'> = [];
-      if (isSteamStaticUrl(g.cover_url) && !(await isUrlHealthy(g.cover_url, opts))) {
+      if (g.cover_url && g.cover_url.startsWith('http') && !(await isUrlHealthy(g.cover_url, opts))) {
         deadFields.push('cover_url');
       }
-      if (isSteamStaticUrl(g.banner_url) && !(await isUrlHealthy(g.banner_url, opts))) {
+      if (g.banner_url && g.banner_url.startsWith('http') && !(await isUrlHealthy(g.banner_url, opts))) {
         deadFields.push('banner_url');
       }
       if (deadFields.length === 0) continue;
@@ -1708,8 +1734,10 @@ async function repairDeadSteamStaticCovers(db: any, opts: LiveResolveOptions): P
       if (!resolved.verified) continue; // offline: leave dead URL alone, retry next run
 
       const updates: Array<[string, string]> = [];
-      if (deadFields.includes('cover_url') && resolved.poster) updates.push(['cover_url', resolved.poster]);
-      if (deadFields.includes('banner_url') && resolved.banner) updates.push(['banner_url', resolved.banner]);
+      const posterCandidate = resolved.poster || resolved.banner;
+      const bannerCandidate = resolved.banner || resolved.poster;
+      if (deadFields.includes('cover_url') && posterCandidate) updates.push(['cover_url', posterCandidate]);
+      if (deadFields.includes('banner_url') && bannerCandidate) updates.push(['banner_url', bannerCandidate]);
       if (updates.length === 0) continue;
 
       try {
@@ -1722,17 +1750,16 @@ async function repairDeadSteamStaticCovers(db: any, opts: LiveResolveOptions): P
       } catch {}
     }
   } catch (err) {
-    console.error('Error repairing dead steamstatic covers:', err);
+    console.error('Error repairing dead web covers:', err);
   }
   return repaired;
 }
 
 /**
- * Automatically enriches all games in the database that lack cover art,
- * then repairs saved Steam CDN URLs that no longer resolve.
- * Resolution: Steam AppID (param, folder detection, curated dictionary) →
- * live steamcommunity search → verified Fastly CDN → E:\Game screenshot
- * fallback. Manually-set covers are never overwritten.
+ * Automatically enriches all games in the database that lack cover art or have dead local/web paths,
+ * then repairs saved CDN URLs that no longer resolve.
+ * Resolution: Curated dictionary / non-Steam map → Steam AppID (param, folder detection) →
+ * live steamcommunity search → verified Fastly CDN / IGDB / Wikipedia.
  */
 export async function autoEnrichAllGameCovers(
   targetDb?: any,
@@ -1753,28 +1780,35 @@ export async function autoEnrichAllGameCovers(
   let updated = 0;
 
   try {
-    const games = db.prepare("SELECT id, title, exe_name, exe_path, steam_id, cover_url, banner_url FROM games WHERE cover_url IS NULL OR cover_url = ''").all() as any[];
-
-    const updateStmt = db.prepare('UPDATE games SET cover_url = ?, banner_url = COALESCE(banner_url, ?) WHERE id = ?');
-    const bannerOnlyStmt = db.prepare('UPDATE games SET banner_url = ? WHERE id = ?');
+    const games = db.prepare('SELECT id, title, exe_name, exe_path, steam_id, cover_url, banner_url FROM games').all() as any[];
 
     for (const g of games) {
+      const isCoverHttp = g.cover_url && (g.cover_url.startsWith('http://') || g.cover_url.startsWith('https://'));
+      const isCoverMissingOrNonCanonical = !isCoverHttp;
+
+      if (!isCoverMissingOrNonCanonical) {
+        continue;
+      }
+
       const { poster, banner } = await resolveWebCoversForGame(db, g, opts);
       if (throttleMs > 0) await sleep(throttleMs);
 
-      // Canonical URLs only — local screenshots are never auto-covers so
-      // every user's library shows identical art (leaderboard-safe). Users
-      // can still set personal art manually via the cover modal.
-      if (poster) {
-        updateStmt.run(poster, banner || poster, g.id);
+      const targetPoster = poster || banner;
+      const targetBanner = banner || poster;
+
+      if (targetPoster) {
+        db.prepare(
+          "UPDATE games SET cover_url = ?, banner_url = COALESCE(banner_url, ?), updated_at = datetime('now', 'localtime') WHERE id = ?"
+        ).run(targetPoster, targetBanner || targetPoster, g.id);
         updated++;
-      } else if (banner) {
-        bannerOnlyStmt.run(banner, g.id);
-        updated++;
+      } else if (targetBanner) {
+        db.prepare(
+          "UPDATE games SET banner_url = ?, updated_at = datetime('now', 'localtime') WHERE id = ?"
+        ).run(targetBanner, g.id);
       }
     }
 
-    await repairDeadSteamStaticCovers(db, opts);
+    await repairDeadWebCovers(db, opts);
   } catch (err) {
     console.error('Error auto-enriching game covers:', err);
   }
