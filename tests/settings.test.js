@@ -32,15 +32,17 @@ describe('Settings & Customizable Screenshot Hotkey Suite', () => {
     assert.equal(s.screenshotHotkeyVk, 0x75);
     assert.equal(s.autoDetectGames, true);
     assert.equal(s.pollIntervalSeconds, 5);
+    assert.equal(s.hddMode, true);
   });
 
-  it('persists and retrieves updated settings', () => {
+  it('persists and retrieves updated settings including hddMode', () => {
     const updated = saveAppSettings({
       screenshotEnabled: false,
       screenshotHotkey: 'F12',
       screenshotHotkeyVk: 0x7b,
       screenshotsDir: 'D:\\TestScreenshots',
       mediaBaseDir: 'D:\\TestMedia',
+      hddMode: false,
       autoDetectGames: false,
       pollIntervalSeconds: 3,
       googleApiKey: 'AIzaSyTestKey123',
@@ -52,6 +54,7 @@ describe('Settings & Customizable Screenshot Hotkey Suite', () => {
     assert.equal(updated.screenshotHotkeyVk, 0x7b);
     assert.equal(updated.screenshotsDir, 'D:\\TestScreenshots');
     assert.equal(updated.mediaBaseDir, 'D:\\TestMedia');
+    assert.equal(updated.hddMode, false);
     assert.equal(updated.autoDetectGames, false);
     assert.equal(updated.pollIntervalSeconds, 3);
     assert.equal(updated.googleApiKey, 'AIzaSyTestKey123');
@@ -62,6 +65,7 @@ describe('Settings & Customizable Screenshot Hotkey Suite', () => {
     assert.equal(loaded.screenshotEnabled, false);
     assert.equal(loaded.screenshotHotkey, 'F12');
     assert.equal(loaded.screenshotHotkeyVk, 0x7b);
+    assert.equal(loaded.hddMode, false);
   });
 
   it('F6CaptureManager dynamically updates hotkey, paths, and enabled state', () => {
@@ -85,8 +89,14 @@ describe('Settings & Customizable Screenshot Hotkey Suite', () => {
     assert.equal(manager.screenshotsDir, 'D:\\NewScreenshots');
     assert.equal(manager.mediaDir, 'D:\\NewMedia');
 
+    // Toggle HDD Mode
+    assert.equal(manager.hddMode, true);
+    manager.setHddMode(false);
+    assert.equal(manager.hddMode, false);
+
     const status = manager.getStatus();
     assert.equal(status.isEnabled, false);
+    assert.equal(status.hddMode, false);
     assert.equal(status.hotkey, 'PrintScreen');
     assert.equal(status.hotkeyVk, 0x2c);
     assert.equal(status.screenshotsDir, 'D:\\NewScreenshots');

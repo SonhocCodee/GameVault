@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
+
+const execAsync = promisify(exec);
 import {
   getDb,
   recordPendingF6Capture,
@@ -47,6 +51,7 @@ export class F6CaptureManager {
   public mediaDir: string;
   public isF6Down: boolean = false;
   public isEnabled: boolean = true;
+  public hddMode: boolean = true;
   public hotkeyVk: number = 0x75; // VK_F6
   public hotkeyName: string = 'F6';
   private pollInterval: NodeJS.Timeout | null = null;
@@ -96,6 +101,77 @@ export class F6CaptureManager {
     if (mediaDir) {
       this.mediaDir = mediaDir;
     }
+  }
+
+  public setHddMode(mode: boolean): void {
+    this.hddMode = mode;
+    console.log(`[F6Capture] HDD Mode ${mode ? 'ENABLED (buffer & sync)' : 'DISABLED (direct save / SSD)'}`);
+  }
+
+  /**
+   * Directly captures primary screen and saves directly to the game's media folder
+   * without creating temporary buffer files, optimizing SSD endurance.
+   */
+  public async captureDirectToGameFolder(
+    gameId: number,
+    gameTitle: string,
+    now: Date = new Date(),
+    captureId?: number
+  ): Promise<F6SyncResult | null> {
+    try {
+      const { fullPath: destFolder } = ensureGameFolder(gameTitle, this.mediaDir);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const timeStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const filename = `Screenshot-F6-${timeStr}.png`;
+      const targetPath = path.join(destFolder, filename);
+
+      const psScript = `
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+$bmp.Save('${targetPath.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose()
+$bmp.Dispose()
+`.trim();
+
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+      await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`);
+
+      if (fs.existsSync(targetPath)) {
+        if (captureId) {
+          markF6CaptureMatched(captureId, this.db);
+        }
+        recordScreenshotSync(
+          {
+            game_id: gameId,
+            original_filename: filename,
+            target_path: targetPath,
+            file_timestamp: now.toISOString(),
+          },
+          this.db
+        );
+
+        const resultItem: F6SyncResult = {
+          file: filename,
+          gameTitle,
+          targetPath,
+          timestamp: now.toISOString(),
+        };
+
+        if (this.onScreenshotSynced) {
+          this.onScreenshotSynced(resultItem);
+        }
+
+        console.log(`[F6Capture] Direct SSD capture saved: ${targetPath}`);
+        return resultItem;
+      }
+    } catch (err) {
+      // Direct capture fallback to buffer watcher
+      console.warn('[F6Capture] Direct capture fell back to watcher:', err);
+    }
+    return null;
   }
 
   /**
@@ -180,11 +256,16 @@ export class F6CaptureManager {
 
     if (activeGame) {
       const timestampIso = now.toISOString();
-      recordPendingF6Capture(activeGame.id, activeGame.title, timestampIso, this.db);
-      console.log(`[F6Capture] Logged capture token for "${activeGame.title}" at ${timestampIso}`);
+      const captureId = recordPendingF6Capture(activeGame.id, activeGame.title, timestampIso, this.db);
+      console.log(`[F6Capture] Logged capture token for "${activeGame.title}" at ${timestampIso} (HDD Mode: ${this.hddMode ? 'ON' : 'OFF'})`);
 
       if (this.onF6Captured) {
         this.onF6Captured({ gameTitle: activeGame.title, timestamp: now });
+      }
+
+      // If HDD Mode is disabled (SSD mode), attempt direct capture to avoid double-writes
+      if (!this.hddMode && process.platform === 'win32') {
+        this.captureDirectToGameFolder(activeGame.id, activeGame.title, now, captureId);
       }
 
       // Proactively schedule sync sweeps to pick up file as soon as screenshot tool writes it
@@ -350,6 +431,7 @@ export class F6CaptureManager {
     const unmatchedCaptures = getUnmatchedF6Captures(this.db);
     return {
       isEnabled: this.isEnabled,
+      hddMode: this.hddMode,
       hotkey: this.hotkeyName,
       hotkeyVk: this.hotkeyVk,
       screenshotsDir: this.screenshotsDir,

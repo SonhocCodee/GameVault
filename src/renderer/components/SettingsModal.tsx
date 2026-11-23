@@ -20,6 +20,8 @@ import {
   Activity,
   CheckCircle2,
   Loader2,
+  HardDrive,
+  Zap,
 } from 'lucide-react';
 import type { AppSettings, F6ProcessStatus, FpsStatus, HardwareInfo } from '../../shared/types.js';
 
@@ -66,6 +68,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [screenshotsDir, setScreenshotsDir] = useState<string>('');
   const [mediaBaseDir, setMediaBaseDir] = useState<string>('');
   const [vaultRoot, setVaultRoot] = useState<string>('');
+  const [hddMode, setHddMode] = useState<boolean>(true);
   const [autoDetectGames, setAutoDetectGames] = useState<boolean>(true);
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState<number>(5);
   const [amdWatcherEnabled, setAmdWatcherEnabled] = useState<boolean>(true);
@@ -94,6 +97,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setScreenshotsDir(data.screenshotsDir);
         setMediaBaseDir(data.mediaBaseDir);
         setVaultRoot(data.vaultRoot);
+        setHddMode(data.hddMode !== undefined ? data.hddMode : true);
         setAutoDetectGames(data.autoDetectGames);
         setPollIntervalSeconds(data.pollIntervalSeconds);
         setAmdWatcherEnabled(data.amdWatcherEnabled);
@@ -235,6 +239,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           screenshotsDir,
           mediaBaseDir,
           vaultRoot,
+          hddMode,
           autoDetectGames,
           pollIntervalSeconds,
           amdWatcherEnabled,
@@ -633,6 +638,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* TAB 2: STORAGE & PATHS */}
                 {activeTab === 'paths' && (
                   <div className="space-y-4">
+                    {/* HDD Mode Toggle Card & Notice */}
+                    <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                              hddMode
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            }`}
+                          >
+                            {hddMode ? <HardDrive className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-white">Chế độ HDD (HDD Mode - Lưu tạm &amp; Đồng bộ sau)</span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                  hddMode
+                                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                }`}
+                              >
+                                {hddMode ? 'Đang BẬT (Dành cho HDD)' : 'Đang TẮT (Tối ưu cho SSD)'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#8e95a5]">
+                              {hddMode
+                                ? 'Ảnh chụp lưu tạm vào ổ nhanh (SSD) rồi mới chuyển sang ổ HDD để HDD không bị quay liên tục khi chơi game.'
+                                : 'Ảnh chụp lưu thẳng vào thư mục game trong ổ đích, không qua bước lưu tạm để bảo vệ tuổi thọ SSD.'}
+                            </p>
+                          </div>
+                        </div>
+                        {/* Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => setHddMode(!hddMode)}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            hddMode ? 'bg-[#ff2a44]' : 'bg-zinc-700'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                              hddMode ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Notice Callout */}
+                      <div
+                        className={`rounded-lg border p-3 text-xs leading-relaxed ${
+                          hddMode
+                            ? 'border-amber-500/30 bg-amber-500/10 text-amber-200/90'
+                            : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200/90'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold">Khuyến nghị lưu trữ: </span>
+                            {hddMode ? (
+                              <>
+                                Nếu thư mục lưu trữ bạn chọn là <strong>ổ cứng cơ (HDD)</strong>, hãy <strong>BẬT</strong> chế độ này để ổ HDD được ngủ yên (spin down) khi chơi game.
+                                Nếu ổ đích là <strong>SSD</strong>, bạn <strong>nên TẮT</strong> để ảnh lưu thẳng vào thư mục game, tránh việc ghi tạm rồi copy làm hao mòn tuổi thọ (TBW) của SSD vô ích.
+                              </>
+                            ) : (
+                              <>
+                                Bạn đang tắt HDD Mode (chế độ trực tiếp). Rất phù hợp nếu thư mục đích nằm trên <strong>ổ SSD</strong>.
+                                Ảnh chụp sẽ được lưu thẳng vào thư mục game, chỉ cần chọn đúng 1 ổ đích bên dưới!
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Media Directory */}
                     <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-2">
                       <div className="flex items-center justify-between">
@@ -661,33 +743,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       />
                     </div>
 
-                    {/* Screenshots Directory (Source) */}
-                    <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <Camera className="h-4 w-4 text-amber-400" />
-                            <span>Thư mục Chụp màn hình nguồn (Screenshots folder):</span>
-                          </label>
-                          <p className="text-[11px] text-[#8e95a5]">
-                            Mặc định là <code className="text-white">Pictures\Screenshots</code>. Nơi sinh ra file chụp trước khi chuyển vào E:\Game.
-                          </p>
+                    {/* Screenshots Directory (Source - Only visible when HDD Mode is ON) */}
+                    {hddMode && (
+                      <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <Camera className="h-4 w-4 text-amber-400" />
+                              <span>Thư mục Chụp màn hình nguồn (lưu tạm):</span>
+                            </label>
+                            <p className="text-[11px] text-[#8e95a5]">
+                              Mặc định là <code className="text-white">Pictures\Screenshots</code>. Nơi sinh ra file chụp tạm trước khi chuyển vào HDD.
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleBrowseFolder('screenshots')}
+                            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#202433] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#ff2a44] hover:bg-[#ff2a44]/10 hover:text-[#ff2a44]"
+                          >
+                            <FolderOpen className="h-3.5 w-3.5" />
+                            <span>Duyệt thư mục...</span>
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleBrowseFolder('screenshots')}
-                          className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#202433] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#ff2a44] hover:bg-[#ff2a44]/10 hover:text-[#ff2a44]"
-                        >
-                          <FolderOpen className="h-3.5 w-3.5" />
-                          <span>Duyệt thư mục...</span>
-                        </button>
+                        <input
+                          type="text"
+                          value={screenshotsDir}
+                          onChange={(e) => setScreenshotsDir(e.target.value)}
+                          className="w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#ff2a44]"
+                        />
                       </div>
-                      <input
-                        type="text"
-                        value={screenshotsDir}
-                        onChange={(e) => setScreenshotsDir(e.target.value)}
-                        className="w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 font-mono text-xs text-white outline-none focus:border-[#ff2a44]"
-                      />
-                    </div>
+                    )}
 
                     {/* Save Vault Root */}
                     <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-2">

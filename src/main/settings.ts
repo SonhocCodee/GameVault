@@ -71,6 +71,7 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
   const appStartupStr = getSetting('app_startup_enabled', customDb);
   const setupCompletedStr = getSetting('setup_completed', customDb);
   const playtimeWatchStr = getSetting('playtime_watch_enabled', customDb);
+  const hddModeStr = getSetting('hdd_mode', customDb);
   const googleApiKey = getSetting('google_api_key', customDb) || '';
   const googleCseId = getSetting('google_cse_id', customDb) || '';
 
@@ -97,6 +98,9 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
     // Watchdog defaults ON: installed from first run, keeps counting playtime
     // while GameVault itself is closed
     playtimeWatchEnabled: playtimeWatchStr === null ? true : playtimeWatchStr === 'true',
+    // HDD Mode defaults ON: buffers screenshots to protect spinning HDD drives.
+    // When disabled (SSD mode), saves directly to game media folder to minimize SSD wear.
+    hddMode: hddModeStr === null ? true : hddModeStr === 'true',
     googleApiKey,
     googleCseId,
   };
@@ -152,6 +156,9 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
   }
   if (patch.playtimeWatchEnabled !== undefined) {
     setSetting('playtime_watch_enabled', patch.playtimeWatchEnabled ? 'true' : 'false', customDb);
+  }
+  if (patch.hddMode !== undefined) {
+    setSetting('hdd_mode', patch.hddMode ? 'true' : 'false', customDb);
   }
   if (patch.googleApiKey !== undefined) {
     setSetting('google_api_key', patch.googleApiKey, customDb);

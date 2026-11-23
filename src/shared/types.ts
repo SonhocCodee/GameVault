@@ -345,6 +345,8 @@ export interface AppSettings {
   setupCompleted: boolean;
   /** Independent background watchdog counts playtime even while GameVault is closed. */
   playtimeWatchEnabled: boolean;
+  /** HDD Mode: buffer screenshots on fast drive before syncing to avoid spinning up HDD during gameplay. If disabled (SSD mode), saves directly to game media folder. */
+  hddMode: boolean;
   googleApiKey: string;
   googleCseId: string;
 }

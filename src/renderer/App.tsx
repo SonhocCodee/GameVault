@@ -122,6 +122,7 @@ export default function App() {
     mediaBaseDir: '',
     screenshotsDir: '',
     vaultRoot: '',
+    hddMode: true,
   });
 
   useEffect(() => {
@@ -134,6 +135,7 @@ export default function App() {
               mediaBaseDir: s.mediaBaseDir || 'E:\\Game',
               screenshotsDir: s.screenshotsDir || '',
               vaultRoot: s.vaultRoot || 'E:\\Game\\SaveVault',
+              hddMode: s.hddMode !== undefined ? s.hddMode : true,
             });
             setFirstRunOpen(true);
           }
@@ -162,6 +164,7 @@ export default function App() {
       mediaBaseDir: firstRunPaths.mediaBaseDir.trim(),
       screenshotsDir: firstRunPaths.screenshotsDir.trim(),
       vaultRoot: firstRunPaths.vaultRoot.trim(),
+      hddMode: firstRunPaths.hddMode,
       setupCompleted: true,
     });
     setFirstRunOpen(false);
@@ -994,6 +997,8 @@ export default function App() {
           mediaBaseDir={firstRunPaths.mediaBaseDir}
           screenshotsDir={firstRunPaths.screenshotsDir}
           vaultRoot={firstRunPaths.vaultRoot}
+          hddMode={firstRunPaths.hddMode}
+          onHddModeChange={(enabled) => setFirstRunPaths((p) => ({ ...p, hddMode: enabled }))}
           onFieldChange={(field, value) => {
             if (field === 'media') setFirstRunPaths((p) => ({ ...p, mediaBaseDir: value }));
             else if (field === 'screenshots') setFirstRunPaths((p) => ({ ...p, screenshotsDir: value }));
