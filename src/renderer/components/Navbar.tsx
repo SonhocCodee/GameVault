@@ -19,6 +19,7 @@ import {
   LayoutGrid,
   GitCommitVertical,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import type { GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
@@ -97,6 +98,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isLibrary = currentView ? currentView === 'library' : !isDetailView;
   const isCommunity = currentView === 'community';
   const isDetail = currentView ? currentView === 'detail' : isDetailView;
+
+  const [isSyncingMedia, setIsSyncingMedia] = useState<boolean>(false);
+
+  useEffect(() => {
+    window.electronAPI?.getActiveMediaSyncStatus?.().then((status) => {
+      setIsSyncingMedia(!!status?.isRunning);
+    }).catch(() => {});
+
+    const unsub = window.electronAPI?.onDriveMediaProgress?.((p) => {
+      setIsSyncingMedia(p.percent < 100);
+    });
+    return () => unsub?.();
+  }, []);
 
   // Click outside listener for Tools dropdown
   useEffect(() => {
@@ -234,11 +248,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Direct Prominent Sync Button */}
           <button
             onClick={onOpenSyncModal}
-            className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs font-bold text-sky-400 hover:border-sky-400 hover:bg-sky-500/20 hover:text-white transition-all shadow-sm active:scale-95"
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-all shadow-sm active:scale-95 ${
+              isSyncingMedia
+                ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300 animate-pulse'
+                : 'border-sky-500/40 bg-sky-500/10 text-sky-400 hover:border-sky-400 hover:bg-sky-500/20 hover:text-white'
+            }`}
             title="Mở Trung tâm Đồng bộ (Cloud D1 & Google Drive)"
           >
-            <RefreshCw className="h-3.5 w-3.5 text-sky-400" />
-            <span>Đồng bộ</span>
+            {isSyncingMedia ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 text-emerald-400 animate-spin" />
+                <span>Đang đồng bộ...</span>
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3.5 w-3.5 text-sky-400" />
+                <span>Đồng bộ</span>
+              </>
+            )}
           </button>
 
           {/* Quick Tools Dropdown (F6 Sync, AMD Import, Steam Wishlist) */}

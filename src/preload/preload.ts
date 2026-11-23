@@ -47,6 +47,7 @@ import type {
   DriveMediaStats,
   DriveStorageQuota,
   DriveMediaProgress,
+  ActiveMediaSyncStatus,
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
@@ -293,6 +294,9 @@ const electronAPI: ElectronAPI = {
   },
   getDriveStorageQuota: (): Promise<DriveStorageQuota> => {
     return ipcRenderer.invoke('drive:getStorageQuota');
+  },
+  getActiveMediaSyncStatus: (): Promise<ActiveMediaSyncStatus> => {
+    return ipcRenderer.invoke('drive:getActiveMediaSync');
   },
 
   // Settings & System Controls

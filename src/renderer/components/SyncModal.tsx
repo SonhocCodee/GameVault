@@ -102,7 +102,34 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
       const unsub = window.electronAPI?.onDriveMediaProgress?.((p) => {
         setDriveProgress(p);
+        if (p.type === 'upload') setDriveUploading(true);
+        if (p.type === 'download') setDriveDownloading(true);
       });
+
+      if (window.electronAPI?.getActiveMediaSyncStatus) {
+        window.electronAPI.getActiveMediaSyncStatus().then((status) => {
+          if (status.isRunning) {
+            if (status.type === 'upload') setDriveUploading(true);
+            if (status.type === 'download') setDriveDownloading(true);
+            if (status.progress) setDriveProgress(status.progress);
+          } else if (status.result) {
+            if (status.type === 'upload') {
+              const res = status.result;
+              const mb = (res.bytesUploaded / (1024 * 1024)).toFixed(1);
+              let msg = '';
+              if (res.filesUploaded > 0) {
+                msg = `Đã sao lưu thành công ${res.filesUploaded} ảnh (${mb} MB) từ ${res.gamesProcessed} game lên Google Drive!`;
+              } else {
+                msg = `Toàn bộ ảnh từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước.`;
+              }
+              if (res.errors && res.errors.length > 0) {
+                msg += ` (Có ${res.errors.length} ảnh gặp lỗi tải)`;
+              }
+              setDriveResult(msg);
+            }
+          }
+        }).catch(console.error);
+      }
 
       return () => {
         unsub?.();
@@ -639,7 +666,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <span className="text-[10px] font-normal text-[#8e95a5]">
                     {driveUploading
                       ? driveProgress
-                        ? `Đang đẩy: ${driveProgress.percent}% (${driveProgress.current}/${driveProgress.total} ảnh)`
+                        ? `Đang đẩy: ${driveProgress.percent}% (${driveProgress.current}/${driveProgress.total} ảnh) • ${driveProgress.currentGame}`
                         : 'Đang đẩy ảnh lên Drive...'
                       : 'Quét E:\\Game và đẩy ảnh mới lên'}
                   </span>
@@ -818,7 +845,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-[#2a2e3d] px-6 py-3.5 bg-[#0e1015]">
           <div className="text-[11px] text-[#8e95a5]">
-            💡 Gợi ý: Bật đồng bộ để game trên laptop và PC luôn cập nhật cùng nhau.
+            {driveUploading || driveDownloading
+              ? '⚡ Bạn có thể đóng cửa sổ này, tiến trình đồng bộ vẫn sẽ tiếp tục chạy ngầm trong background.'
+              : '💡 Gợi ý: Bật đồng bộ để game trên laptop và PC luôn cập nhật cùng nhau.'}
           </div>
           <button
             onClick={onClose}

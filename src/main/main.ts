@@ -61,6 +61,7 @@ import {
   getDriveMediaStats,
   listDriveGameBackups,
   getDriveStorageQuota,
+  getActiveMediaSyncStatus,
 } from './drive.js';
 import {
   submitReview,
@@ -736,6 +737,9 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('drive:getStorageQuota', async () => {
     return getDriveStorageQuota();
+  });
+  ipcMain.handle('drive:getActiveMediaSync', async () => {
+    return getActiveMediaSyncStatus();
   });
 }
 

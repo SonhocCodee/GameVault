@@ -400,6 +400,14 @@ export interface DriveMediaProgress {
   bytesTransferred: number;
 }
 
+export interface ActiveMediaSyncStatus {
+  isRunning: boolean;
+  type?: 'upload' | 'download';
+  progress?: DriveMediaProgress | null;
+  result?: any;
+  error?: string | null;
+}
+
 export interface TrackerStatus {
   isTracking: boolean;
   activeGameTitle: string | null;
@@ -610,6 +618,7 @@ export interface ElectronAPI {
   downloadMediaFromDrive?(options?: { gameTitle?: string; localMediaBaseDir?: string }): Promise<DriveMediaRestoreResult>;
   getDriveMediaStats?(): Promise<DriveMediaStats>;
   getDriveStorageQuota?(): Promise<DriveStorageQuota>;
+  getActiveMediaSyncStatus?(): Promise<ActiveMediaSyncStatus>;
 
   // Cloud auth (Google login)
   getAuthStatus(): Promise<AuthStatus>;
