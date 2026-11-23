@@ -3,6 +3,9 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import esbuild from 'esbuild';
 import fs from 'node:fs';
+import { ensureCloudConfig } from './ensure-config.js';
+
+ensureCloudConfig();
 
 const distElectron = path.resolve('dist-electron');
 if (!fs.existsSync(distElectron)) {
@@ -48,6 +51,9 @@ async function startDev() {
 
   if (fs.existsSync('dist-electron/preload.cjs')) {
     fs.copyFileSync('dist-electron/preload.cjs', 'dist-electron/preload.js');
+  }
+  if (fs.existsSync('cloud-config.json')) {
+    fs.copyFileSync('cloud-config.json', 'dist-electron/cloud-config.json');
   }
 
   // 2. Start Vite Dev Server

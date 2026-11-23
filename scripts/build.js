@@ -1,6 +1,9 @@
 import esbuild from 'esbuild';
 import path from 'node:path';
 import fs from 'node:fs';
+import { ensureCloudConfig } from './ensure-config.js';
+
+ensureCloudConfig();
 
 const isWatch = process.argv.includes('--watch');
 
@@ -72,6 +75,9 @@ async function buildAll() {
       // Also copy/duplicate preload.cjs to preload.js for backward compatibility
       if (fs.existsSync('dist-electron/preload.cjs')) {
         fs.copyFileSync('dist-electron/preload.cjs', 'dist-electron/preload.js');
+      }
+      if (fs.existsSync('cloud-config.json')) {
+        fs.copyFileSync('cloud-config.json', 'dist-electron/cloud-config.json');
       }
       const elapsed = Date.now() - startTime;
       console.log(`[build] Electron build completed in ${elapsed}ms.`);
