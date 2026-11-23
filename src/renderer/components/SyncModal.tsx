@@ -115,15 +115,17 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           } else if (status.result) {
             if (status.type === 'upload') {
               const res = status.result;
-              const mb = (res.bytesUploaded / (1024 * 1024)).toFixed(1);
+              const formattedSize = res.bytesUploaded >= 1024 * 1024 * 1024
+                ? `${(res.bytesUploaded / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                : `${(res.bytesUploaded / (1024 * 1024)).toFixed(1)} MB`;
               let msg = '';
               if (res.filesUploaded > 0) {
-                msg = `Đã sao lưu thành công ${res.filesUploaded} ảnh (${mb} MB) từ ${res.gamesProcessed} game lên Google Drive!`;
+                msg = `Đã sao lưu thành công ${res.filesUploaded} file media (${formattedSize}) từ ${res.gamesProcessed} game lên Google Drive!`;
               } else {
-                msg = `Toàn bộ ảnh từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước.`;
+                msg = `Toàn bộ ảnh & video từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước.`;
               }
               if (res.errors && res.errors.length > 0) {
-                msg += ` (Có ${res.errors.length} ảnh gặp lỗi tải)`;
+                msg += ` (Có ${res.errors.length} file gặp lỗi tải)`;
               }
               setDriveResult(msg);
             }
@@ -178,15 +180,17 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     try {
       if (window.electronAPI?.uploadMediaToDrive) {
         const res: DriveMediaSyncResult = await window.electronAPI.uploadMediaToDrive();
-        const mb = (res.bytesUploaded / (1024 * 1024)).toFixed(1);
+        const formattedSize = res.bytesUploaded >= 1024 * 1024 * 1024
+          ? `${(res.bytesUploaded / (1024 * 1024 * 1024)).toFixed(2)} GB`
+          : `${(res.bytesUploaded / (1024 * 1024)).toFixed(1)} MB`;
         let msg = '';
         if (res.filesUploaded > 0) {
-          msg = `Đã sao lưu thành công ${res.filesUploaded} ảnh (${mb} MB) từ ${res.gamesProcessed} game lên Google Drive!`;
+          msg = `Đã sao lưu thành công ${res.filesUploaded} file media (${formattedSize}) từ ${res.gamesProcessed} game lên Google Drive!`;
         } else {
-          msg = `Toàn bộ ảnh từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước (không có ảnh mới cần tải lên).`;
+          msg = `Toàn bộ ảnh & video từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước (không có file mới cần tải lên).`;
         }
         if (res.errors && res.errors.length > 0) {
-          msg += ` (Có ${res.errors.length} ảnh gặp lỗi tải)`;
+          msg += ` (Có ${res.errors.length} file gặp lỗi tải)`;
         }
         setDriveResult(msg);
         fetchQuota();
@@ -196,7 +200,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       }
     } catch (err: any) {
       console.error('Drive upload media error:', err);
-      setDriveError(err?.message || 'Không thể tải ảnh lên Google Drive.');
+      setDriveError(err?.message || 'Không thể tải media lên Google Drive.');
     } finally {
       setDriveUploading(false);
       setDriveProgress(null);
@@ -215,7 +219,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       if (window.electronAPI?.downloadMediaFromDrive) {
         const res: DriveMediaRestoreResult = await window.electronAPI.downloadMediaFromDrive();
         setDriveResult(
-          `Đã kéo thành công ${res.filesDownloaded} ảnh về thư mục "${res.localBaseDir}" (từ ${res.gamesRestored} game)!`
+          `Đã kéo thành công ${res.filesDownloaded} file media về thư mục "${res.localBaseDir}" (từ ${res.gamesRestored} game)!`
         );
         fetchQuota();
         onSuccess();
@@ -224,7 +228,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       }
     } catch (err: any) {
       console.error('Drive download media error:', err);
-      setDriveError(err?.message || 'Không thể kéo ảnh từ Google Drive về máy.');
+      setDriveError(err?.message || 'Không thể kéo file từ Google Drive về máy.');
     } finally {
       setDriveDownloading(false);
       setDriveProgress(null);
@@ -293,7 +297,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-white">Trung tâm Đồng bộ (Cloud &amp; Drive)</h2>
               <p className="text-xs text-[#8e95a5]">
-                Đồng bộ toàn bộ game (Đang chơi, Wishlist, Phá đảo, Bỏ dở...) &amp; sao lưu ảnh lên Drive
+                Đồng bộ toàn bộ game (Đang chơi, Wishlist, Phá đảo, Bỏ dở...) &amp; sao lưu ảnh/video lên Drive
               </p>
             </div>
           </div>
@@ -328,7 +332,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             }`}
           >
             <HardDrive className="h-4 w-4 text-emerald-400" />
-            <span>Ảnh chụp (Google Drive)</span>
+            <span>Ảnh &amp; Video (Google Drive)</span>
           </button>
 
           <button
@@ -502,7 +506,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <div>
                     <div className="font-bold text-white mb-0.5">Cần đăng nhập Google</div>
                     <p className="text-[#8e95a5]">
-                      Google Drive dùng tài khoản Google cá nhân của bạn để lưu ảnh chụp an toàn trong không gian riêng tư.
+                      Google Drive dùng tài khoản Google cá nhân của bạn để lưu ảnh &amp; video an toàn trong không gian riêng tư.
                     </p>
                   </div>
                 </div>
@@ -556,7 +560,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] text-[#8e95a5]">
-                    <span>Không gian riêng tư (appDataFolder ẩn, 15GB miễn phí, ảnh không bị nén)</span>
+                    <span>Không gian riêng tư (appDataFolder ẩn, 15GB miễn phí, ảnh &amp; video không bị nén)</span>
                     <button
                       onClick={fetchQuota}
                       disabled={quotaLoading}
@@ -577,7 +581,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                     <div className="flex items-center gap-2 font-bold text-white">
                       <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
                       <span>
-                        {driveUploading ? 'Đang đẩy ảnh lên Google Drive...' : 'Đang kéo ảnh từ Google Drive về máy...'}
+                        {driveUploading ? 'Đang đẩy ảnh & video lên Google Drive (đa luồng)...' : 'Đang kéo ảnh & video từ Google Drive về máy (đa luồng)...'}
                       </span>
                     </div>
                     <span className="font-mono text-sm font-bold text-emerald-400">
@@ -608,7 +612,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                               </span>
                             )}
                             <span className="font-bold text-emerald-300 text-xs">
-                              {driveProgress.current} / {driveProgress.total} ảnh
+                              {driveProgress.current} / {driveProgress.total} file
                             </span>
                           </div>
                         </div>
@@ -628,7 +632,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                     ) : (
                       <div className="text-[11px] text-[#8e95a5] italic flex items-center gap-1.5">
                         <Loader2 className="h-3 w-3 animate-spin text-emerald-400" />
-                        <span>Đang quét danh sách file và so khớp với Drive (bỏ qua ảnh đã tải)...</span>
+                        <span>Đang quét danh sách file và so khớp với Drive (bỏ qua file đã tải)...</span>
                       </div>
                     )}
                   </div>
@@ -655,7 +659,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <span>Tại sao Google Drive tốt hơn Google Photos?</span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Lưu vào <strong>Google Drive (appDataFolder riêng tư)</strong> giữ nguyên vẹn 100% cấu trúc thư mục game (<code className="text-white">E:\Game\&lt;Tên Game&gt;</code>) và ảnh gốc không bị Google nén giảm chất lượng. Khi sang máy mới, bạn chỉ cần bấm nút <strong>"Kéo toàn bộ ảnh về máy"</strong> là xong!
+                  Lưu vào <strong>Google Drive (appDataFolder riêng tư)</strong> giữ nguyên vẹn 100% cấu trúc thư mục game (<code className="text-white">E:\Game\&lt;Tên Game&gt;</code>) và toàn bộ ảnh chụp (F6) lẫn video gameplay (.mp4, .mov...) gốc không bị Google nén giảm chất lượng. Khi sang máy mới, bạn chỉ cần bấm nút <strong>"Kéo toàn bộ về máy"</strong> là xong!
                 </p>
               </div>
 
@@ -671,13 +675,13 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   ) : (
                     <UploadCloud className="h-6 w-6 text-emerald-400" />
                   )}
-                  <span>Sao lưu ảnh lên Google Drive</span>
+                  <span>Sao lưu ảnh &amp; video lên Google Drive</span>
                   <span className="text-[10px] font-normal text-[#8e95a5]">
                     {driveUploading
                       ? driveProgress
-                        ? `Đang đẩy: ${driveProgress.percent}% (${driveProgress.formattedTransferred || `${driveProgress.current}/${driveProgress.total} ảnh`}) • ${driveProgress.formattedSpeed || ''}`
-                        : 'Đang đẩy ảnh lên Drive...'
-                      : 'Quét E:\\Game và đẩy ảnh mới lên'}
+                        ? `Đang đẩy: ${driveProgress.percent}% (${driveProgress.formattedTransferred || `${driveProgress.current}/${driveProgress.total} file`}) • ${driveProgress.formattedSpeed || ''}`
+                        : 'Đang đẩy lên Drive...'
+                      : 'Quét E:\\Game và đẩy ảnh & video mới lên (đa luồng siêu tốc)'}
                   </span>
                 </button>
 
@@ -691,12 +695,12 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   ) : (
                     <DownloadCloud className="h-6 w-6 text-sky-400" />
                   )}
-                  <span>Kéo toàn bộ ảnh từ Drive về máy</span>
+                  <span>Kéo toàn bộ ảnh &amp; video từ Drive về máy</span>
                   <span className="text-[10px] font-normal text-[#8e95a5]">
                     {driveDownloading
                       ? driveProgress
-                        ? `Đang kéo: ${driveProgress.percent}% (${driveProgress.formattedTransferred || `${driveProgress.current}/${driveProgress.total} ảnh`}) • ${driveProgress.formattedSpeed || ''}`
-                        : 'Đang tải ảnh từ Drive về...'
+                        ? `Đang kéo: ${driveProgress.percent}% (${driveProgress.formattedTransferred || `${driveProgress.current}/${driveProgress.total} file`}) • ${driveProgress.formattedSpeed || ''}`
+                        : 'Đang tải từ Drive về...'
                       : 'Tải về thư mục E:\\Game máy này'}
                   </span>
                 </button>

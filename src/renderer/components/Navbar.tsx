@@ -307,7 +307,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div>
                     <div className="font-semibold text-white group-hover:text-sky-400">Trung tâm Đồng bộ</div>
-                    <div className="text-[10px] text-[#8e95a5]">Đồng bộ Thư viện Cloud, Drive &amp; ảnh F6</div>
+                    <div className="text-[10px] text-[#8e95a5]">Đồng bộ Thư viện Cloud, Drive Media &amp; F6</div>
                   </div>
                 </button>
 

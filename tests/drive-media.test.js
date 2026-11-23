@@ -67,8 +67,15 @@ function createMockDriveFetch() {
         return new Response(JSON.stringify(item), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
-      // 3. Multipart Upload: POST https://www.googleapis.com/upload/drive/v3/files
+      // 3. Resumable Init: POST https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable
       if (url.pathname === '/upload/drive/v3/files' && method === 'POST') {
+        if (url.searchParams.get('uploadType') === 'resumable') {
+          const body = JSON.parse(init.body);
+          const id = `resumable_${nextId++}`;
+          const sessionUrl = `https://mock-drive/upload-session/${id}?name=${encodeURIComponent(body.name)}&parents=${encodeURIComponent((body.parents || []).join(','))}`;
+          return new Response(null, { status: 200, headers: { Location: sessionUrl } });
+        }
+
         const contentType = String(init.headers?.['Content-Type'] || init.headers?.['content-type'] || '');
         const boundaryMatch = contentType.match(/boundary=([^;]+)/);
         const boundary = boundaryMatch ? boundaryMatch[1] : '';
@@ -104,6 +111,15 @@ function createMockDriveFetch() {
         };
         files.set(id, item);
         return new Response(JSON.stringify(item), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      // 3b. Resumable Chunk PUT: PUT https://mock-drive/upload-session/:id
+      if (url.host === 'mock-drive' && method === 'PUT') {
+        const name = url.searchParams.get('name') || 'uploaded_video';
+        const parents = (url.searchParams.get('parents') || '').split(',').filter(Boolean);
+        const id = `file_${nextId++}`;
+        files.set(id, { id, name, mimeType: 'video/mp4', parents, content: Buffer.alloc(0) });
+        return new Response(JSON.stringify({ id, name }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
       // 4. Download File: GET https://www.googleapis.com/drive/v3/files/:id?alt=media
@@ -218,5 +234,50 @@ describe('Google Drive Media (Screenshots) Cloud Sync Suite', () => {
     const restoredFile = path.join(pcBMediaDir, 'Elden Ring', 'malenia_victory.png');
     assert.equal(fs.existsSync(restoredFile), true);
     assert.equal(fs.readFileSync(restoredFile, 'utf-8'), 'malenia-screenshot-bytes');
+  });
+
+  test('uploadMediaToDrive includes gameplay videos (.mp4, .mov, .mkv) alongside images', async () => {
+    const localMediaDir = newTmp('video-media');
+    const controlDir = path.join(localMediaDir, 'Control');
+    fs.mkdirSync(controlDir, { recursive: true });
+
+    fs.writeFileSync(path.join(controlDir, 'screenshot.png'), 'png-bytes');
+    fs.writeFileSync(path.join(controlDir, 'clip_boss.mp4'), 'mp4-bytes');
+    fs.writeFileSync(path.join(controlDir, 'cutscene.mov'), 'mov-bytes');
+    fs.writeFileSync(path.join(controlDir, 'photo.heic'), 'heic-bytes');
+    fs.writeFileSync(path.join(controlDir, 'game_save.sav'), 'ignore-sav');
+
+    const uploadRes = await uploadMediaToDrive({ localMediaBaseDir: localMediaDir });
+    assert.equal(uploadRes.gamesProcessed, 1);
+    assert.equal(uploadRes.filesUploaded, 4, 'Should upload 4 media files (.png, .mp4, .mov, .heic) and ignore .sav');
+
+    const stats = await getDriveMediaStats();
+    assert.equal(stats.gamesCount, 1);
+    assert.equal(stats.filesCount, 4);
+  });
+
+  test('uploadMediaToDrive handles large files via resumable chunk upload with progress reporting', async () => {
+    const localMediaDir = newTmp('large-media');
+    const dmcDir = path.join(localMediaDir, 'Devil May Cry 5');
+    fs.mkdirSync(dmcDir, { recursive: true });
+
+    // 10.5 MB file to trigger resumable upload (>= 10 MB threshold)
+    const largeSize = 11 * 1024 * 1024;
+    const largeFilePath = path.join(dmcDir, 'combo_mad.mp4');
+    const fd = fs.openSync(largeFilePath, 'w');
+    fs.writeSync(fd, Buffer.alloc(1024 * 1024, 'X'), 0, 1024 * 1024, 0);
+    fs.ftruncateSync(fd, largeSize);
+    fs.closeSync(fd);
+
+    const progressReports = [];
+    const uploadRes = await uploadMediaToDrive({
+      localMediaBaseDir: localMediaDir,
+      onProgress: (p) => progressReports.push(p),
+    });
+
+    assert.equal(uploadRes.gamesProcessed, 1);
+    assert.equal(uploadRes.filesUploaded, 1);
+    assert.ok(progressReports.length > 0, 'Should emit progress reports');
+    assert.ok(progressReports.some((p) => p.currentFile === 'combo_mad.mp4'));
   });
 });

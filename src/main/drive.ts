@@ -241,7 +241,12 @@ export async function downloadBackupFromDrive(drivePath: string, vaultRoot: stri
 // Media / Screenshot Cloud Sync via Drive
 // ==========================================
 
-const MEDIA_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
+const MEDIA_EXTS = new Set([
+  // Images
+  '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.heic',
+  // Videos
+  '.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v', '.wmv', '.flv',
+]);
 
 function getMimeType(filename: string): string {
   const ext = path.extname(filename).toLowerCase();
@@ -252,7 +257,149 @@ function getMimeType(filename: string): string {
     case '.webp': return 'image/webp';
     case '.bmp': return 'image/bmp';
     case '.gif': return 'image/gif';
+    case '.heic': return 'image/heic';
+    case '.mp4': return 'video/mp4';
+    case '.mov': return 'video/quicktime';
+    case '.mkv': return 'video/x-matroska';
+    case '.webm': return 'video/webm';
+    case '.avi': return 'video/x-msvideo';
+    case '.m4v': return 'video/x-m4v';
+    case '.wmv': return 'video/x-ms-wmv';
+    case '.flv': return 'video/x-flv';
     default: return 'application/octet-stream';
+  }
+}
+
+const RESUMABLE_THRESHOLD_BYTES = 10 * 1024 * 1024; // 10 MB
+
+async function uploadResumableFile(
+  name: string,
+  parentId: string,
+  filePath: string,
+  fileSize: number,
+  mimeType = 'application/octet-stream',
+  onChunkUploaded?: (bytesUploadedDelta: number) => void
+): Promise<string> {
+  const doFetch = await driveFetch();
+  const token = await getValidGoogleAccessToken();
+
+  // 1. Initiate resumable upload session
+  const initResp = await doFetch(`${DRIVE_UPLOAD_API}?uploadType=resumable`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Upload-Content-Type': mimeType,
+      'X-Upload-Content-Length': String(fileSize),
+    },
+    body: JSON.stringify({ name, parents: [parentId] }),
+  });
+
+  if (!initResp.ok) {
+    const errorText = await initResp.text().catch(() => '');
+    throw new Error(`Drive resumable init failed (${name}): ${initResp.status} ${errorText}`);
+  }
+
+  const uploadLocation = initResp.headers.get('location');
+  if (!uploadLocation) {
+    throw new Error(`Drive resumable init returned no Location header for ${name}`);
+  }
+
+  // 2. Upload chunks (8 MB chunks, multiple of 256 KiB)
+  const CHUNK_SIZE = 8 * 1024 * 1024;
+  const fd = fs.openSync(filePath, 'r');
+  let start = 0;
+  let fileId = '';
+
+  try {
+    const buffer = Buffer.alloc(CHUNK_SIZE);
+    while (start < fileSize) {
+      const bytesToRead = Math.min(CHUNK_SIZE, fileSize - start);
+      fs.readSync(fd, buffer, 0, bytesToRead, start);
+      const chunk = buffer.subarray(0, bytesToRead);
+      const end = start + bytesToRead - 1;
+
+      const chunkResp = await doFetch(uploadLocation, {
+        method: 'PUT',
+        headers: {
+          'Content-Length': String(bytesToRead),
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        },
+        body: chunk,
+      });
+
+      if (chunkResp.status === 200 || chunkResp.status === 201) {
+        const data = await chunkResp.json();
+        fileId = data.id;
+        onChunkUploaded?.(bytesToRead);
+        break;
+      } else if (chunkResp.status === 308) {
+        start += bytesToRead;
+        onChunkUploaded?.(bytesToRead);
+      } else {
+        const errorText = await chunkResp.text().catch(() => '');
+        throw new Error(`Drive resumable chunk failed (${name} [${start}-${end}]): ${chunkResp.status} ${errorText}`);
+      }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  return fileId;
+}
+
+async function uploadMediaItem(
+  name: string,
+  parentId: string,
+  filePath: string,
+  fileSize: number,
+  mimeType: string,
+  onChunkUploaded?: (bytesUploadedDelta: number) => void
+): Promise<string> {
+  if (fileSize < RESUMABLE_THRESHOLD_BYTES) {
+    const content = fs.readFileSync(filePath);
+    const id = await uploadFile(name, parentId, content, mimeType);
+    onChunkUploaded?.(content.length);
+    return id;
+  }
+  return uploadResumableFile(name, parentId, filePath, fileSize, mimeType, onChunkUploaded);
+}
+
+async function downloadFileToDisk(fileId: string, destPath: string, onChunk?: (bytesChunk: number) => void): Promise<void> {
+  const doFetch = await driveFetch();
+  const headers = await authedHeaders();
+  const resp = await doFetch(`${DRIVE_API}/${fileId}?alt=media`, { headers });
+  if (!resp.ok) {
+    throw new Error(`Drive download failed: ${resp.status}`);
+  }
+
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+
+  if (resp.body && typeof (resp.body as any).getReader === 'function') {
+    const reader = (resp.body as any).getReader();
+    const fileStream = fs.createWriteStream(destPath);
+    await new Promise<void>(async (resolve, reject) => {
+      fileStream.on('finish', resolve);
+      fileStream.on('error', reject);
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            fileStream.write(Buffer.from(value));
+            onChunk?.(value.byteLength);
+          }
+        }
+        fileStream.end();
+      } catch (readErr) {
+        fileStream.destroy();
+        reject(readErr);
+      }
+    });
+  } else {
+    const buf = Buffer.from(await resp.arrayBuffer());
+    fs.writeFileSync(destPath, buf);
+    onChunk?.(buf.length);
   }
 }
 
@@ -340,8 +487,8 @@ export async function uploadMediaToDrive(options: {
       current: 0,
       total: 0,
       percent: 0,
-      currentFile: 'Đang kiểm tra ảnh mới...',
-      currentGame: 'Đang quét thư viện...',
+      currentFile: 'Đang kiểm tra file media mới...',
+      currentGame: 'Đang quét thư viện ảnh & video...',
       bytesTransferred: 0,
       totalBytes: 0,
       speedBytesPerSec: 0,
@@ -484,28 +631,68 @@ export async function uploadMediaToDrive(options: {
     };
 
     const createdFolderMap = new Map<string, string>();
+    const folderPromiseMap = new Map<string, Promise<string>>();
 
-    for (const task of uploadTasks) {
-      processedFiles++;
-      emitUploadProgress(task.fileName, task.gameName);
+    const getOrCreateGameFolder = async (gameName: string): Promise<string> => {
+      const key = gameName.toLowerCase();
+      const existing = driveFolderMap.get(key) || createdFolderMap.get(key);
+      if (existing) return existing;
 
-      try {
-        let driveFolderId = task.driveFolderId || createdFolderMap.get(task.gameName.toLowerCase());
-        if (!driveFolderId) {
-          driveFolderId = await findChild(mediaRootId, task.gameName) || await createFolder(task.gameName, mediaRootId);
-          createdFolderMap.set(task.gameName.toLowerCase(), driveFolderId);
-        }
-
-        const content = fs.readFileSync(task.filePath);
-        await uploadFile(task.fileName, driveFolderId, content, getMimeType(task.fileName));
-        filesUploaded++;
-        bytesUploaded += content.length;
-        processedGamesSet.add(task.gameName);
-        emitUploadProgress(task.fileName, task.gameName);
-      } catch (fileErr: any) {
-        errors.push(`Lỗi tải ảnh ${task.fileName} (${task.gameName}): ${fileErr.message}`);
+      let p = folderPromiseMap.get(key);
+      if (!p) {
+        p = (async () => {
+          const found = await findChild(mediaRootId, gameName);
+          if (found) {
+            createdFolderMap.set(key, found);
+            return found;
+          }
+          const created = await createFolder(gameName, mediaRootId);
+          createdFolderMap.set(key, created);
+          return created;
+        })();
+        folderPromiseMap.set(key, p);
       }
-    }
+      return p;
+    };
+
+    const CONCURRENCY = 3;
+    let uploadIndex = 0;
+
+    const runUploadWorker = async () => {
+      while (true) {
+        const idx = uploadIndex++;
+        if (idx >= uploadTasks.length) break;
+        const task = uploadTasks[idx];
+
+        emitUploadProgress(task.fileName, task.gameName);
+
+        try {
+          const driveFolderId = task.driveFolderId || (await getOrCreateGameFolder(task.gameName));
+          await uploadMediaItem(
+            task.fileName,
+            driveFolderId,
+            task.filePath,
+            task.size,
+            getMimeType(task.fileName),
+            (delta) => {
+              bytesUploaded += delta;
+              emitUploadProgress(task.fileName, task.gameName);
+            }
+          );
+          filesUploaded++;
+          processedFiles++;
+          processedGamesSet.add(task.gameName);
+          emitUploadProgress(task.fileName, task.gameName);
+        } catch (fileErr: any) {
+          errors.push(`Lỗi tải file ${task.fileName} (${task.gameName}): ${fileErr.message}`);
+          processedFiles++;
+          emitUploadProgress(task.fileName, task.gameName);
+        }
+      }
+    };
+
+    const uploadWorkers = Array.from({ length: Math.min(CONCURRENCY, uploadTasks.length) }, () => runUploadWorker());
+    await Promise.all(uploadWorkers);
 
     return {
       gamesProcessed: Math.max(foldersToProcess.length, processedGamesSet.size),
@@ -648,23 +835,37 @@ export async function downloadMediaFromDrive(options: {
       options.onProgress?.(prog);
     };
 
-    for (const task of downloadTasks) {
-      processedFiles++;
-      emitDownloadProgress(task.fileName, task.gameName);
+    const CONCURRENCY = 3;
+    let downloadIndex = 0;
 
-      fs.mkdirSync(task.localGameDir, { recursive: true });
+    const runDownloadWorker = async () => {
+      while (true) {
+        const idx = downloadIndex++;
+        if (idx >= downloadTasks.length) break;
+        const task = downloadTasks[idx];
 
-      try {
-        const content = await downloadFile(task.fileId);
-        fs.writeFileSync(task.targetFilePath, content);
-        filesDownloaded++;
-        bytesDownloaded += content.length;
-        restoredGamesSet.add(task.gameName);
         emitDownloadProgress(task.fileName, task.gameName);
-      } catch (err: any) {
-        console.error(`Failed to download ${task.fileName}:`, err);
+        fs.mkdirSync(task.localGameDir, { recursive: true });
+
+        try {
+          await downloadFileToDisk(task.fileId, task.targetFilePath, (delta) => {
+            bytesDownloaded += delta;
+            emitDownloadProgress(task.fileName, task.gameName);
+          });
+          filesDownloaded++;
+          processedFiles++;
+          restoredGamesSet.add(task.gameName);
+          emitDownloadProgress(task.fileName, task.gameName);
+        } catch (err: any) {
+          console.error(`Failed to download ${task.fileName}:`, err);
+          processedFiles++;
+          emitDownloadProgress(task.fileName, task.gameName);
+        }
       }
-    }
+    };
+
+    const downloadWorkers = Array.from({ length: Math.min(CONCURRENCY, downloadTasks.length) }, () => runDownloadWorker());
+    await Promise.all(downloadWorkers);
 
     return {
       gamesRestored: Math.max(targetFolders.length, restoredGamesSet.size),
