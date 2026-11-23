@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FolderOpen, Camera, Layers, Gamepad2, HardDrive, Info, Zap } from 'lucide-react';
 
 export interface FirstRunSetupModalProps {
@@ -30,6 +30,20 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
 }) => {
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [gdriveDetected, setGdriveDetected] = useState<{ drive: string; path: string } | null>(null);
+
+  useEffect(() => {
+    if (window.electronAPI?.detectGoogleDriveDesktop) {
+      window.electronAPI
+        .detectGoogleDriveDesktop()
+        .then((res) => {
+          if (res?.suggestedMediaDir) {
+            setGdriveDetected({ drive: res.mountedDrive || 'Drive', path: res.suggestedMediaDir });
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   const handleStart = async () => {
     if (!mediaBaseDir.trim()) {
@@ -94,6 +108,26 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
             </p>
           </div>
         </div>
+
+        {/* Quick Google Drive Recommendation if Detected */}
+        {gdriveDetected && mediaBaseDir !== gdriveDetected.path && (
+          <div className="mt-3 flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
+            <div className="flex items-center gap-2 text-emerald-300">
+              <Zap className="h-4 w-4 shrink-0 text-emerald-400" />
+              <span>Phát hiện ổ <strong>Google Drive ({gdriveDetected.drive})</strong>! Bạn có thể lưu thẳng ảnh vào đây để tự động đồng bộ lên mây.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onFieldChange('media', gdriveDetected.path);
+                onHddModeChange(false);
+              }}
+              className="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1 text-[11px] font-bold text-white transition-colors"
+            >
+              Dùng ổ Google Drive
+            </button>
+          </div>
+        )}
 
         {/* HDD Mode Toggle Card & Notice */}
         <div className="mt-4 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-3">

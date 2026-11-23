@@ -55,6 +55,10 @@ import { getF6CaptureManager } from './f6-capture.js';
 import { getAMDWatcher } from './amd-watcher.js';
 import { getAuthStatus, login, logout } from './auth.js';
 import {
+  detectGoogleDriveDesktop,
+  applyGoogleDriveDesktopStorage,
+} from './google-drive-desktop.js';
+import {
   uploadBackupToDrive,
   uploadMediaToDrive,
   downloadMediaFromDrive,
@@ -632,6 +636,30 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:toggleStartup', async (_event, enable: boolean) => {
     return toggleF6Startup(enable);
+  });
+
+  // Google Drive for Desktop (Virtual Disk G:)
+  ipcMain.handle('gdriveDesktop:detect', async () => {
+    const settings = loadAppSettings();
+    return detectGoogleDriveDesktop(settings.mediaBaseDir);
+  });
+
+  ipcMain.handle('gdriveDesktop:apply', async (_event, customPath?: string) => {
+    const res = await applyGoogleDriveDesktopStorage(customPath);
+    if (res.ok) {
+      const f6 = getF6CaptureManager();
+      f6.setPaths(undefined, res.settings.mediaBaseDir);
+      f6.setHddMode(res.settings.hddMode);
+    }
+    return res;
+  });
+
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      await shell.openExternal(url);
+      return true;
+    }
+    return false;
   });
 
   // Cloud auth (Google login)

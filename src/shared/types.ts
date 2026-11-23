@@ -490,6 +490,15 @@ export interface AppSettings {
   googlePhotosAlbumId?: string;
 }
 
+export interface GoogleDriveDesktopStatus {
+  installed: boolean;
+  running: boolean;
+  mountedDrive: string | null;
+  myDrivePath: string | null;
+  suggestedMediaDir: string | null;
+  isCurrentlyUsed: boolean;
+}
+
 export interface PlaytimeWatchStatus {
   installed: boolean;
   isRunning: boolean;
@@ -642,6 +651,11 @@ export interface ElectronAPI {
   unvotePick?(): Promise<CommunityPick>;
   syncLibrary?(): Promise<LibrarySyncResult>;
   getCloudLibrary?(): Promise<LibrarySyncResponse>;
+
+  // Google Drive for Desktop (Virtual Disk G:)
+  detectGoogleDriveDesktop?(): Promise<GoogleDriveDesktopStatus>;
+  applyGoogleDriveDesktop?(customPath?: string): Promise<{ ok: boolean; settings: AppSettings; error?: string }>;
+  openExternalUrl?(url: string): Promise<boolean>;
 
   // Real-time Event Subscriptions
   onGameAdded?(callback: (game: Game) => void): () => void;

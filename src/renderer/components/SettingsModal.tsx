@@ -29,7 +29,7 @@ import {
   ExternalLink,
   Image as ImageIcon,
 } from 'lucide-react';
-import type { AppSettings, F6ProcessStatus, FpsStatus, HardwareInfo } from '../../shared/types.js';
+import type { AppSettings, F6ProcessStatus, FpsStatus, HardwareInfo, GoogleDriveDesktopStatus } from '../../shared/types.js';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -78,6 +78,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [googlePhotosAlbumId, setGooglePhotosAlbumId] = useState<string>('');
   const [testingStorage, setTestingStorage] = useState<boolean>(false);
   const [storageTestResult, setStorageTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Google Drive for Desktop State
+  const [gdriveStatus, setGdriveStatus] = useState<GoogleDriveDesktopStatus | null>(null);
+  const [checkingGdrive, setCheckingGdrive] = useState<boolean>(false);
+  const [applyingGdrive, setApplyingGdrive] = useState<boolean>(false);
 
   // Quick Action States inside Settings
   const [syncingLibrary, setSyncingLibrary] = useState<boolean>(false);
@@ -217,11 +222,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadData();
+      loadGdriveStatus();
     } else {
       setIsListeningKey(false);
       setStatusMsg(null);
     }
-  }, [isOpen, loadData]);
+  }, [isOpen, loadData, loadGdriveStatus]);
 
   // Global keydown listener when recording hotkey
   useEffect(() => {
@@ -395,6 +401,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setActionResultMsg({ ok: false, text: err.message || 'Lỗi khi kéo ảnh từ Google Drive.' });
     } finally {
       setRestoringDrive(false);
+    }
+  };
+
+  // Google Drive for Desktop Detection & Apply
+  const loadGdriveStatus = useCallback(async () => {
+    if (window.electronAPI?.detectGoogleDriveDesktop) {
+      setCheckingGdrive(true);
+      try {
+        const res = await window.electronAPI.detectGoogleDriveDesktop();
+        setGdriveStatus(res);
+      } catch (e) {
+        console.error('Failed to detect Google Drive desktop:', e);
+      } finally {
+        setCheckingGdrive(false);
+      }
+    }
+  }, []);
+
+  const handleApplyGdrive = async (customPath?: string) => {
+    if (!window.electronAPI?.applyGoogleDriveDesktop) return;
+    setApplyingGdrive(true);
+    try {
+      const res = await window.electronAPI.applyGoogleDriveDesktop(customPath);
+      if (res.ok) {
+        setMediaBaseDir(res.settings.mediaBaseDir);
+        setHddMode(false);
+        setStatusMsg({
+          type: 'success',
+          text: `Đã kích hoạt lưu trữ Google Drive: "${res.settings.mediaBaseDir}". Ảnh chụp sẽ lưu thẳng vào đây và tự động đồng bộ lên cloud!`,
+        });
+        await loadGdriveStatus();
+      } else {
+        setStatusMsg({ type: 'error', text: res.error || 'Không thể áp dụng ổ Google Drive' });
+      }
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: err.message || 'Lỗi áp dụng ổ Google Drive' });
+    } finally {
+      setApplyingGdrive(false);
+    }
+  };
+
+  const handleOpenGdriveDownload = () => {
+    if (window.electronAPI?.openExternalUrl) {
+      window.electronAPI.openExternalUrl('https://www.google.com/drive/download/');
+    } else {
+      window.open('https://www.google.com/drive/download/', '_blank');
     }
   };
 
@@ -863,6 +915,134 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
 
+                    {/* Google Drive for Desktop Direct Mount Card */}
+                    <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            <HardDrive className="h-4.5 w-4.5" />
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold text-white">Ổ đĩa Google Drive (Google Drive for Desktop)</span>
+                              {gdriveStatus?.isCurrentlyUsed ? (
+                                <span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Đang kích hoạt
+                                </span>
+                              ) : gdriveStatus?.mountedDrive ? (
+                                <span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/40">
+                                  Đã phát hiện ổ {gdriveStatus.mountedDrive}
+                                </span>
+                              ) : (
+                                <span className="rounded-full px-2 py-0.5 text-[10px] font-bold bg-zinc-700/50 text-zinc-400 border border-zinc-600">
+                                  Chưa phát hiện
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#8e95a5] mt-1 leading-relaxed">
+                              Biến Google Drive thành 1 ổ đĩa trong PC (thường là ổ G:). Ảnh chụp màn hình sẽ lưu thẳng vào ổ này và Google Drive tự động đồng bộ ngầm lên mây ngay lập tức mà không phải đọc ghi qua lại trung gian, không cần token API.
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={loadGdriveStatus}
+                          disabled={checkingGdrive}
+                          title="Quét lại ổ đĩa Google Drive"
+                          className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#202433] px-2.5 py-1.5 text-xs text-[#8e95a5] hover:text-white hover:border-[#3d445a] transition-colors shrink-0"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${checkingGdrive ? 'animate-spin text-[#ff2a44]' : ''}`} />
+                          <span className="text-[11px]">Quét lại</span>
+                        </button>
+                      </div>
+
+                      {/* Status Details & Quick Action */}
+                      {gdriveStatus?.mountedDrive || gdriveStatus?.myDrivePath ? (
+                        <div className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] p-3 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between text-xs gap-1">
+                            <span className="text-[#8e95a5]">Ổ đĩa Google Drive:</span>
+                            <span className="font-mono font-semibold text-emerald-400">
+                              {gdriveStatus.myDrivePath || `${gdriveStatus.mountedDrive}\\`}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between text-xs gap-1">
+                            <span className="text-[#8e95a5]">Thư mục lưu đề xuất:</span>
+                            <span className="font-mono text-zinc-300">
+                              {gdriveStatus.suggestedMediaDir || `${gdriveStatus.mountedDrive}\\GameVault`}
+                            </span>
+                          </div>
+
+                          {gdriveStatus.isCurrentlyUsed ? (
+                            <div className="mt-2 flex items-center justify-between rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-300">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                                <span>Ảnh chụp game đang lưu thẳng vào Google Drive và tự động đồng bộ lên cloud.</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleBrowseFolder('media')}
+                                className="text-[11px] underline hover:text-white shrink-0 ml-2"
+                              >
+                                Đổi thư mục con
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#1e2230]">
+                              <p className="text-[11px] text-[#8e95a5]">
+                                Bấm nút bên cạnh để trỏ Thư mục Media vào Google Drive và tự động bật chế độ lưu trực tiếp:
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => handleApplyGdrive()}
+                                disabled={applyingGdrive}
+                                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/20 transition-all shrink-0"
+                              >
+                                {applyingGdrive ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Zap className="h-3.5 w-3.5" />
+                                )}
+                                <span>⚡ Kích hoạt: Lưu thẳng vào Google Drive</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-[#2a2e3d] bg-[#0e1015]/60 p-3 space-y-3">
+                          <div className="flex items-start gap-2.5 text-xs text-[#8e95a5]">
+                            <Info className="h-4 w-4 shrink-0 mt-0.5 text-blue-400" />
+                            <div className="space-y-1">
+                              <p className="font-semibold text-zinc-200">
+                                Chưa tìm thấy ổ Google Drive trong máy tính của bạn.
+                              </p>
+                              <p className="text-[11px] leading-relaxed">
+                                Để có 1 ổ Google Drive (thường là ổ G:) xuất hiện trong This PC giống như bạn của bạn:
+                              </p>
+                              <ol className="list-decimal list-inside text-[11px] space-y-1 text-zinc-400 mt-1">
+                                <li>Tải và cài đặt ứng dụng chính thức <strong>Google Drive for Desktop</strong> từ Google.</li>
+                                <li>Đăng nhập tài khoản Google. Google Drive sẽ tự động tạo một ổ đĩa riêng (thường là G:) trong máy.</li>
+                                <li>Sau khi cài xong, quay lại đây bấm <strong>Quét lại</strong> để kích hoạt.</li>
+                              </ol>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-1 border-t border-[#1e2230]">
+                            <button
+                              type="button"
+                              onClick={handleOpenGdriveDownload}
+                              className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#202433] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#ff2a44] hover:bg-[#ff2a44]/10 hover:text-[#ff2a44] transition-colors"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              <span>Tải Google Drive cho máy tính (Chính chủ Google)</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Media Directory */}
                     <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-2">
                       <div className="flex items-center justify-between">
@@ -1304,6 +1484,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           Chọn nơi lưu trữ hình ảnh custom covers và ảnh chụp màn hình khi đồng bộ hoặc chia sẻ lên đám mây.
                           (💡 Ảnh chụp screenshots cũng có thể sao lưu 1-click lên Google Drive thông qua <strong>Trung tâm Đồng bộ</strong>).
                         </p>
+                      </div>
+
+                      {/* Google Drive for Desktop Pro Tip Banner */}
+                      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                            <HardDrive className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
+                              <span>Mẹo: Lưu thẳng vào Ổ đĩa Google Drive (Google Drive for Desktop)</span>
+                              {gdriveStatus?.isCurrentlyUsed && (
+                                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                                  Đang kích hoạt
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#8e95a5] mt-0.5 leading-relaxed">
+                              Bạn muốn ảnh chụp game lưu thẳng vào Google Drive và tự động đồng bộ ngầm mà không cần gọi API hay xác thực phức tạp? Chỉ cần dùng <strong>Google Drive for Desktop</strong> (biến Drive thành ổ đĩa trong PC) và trỏ thư mục lưu ảnh vào đó.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('paths')}
+                          className="shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/30 transition-colors"
+                        >
+                          Cấu hình trong Thư viện &amp; Lưu trữ →
+                        </button>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">

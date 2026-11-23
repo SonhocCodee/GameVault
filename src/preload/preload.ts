@@ -48,6 +48,7 @@ import type {
   DriveStorageQuota,
   DriveMediaProgress,
   ActiveMediaSyncStatus,
+  GoogleDriveDesktopStatus,
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
@@ -329,6 +330,17 @@ const electronAPI: ElectronAPI = {
   },
   togglePlaytimeWatch: (enable: boolean): Promise<boolean> => {
     return ipcRenderer.invoke('settings:togglePlaytimeWatch', enable);
+  },
+
+  // Google Drive for Desktop (Virtual Disk G:)
+  detectGoogleDriveDesktop: (): Promise<GoogleDriveDesktopStatus> => {
+    return ipcRenderer.invoke('gdriveDesktop:detect');
+  },
+  applyGoogleDriveDesktop: (customPath?: string): Promise<{ ok: boolean; settings: AppSettings; error?: string }> => {
+    return ipcRenderer.invoke('gdriveDesktop:apply', customPath);
+  },
+  openExternalUrl: (url: string): Promise<boolean> => {
+    return ipcRenderer.invoke('shell:openExternal', url);
   },
 
   // Real-time Event Subscriptions
