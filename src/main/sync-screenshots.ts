@@ -334,7 +334,7 @@ export function syncScreenshots(options?: ExtendedSyncOptions): ScreenshotSyncSu
             original_filename: filename,
             target_path: moveResult.targetPath,
             file_timestamp: fileTimestamp.toISOString(),
-          });
+          }, vaultDb);
         } catch {
           // If recordScreenshotSync via getDb fails, try on vaultDb directly
           vaultDb.prepare(`
