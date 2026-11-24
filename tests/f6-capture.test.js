@@ -237,5 +237,37 @@ describe('Auto-Detection & F6 Hotkey Screenshot Capture Suite', () => {
       const pending = getUnmatchedF6Captures(db);
       assert.equal(pending.length, 1, 'Pending token must remain queued for when drive comes back online');
     });
+
+    it('buffers screenshots in Screenshots folder during HDD Mode without moving until explicitly synced or session closes', () => {
+      const gameRes = db.prepare('INSERT INTO games (title, media_folder) VALUES (?, ?)')
+        .run('Sekiro', 'Sekiro');
+      const gameId = Number(gameRes.lastInsertRowid);
+
+      const f6Manager = new F6CaptureManager(db, screenshotsDir, mediaDir);
+      f6Manager.setHddMode(true);
+
+      // Player captures screenshot while playing
+      const capTime = new Date(2026, 10, 20, 23, 15, 0);
+      recordPendingF6Capture(gameId, 'Sekiro', capTime.toISOString(), db);
+
+      const shotFile = 'Screenshot-F6-20261120-231500.png';
+      const shotPath = path.join(screenshotsDir, shotFile);
+      fs.writeFileSync(shotPath, 'SEKIRO_SHOT');
+
+      // The file stays on SSD (C:) while playing
+      assert.equal(fs.existsSync(shotPath), true);
+      const pendingBefore = getUnmatchedF6Captures(db);
+      assert.equal(pendingBefore.length, 1);
+
+      // When game closes or sync is triggered, it moves to HDD
+      const synced = f6Manager.scanAndSync();
+      assert.equal(synced.length, 1);
+      assert.equal(synced[0].gameTitle, 'Sekiro');
+      assert.equal(fs.existsSync(shotPath), false);
+      assert.equal(fs.existsSync(path.join(mediaDir, 'Sekiro', shotFile)), true);
+
+      const pendingAfter = getUnmatchedF6Captures(db);
+      assert.equal(pendingAfter.length, 0);
+    });
   });
 });

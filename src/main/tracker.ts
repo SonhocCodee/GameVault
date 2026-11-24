@@ -691,12 +691,11 @@ export class PlaytimeTracker {
         if (!exeName.toLowerCase().endsWith('.exe')) continue;
         if (this.isSystemProcess(exeName)) continue;
 
-        // If already in database, ensure active session is tracking if idle
+        // If already in database, return existing game record.
+        // Active session tracking is driven by pollOnce when the game is in foreground;
+        // do not force-start an unfocused session that was just closed by the alt-tab timeout.
         const existing = this.findGameByProcess(exeName);
         if (existing) {
-          if (!this.activeSession) {
-            this.handleProcessPoll(exeName, pid, new Date());
-          }
           return existing;
         }
       }

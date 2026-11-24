@@ -1,4 +1,4 @@
-# GameVault FPS helper - runs ELEVATED via the "GameVaultFPS" Scheduled Task.
+﻿# GameVault FPS helper - runs ELEVATED via the "GameVaultFPS" Scheduled Task.
 # One task instance = one capture session:
 #   1. Read handoff config (game exe, output CSV, stop/done signal paths)
 #   2. Start PresentMon targeting the game process (ETW frame capture)
@@ -16,6 +16,21 @@ param(
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# 0. Instantly suppress/hide any console window that conhost allocated
+try {
+    Add-Type -Name Win32ConsoleHelper -Namespace GameVaultNative -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("Kernel32.dll")]
+public static extern System.IntPtr GetConsoleWindow();
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+'@ -ErrorAction SilentlyContinue
+
+    $hWnd = [GameVaultNative.Win32ConsoleHelper]::GetConsoleWindow()
+    if ($hWnd -and $hWnd -ne [System.IntPtr]::Zero) {
+        [GameVaultNative.Win32ConsoleHelper]::ShowWindow($hWnd, 0) | Out-Null
+    }
+} catch {}
+
 function Write-HelperLog {
     param([string]$Message)
     try {
@@ -23,6 +38,24 @@ function Write-HelperLog {
         [System.IO.File]::AppendAllText($logPath, "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message`r`n")
     } catch {}
 }
+
+# Auto-upgrade the GameVaultFPS Scheduled Task to run via wscript.exe + fps-launcher.vbs
+# (Runs elevated with RunLevel Highest so this modification succeeds without UAC prompts).
+try {
+    $scriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
+    if ($scriptDir) {
+        $launcherVbs = Join-Path $scriptDir 'fps-launcher.vbs'
+        if (Test-Path $launcherVbs) {
+            $existingTask = Get-ScheduledTask -TaskName 'GameVaultFPS' -ErrorAction SilentlyContinue
+            if ($existingTask -and $existingTask.Actions[0].Execute -notlike '*wscript*') {
+                $newAction = New-ScheduledTaskAction -Execute 'wscript.exe' `
+                    -Argument "//nologo `"$launcherVbs`" `"$($MyInvocation.MyCommand.Path)`" `"$ConfigFile`""
+                Set-ScheduledTask -TaskName 'GameVaultFPS' -Action $newAction -ErrorAction SilentlyContinue | Out-Null
+                Write-HelperLog "Upgraded GameVaultFPS scheduled task action to silent wscript.exe launcher"
+            }
+        }
+    }
+} catch {}
 
 function Quote-Arg {
     param([string]$Value)
@@ -35,6 +68,20 @@ function Write-DoneFile {
         $json = $Data | ConvertTo-Json -Compress
         [System.IO.File]::WriteAllText($Path, $json)
     } catch {}
+}
+
+function Start-SilentProcess {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = ($ArgumentList -join ' ')
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.CreateNoWindow = $true
+    $psi.UseShellExecute = $false
+    return [System.Diagnostics.Process]::Start($psi)
 }
 
 Write-HelperLog "Helper started (config: $ConfigFile)"
@@ -64,15 +111,6 @@ if (-not $cfg) {
 Remove-Item $ConfigFile -Force -ErrorAction SilentlyContinue
 
 # 2. Build PresentMon arguments.
-#    NOTE: --process_name/--process_id targeting is BROKEN in the
-#    Adrenalin-bundled PresentMon (captures zero frames, or hangs forever).
-#    Therefore that fork records ALL presenting processes and GameVault
-#    filters rows by the Application/ProcessID columns when parsing the CSV.
-#    The official Intel release (GameVault-managed download) handles targeting
-#    correctly — cfg.useProcessTargeting enables it, which shrinks a long
-#    session's CSV from hundreds of MB to a few (only the game's frames are
-#    written to disk).
-#    --v1_metrics CSVs lack a ProcessID column, so default v2 metrics are used.
 $pmArgs = @(
     '--output_file', $cfg.csvPath,
     '--session_name', 'GameVaultFPS',
@@ -88,12 +126,12 @@ if ($cfg.pmExtraArgs) {
     foreach ($a in $cfg.pmExtraArgs) { $pmArgs += [string]$a }
 }
 
-# Spawn PresentMon via the PowerShell call operator (&) — see header comment.
+# Spawn PresentMon via PowerShell call operator (&) with CreateNoWindow = true
 $cmdLine = "& " + (Quote-Arg $cfg.presentMon) + " " + (($pmArgs | ForEach-Object { Quote-Arg $_ }) -join ' ')
-Write-HelperLog "Spawning PM host: $cmdLine"
-$pmHost = Start-Process -FilePath 'powershell.exe' `
-    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $cmdLine) `
-    -PassThru -WindowStyle Hidden
+Write-HelperLog "Spawning PM host silently: $cmdLine"
+$pmHost = Start-SilentProcess -FilePath 'powershell.exe' `
+    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $cmdLine)
+
 if ($pmHost) {
     Write-HelperLog "PM host started with PID $($pmHost.Id)"
 } else {
@@ -113,14 +151,13 @@ while (-not $pmHost.HasExited) {
             (Quote-Arg '--terminate_existing_session') + " " +
             (Quote-Arg '--session_name') + " " + (Quote-Arg 'GameVaultFPS') + " " +
             (Quote-Arg '--no_console_stats')
-        $term = Start-Process -FilePath 'powershell.exe' `
-            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $termCmd) `
-            -PassThru -WindowStyle Hidden
+        $term = Start-SilentProcess -FilePath 'powershell.exe' `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $termCmd)
         if ($term) { $term.WaitForExit(8000) | Out-Null }
         Start-Sleep -Milliseconds 1500
         if (-not $pmHost.HasExited) {
             Write-HelperLog "PM host survived session stop - force killing tree"
-            Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/T', '/F', "/PID", "$($pmHost.Id)") -WindowStyle Hidden
+            Start-SilentProcess -FilePath 'taskkill.exe' -ArgumentList @('/T', '/F', '/PID', "$($pmHost.Id)") | Out-Null
         }
         break
     }

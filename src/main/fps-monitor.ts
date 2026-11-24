@@ -194,12 +194,16 @@ export class FpsMonitor {
     const setupPath = path.join(workDir, 'fps-task-setup.ps1');
     const configPath = this.getConfigPath();
 
+    const launcherPath = this.resolveLauncherPath();
+    const actionArgument = launcherPath
+      ? `//nologo "${launcherPath}" "${helperPath}" "${configPath}"`
+      : `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${helperPath}" -ConfigFile "${configPath}"`;
+    const actionExecute = launcherPath ? 'wscript.exe' : 'powershell.exe';
+
     const setupScript = [
       "$ErrorActionPreference = 'Stop'",
-      `$helper = '${helperPath.replace(/'/g, "''")}'`,
-      `$config = '${configPath.replace(/'/g, "''")}'`,
-      "$action = New-ScheduledTaskAction -Execute 'powershell.exe' " +
-        "-Argument \"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `\"$helper`\" -ConfigFile `\"$config`\"\"",
+      `$action = New-ScheduledTaskAction -Execute '${actionExecute}' ` +
+        `-Argument '${actionArgument.replace(/'/g, "''")}'`,
       "$principal = New-ScheduledTaskPrincipal -UserId \"$env:USERDOMAIN\\$env:USERNAME\" " +
         '-LogonType Interactive -RunLevel Highest',
       "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries " +
@@ -386,6 +390,20 @@ export class FpsMonitor {
       path.join(__dirname, '..', 'resources', 'fps-helper.ps1'),
       path.join(__dirname, '..', '..', 'resources', 'fps-helper.ps1'),
       path.join(__dirname, '..', '..', '..', 'resources', 'fps-helper.ps1'),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) return candidate;
+      } catch {}
+    }
+    return null;
+  }
+
+  private resolveLauncherPath(): string | null {
+    const candidates = [
+      path.join(__dirname, '..', 'resources', 'fps-launcher.vbs'),
+      path.join(__dirname, '..', '..', 'resources', 'fps-launcher.vbs'),
+      path.join(__dirname, '..', '..', '..', 'resources', 'fps-launcher.vbs'),
     ];
     for (const candidate of candidates) {
       try {

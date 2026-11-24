@@ -54,6 +54,7 @@ export class F6CaptureManager {
   public hddMode: boolean = true;
   public hotkeyVk: number = 0x75; // VK_F6
   public hotkeyName: string = 'F6';
+  public lastCaptureTime: number = 0;
   private pollInterval: NodeJS.Timeout | null = null;
   private watcher: fs.FSWatcher | null = null;
   private syncDebounceTimer: NodeJS.Timeout | null = null;
@@ -255,6 +256,7 @@ $bmp.Dispose()
     }
 
     if (activeGame) {
+      this.lastCaptureTime = Date.now();
       const timestampIso = now.toISOString();
       const captureId = recordPendingF6Capture(activeGame.id, activeGame.title, timestampIso, this.db);
       console.log(`[F6Capture] Logged capture token for "${activeGame.title}" at ${timestampIso} (HDD Mode: ${this.hddMode ? 'ON' : 'OFF'})`);
@@ -268,10 +270,14 @@ $bmp.Dispose()
         this.captureDirectToGameFolder(activeGame.id, activeGame.title, now, captureId);
       }
 
-      // Proactively schedule sync sweeps to pick up file as soon as screenshot tool writes it
-      setTimeout(() => this.scanAndSync(), 400);
-      setTimeout(() => this.scanAndSync(), 1200);
-      setTimeout(() => this.scanAndSync(), 2500);
+      // In SSD mode (HDD mode OFF), proactively schedule sync sweeps to pick up file immediately.
+      // In HDD mode (buffer on SSD & sync later), DO NOT sync during gameplay to allow HDD to remain asleep (spin-down).
+      // Screenshots stay buffered in screenshotsDir on SSD until the session ends or user manually syncs.
+      if (!this.hddMode) {
+        setTimeout(() => this.scanAndSync(), 400);
+        setTimeout(() => this.scanAndSync(), 1200);
+        setTimeout(() => this.scanAndSync(), 2500);
+      }
 
       return { gameTitle: activeGame.title, timestamp: now };
     }
@@ -295,6 +301,17 @@ $bmp.Dispose()
         if (!filename) return;
         const ext = path.extname(filename).toLowerCase();
         if (!SUPPORTED_EXTENSIONS.has(ext)) return;
+
+        // When HDD Mode is ON: do NOT immediately sync to HDD while in-game or right after capture.
+        // This keeps the HDD completely asleep during gameplay, buffering screenshots safely in SSD.
+        if (this.hddMode) {
+          const tracker = getTracker();
+          const isRecentCapture = Date.now() - this.lastCaptureTime < 60000;
+          if (tracker?.activeSession || isRecentCapture) {
+            console.log('[F6Capture] HDD Mode ON: screenshot buffered in temporary folder, keeping HDD asleep during gameplay.');
+            return;
+          }
+        }
 
         if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
         this.syncDebounceTimer = setTimeout(() => {
