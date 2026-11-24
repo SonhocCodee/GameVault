@@ -14,11 +14,143 @@ export interface AMDImportOptions {
 }
 
 /**
+ * Fast, pure-binary PE VersionInfo parser for Windows executables (.exe).
+ * Reads the PE header, navigates to the .rsrc section and extracts
+ * FileDescription and ProductName directly from StringFileInfo in ~1ms.
+ * Requires 0 external processes or PowerShell calls.
+ */
+export function parsePeVersionInfo(filePath: string): { fileDescription: string | null; productName: string | null } | null {
+  if (!filePath) return null;
+  let fd: number | undefined;
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    fd = fs.openSync(filePath, 'r');
+    const headerBuf = Buffer.alloc(1024);
+    fs.readSync(fd, headerBuf, 0, 1024, 0);
+
+    // Verify DOS 'MZ' signature
+    if (headerBuf.readUInt16LE(0) !== 0x5a4d) {
+      return null;
+    }
+
+    const peOffset = headerBuf.readUInt32LE(0x3c);
+    const peBuf = Buffer.alloc(1024);
+    fs.readSync(fd, peBuf, 0, 1024, peOffset);
+
+    // Verify 'PE\0\0'
+    if (peBuf.readUInt32LE(0) !== 0x00004550) {
+      return null;
+    }
+
+    const numSections = peBuf.readUInt16LE(6);
+    const optHeaderSize = peBuf.readUInt16LE(20);
+    const optHeaderOffset = 24;
+
+    const magic = peBuf.readUInt16LE(optHeaderOffset);
+    const is64 = magic === 0x20b;
+    const is32 = magic === 0x10b;
+    if (!is64 && !is32) return null;
+
+    const dataDirOffset = optHeaderOffset + (is64 ? 112 : 96);
+    const rsrcRva = peBuf.readUInt32LE(dataDirOffset + 16);
+    const rsrcSize = peBuf.readUInt32LE(dataDirOffset + 20);
+    if (!rsrcRva || !rsrcSize) return null;
+
+    const secTableOffset = peOffset + optHeaderOffset + optHeaderSize;
+    const secBuf = Buffer.alloc(numSections * 40);
+    fs.readSync(fd, secBuf, 0, secBuf.length, secTableOffset);
+
+    let rsrcSec: { vAddr: number; rawPtr: number; rawSize: number } | null = null;
+    for (let i = 0; i < numSections; i++) {
+      const sOffset = i * 40;
+      const vAddr = secBuf.readUInt32LE(sOffset + 12);
+      const vSize = secBuf.readUInt32LE(sOffset + 8);
+      const rawSize = secBuf.readUInt32LE(sOffset + 16);
+      const rawPtr = secBuf.readUInt32LE(sOffset + 20);
+
+      if (rsrcRva >= vAddr && rsrcRva < vAddr + Math.max(vSize, rawSize)) {
+        rsrcSec = { vAddr, rawPtr, rawSize };
+        break;
+      }
+    }
+
+    if (!rsrcSec) return null;
+
+    const readSize = Math.min(rsrcSize, 2 * 1024 * 1024);
+    const rsrcData = Buffer.alloc(readSize);
+    const rsrcFileOffset = rsrcSec.rawPtr + (rsrcRva - rsrcSec.vAddr);
+    fs.readSync(fd, rsrcData, 0, readSize, rsrcFileOffset);
+
+    const fileDesc = extractUtf16StringFromBuffer(rsrcData, 'FileDescription');
+    const prodName = extractUtf16StringFromBuffer(rsrcData, 'ProductName');
+
+    return { fileDescription: fileDesc, productName: prodName };
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+}
+
+function extractUtf16StringFromBuffer(buf: Buffer, key: string): string | null {
+  const keyBuf = Buffer.from(key + '\0', 'utf16le');
+  let idx = buf.indexOf(keyBuf);
+  if (idx === -1) return null;
+
+  idx += keyBuf.length;
+  while (idx < buf.length && buf.readUInt16LE(idx) === 0) {
+    idx += 2;
+  }
+  if (idx >= buf.length) return null;
+
+  const start = idx;
+  while (idx + 1 < buf.length && buf.readUInt16LE(idx) !== 0) {
+    idx += 2;
+  }
+  if (idx > start) {
+    return buf.subarray(start, idx).toString('utf16le').trim();
+  }
+  return null;
+}
+
+function cleanPeTitle(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/[\u2122\u00ae]/g, '')
+    .replace(/\((?:tm|r)\)/gi, '')
+    .replace(/\s+(?:Client|Game Client)$/i, '')
+    .trim();
+}
+
+function isGenericTitle(str: string): boolean {
+  const s = (str || '').toLowerCase().trim();
+  return /^(game|shipping|client|launcher|unrealengine|unity|crashhandler|bootstrap|setup|installer|start)$/i.test(s);
+}
+
+/**
  * Extracts a readable and clean game title from an executable path.
- * Strips directory components, common prefixes/suffixes, and expands PascalCase.
+ * 1. Reads embedded PE VersionInfo (FileDescription / ProductName) directly from the .exe binary.
+ * 2. If missing or generic, strips directory components, prefixes/suffixes, and expands PascalCase.
+ * 3. Falls back to parent folder if title is an abbreviation or generic name.
  */
 export function extractTitleFromExe(exePath?: string | null): string {
   if (!exePath) return 'Unknown Game';
+
+  // 1. Try reading embedded PE VersionInfo directly from the executable binary
+  try {
+    const peInfo = parsePeVersionInfo(exePath);
+    if (peInfo) {
+      const candidate = peInfo.fileDescription || peInfo.productName || '';
+      const cleaned = cleanPeTitle(candidate);
+      if (cleaned && !isGenericTitle(cleaned) && cleaned.length >= 2) {
+        return cleaned;
+      }
+    }
+  } catch {}
+
+  // 2. Synthesize from exe filename
   let base = path.basename(exePath);
   base = base.replace(/\.exe$/i, '');
   base = base.replace(/-Win64-Shipping$/i, '');
@@ -27,7 +159,7 @@ export function extractTitleFromExe(exePath?: string | null): string {
   base = base.replace(/([a-z])([A-Z0-9])/g, '$1 $2');
   let cleaned = base.trim();
 
-  // If title is an abbreviation like "re 9", "re2", or generic "game", use descriptive parent folder
+  // 3. If title is an abbreviation like "re 9", "re2", or generic "game", use descriptive parent folder
   if (/^re\s*\d+$/i.test(cleaned) || cleaned.toLowerCase() === 'game' || cleaned.toLowerCase() === 'shipping') {
     const parent = path.basename(path.dirname(exePath));
     if (parent && !/^(bin|binaries|win64|win32|x64|x86|release|debug)$/i.test(parent)) {

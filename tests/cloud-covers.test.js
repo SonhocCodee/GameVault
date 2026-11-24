@@ -1,0 +1,503 @@
+import { test, describe, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import worker from '../worker/src/index.ts';
+import {
+  createTestWorkerEnv,
+  createTestSessionToken,
+  authHeader,
+} from './test-helpers-cloudflare.js';
+import { initDb, closeDb, createGame, getGames, getGameById, updateGame } from '../src/main/db.ts';
+import {
+  configureCloudDb,
+  getCloudGameCover,
+  cacheCloudGameCover,
+  uploadCloudGameCover,
+  adminGetCloudCovers,
+  adminUpdateCloudCover,
+  adminDeleteCloudCover,
+} from '../src/main/cloud-db.ts';
+import { configureAuth, persistSession, clearSession } from '../src/main/auth.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { resolveWebCoversForGame, autoEnrichAllGameCovers, migrateExternalCoversToCloud } from '../src/main/covers.ts';
+
+describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
+  let env;
+  let d1;
+  let r2;
+  let aliceToken;
+  let bobToken;
+  let adminToken;
+  let tmpUserDataDir;
+  const aliceUid = 'gamer_alice';
+  const bobUid = 'gamer_bob';
+
+  // Sample binary image mock (1x1 PNG)
+  const samplePngBuffer = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+    0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+    0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+  ]);
+
+  beforeEach(async () => {
+    initDb(':memory:');
+    const testEnv = await createTestWorkerEnv();
+    env = testEnv.env;
+    d1 = testEnv.d1;
+    r2 = testEnv.r2;
+
+    aliceToken = await createTestSessionToken(
+      { uid: aliceUid, email: 'alice@gamevault.test', displayName: 'Alice' },
+      env.SESSION_SECRET
+    );
+    bobToken = await createTestSessionToken(
+      { uid: bobUid, email: 'bob@gamevault.test', displayName: 'Bob' },
+      env.SESSION_SECRET
+    );
+
+    adminToken = await createTestSessionToken(
+      { uid: 'admin_pawpaw', email: 'son6232000@gmail.com', displayName: 'PawPaw' },
+      env.SESSION_SECRET
+    );
+
+    tmpUserDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gv-covers-admin-'));
+
+    // Mock global fetch for worker external image downloads
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      const urlStr = String(url);
+      if (urlStr.includes('steamstatic') || urlStr.includes('igdb') || urlStr.includes('wikimedia') || urlStr.includes('external-art')) {
+        return new Response(samplePngBuffer, {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        });
+      }
+      return originalFetch(url, init);
+    };
+
+    // Configure client-side cloud-db to communicate with in-memory worker
+    const fetchImpl = async (url, init = {}) => {
+      const req = new Request(url, init);
+      return worker.fetch(req, env);
+    };
+    configureCloudDb({ workerApiUrl: 'http://localhost', fetchImpl });
+  });
+
+  afterEach(() => {
+    closeDb();
+    configureCloudDb({ fetchImpl: undefined, workerApiUrl: undefined, userDataDir: undefined });
+    configureAuth({ userDataDir: undefined });
+    try {
+      if (tmpUserDataDir) fs.rmSync(tmpUserDataDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  // ==========================================================================
+  // Part 1: Central Cloud Worker Endpoints
+  // ==========================================================================
+  describe('Worker Covers API (/api/covers)', () => {
+    test('1.1: Uncached game returns 404 from GET /api/covers/:gameKey', async () => {
+      const res = await worker.fetch(new Request('http://localhost/api/covers/unknown-game-123'), env);
+      assert.equal(res.status, 404);
+      const data = await res.json();
+      assert.equal(data.found, false);
+      assert.equal(data.gameKey, 'unknown-game-123');
+    });
+
+    test('1.2: First user plays new game -> POST /api/covers/cache downloads external URL and permanently stores in cloud', async () => {
+      const payload = {
+        gameKey: 't_black_myth_wukong',
+        title: 'Black Myth: Wukong',
+        steamId: 2358720,
+        sourcePosterUrl: 'https://external-art.test/wukong_poster.png',
+        sourceBannerUrl: 'https://external-art.test/wukong_banner.png',
+      };
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/covers/cache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }),
+        env
+      );
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.gameKey, 't_black_myth_wukong');
+      assert.equal(data.title, 'Black Myth: Wukong');
+      assert.equal(data.fromCache, false);
+      assert.ok(data.coverUrl.startsWith('/api/images/cover_t_black_myth_wukong_poster'));
+      assert.ok(data.bannerUrl.startsWith('/api/images/cover_t_black_myth_wukong_banner'));
+
+      // Verify image exists and can be retrieved directly from cloud storage
+      const imgRes = await worker.fetch(new Request(`http://localhost${data.coverUrl}`), env);
+      assert.equal(imgRes.status, 200);
+      assert.equal(imgRes.headers.get('Content-Type'), 'image/png');
+      assert.equal(imgRes.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+    });
+
+    test('1.3: Second user (and all other users) retrieves EXACT SAME cloud URL from cache without re-downloading', async () => {
+      // User Alice caches the game first
+      const firstRes = await (
+        await worker.fetch(
+          new Request('http://localhost/api/covers/cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              gameKey: 't_elden_ring',
+              title: 'Elden Ring',
+              steamId: 1245620,
+              sourcePosterUrl: 'https://external-art.test/elden_ring.png',
+            }),
+          }),
+          env
+        )
+      ).json();
+
+      assert.equal(firstRes.fromCache, false);
+      const originalCoverUrl = firstRes.coverUrl;
+      assert.ok(originalCoverUrl);
+
+      // User Bob queries /api/covers/:gameKey
+      const getRes = await worker.fetch(new Request('http://localhost/api/covers/t_elden_ring'), env);
+      assert.equal(getRes.status, 200);
+      const getData = await getRes.json();
+      assert.equal(getData.found, true);
+      assert.equal(getData.coverUrl, originalCoverUrl, 'Bob must receive Alice-cached cloud URL');
+
+      // User Bob calls POST /api/covers/cache
+      const secondRes = await (
+        await worker.fetch(
+          new Request('http://localhost/api/covers/cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              gameKey: 't_elden_ring',
+              title: 'Elden Ring',
+              sourcePosterUrl: 'https://some-other-url.test/diff.png',
+            }),
+          }),
+          env
+        )
+      ).json();
+
+      assert.equal(secondRes.fromCache, true, 'Subsequent calls must be served from cache');
+      assert.equal(secondRes.coverUrl, originalCoverUrl, 'Cover URL must be identical for all users');
+    });
+
+    test('1.4: Direct cover upload updates central catalog and is accessible globally', async () => {
+      const uploadRes = await worker.fetch(
+        new Request('http://localhost/api/covers/upload?gameKey=t_custom_game&type=poster&title=Custom+Game', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'image/png',
+          },
+          body: samplePngBuffer,
+        }),
+        env
+      );
+
+      assert.equal(uploadRes.status, 201);
+      const data = await uploadRes.json();
+      assert.equal(data.success, true);
+      assert.ok(data.url.startsWith('/api/images/cover_t_custom_game_poster'));
+
+      // Verify central catalog has it
+      const catRes = await worker.fetch(new Request('http://localhost/api/covers/t_custom_game'), env);
+      const catData = await catRes.json();
+      assert.equal(catData.found, true);
+      assert.equal(catData.coverUrl, data.url);
+    });
+
+    test('1.5: Fallback to D1 image_store when IMAGES_BUCKET (R2) is disabled', async () => {
+      // Create environment with DB only (no IMAGES_BUCKET)
+      const noR2Env = {
+        DB: d1,
+        SESSION_SECRET: env.SESSION_SECRET,
+      };
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/covers/cache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gameKey: 't_hades2',
+            title: 'Hades II',
+            sourcePosterUrl: 'https://external-art.test/hades2.png',
+          }),
+        }),
+        noR2Env
+      );
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.ok(data.coverUrl);
+
+      // Verify image was saved into D1 image_store and can be served
+      const imgRes = await worker.fetch(new Request(`http://localhost${data.coverUrl}`), noR2Env);
+      assert.equal(imgRes.status, 200);
+      assert.equal(imgRes.headers.get('Content-Type'), 'image/png');
+    });
+  });
+
+  // ==========================================================================
+  // Part 2: Desktop Client Integration (covers.ts & cloud-db.ts)
+  // ==========================================================================
+  describe('Desktop Client Cover Resolution & Cloud Ingestion', () => {
+    test('2.1: resolveWebCoversForGame checks cloud first; if missing, caches to cloud and saves cloud URL', async () => {
+      const g = createGame({
+        title: 'Resident Evil 4',
+        steam_id: 2050650,
+      });
+
+      const db = {
+        prepare: () => ({
+          run: () => {},
+        }),
+      };
+
+      const result = await resolveWebCoversForGame(db, g, {
+        fetchImpl: async () => new Response(samplePngBuffer, { headers: { 'Content-Type': 'image/png' } }),
+      });
+
+      assert.ok(result.poster);
+      assert.ok(result.poster.includes('/api/images/cover_2050650_poster'), 'Local game must receive permanent cloud URL');
+
+      // Now verify that the cloud database actually has this game permanently stored
+      const cloudCheck = await getCloudGameCover('2050650');
+      assert.ok(cloudCheck);
+      assert.equal(cloudCheck.found, true);
+      assert.equal(cloudCheck.coverUrl, result.poster);
+    });
+
+    test('2.2: Second user resolves the same game and instantly gets the cloud URL without hitting external CDN', async () => {
+      // User 1 uploads/caches game cover
+      await cacheCloudGameCover({
+        gameKey: 't_sekiro',
+        title: 'Sekiro',
+        steamId: 814380,
+        sourcePosterUrl: 'https://external-art.test/sekiro_art.png',
+      });
+
+      // User 2 runs resolveWebCoversForGame for Sekiro
+      const db = { prepare: () => ({ run: () => {} }) };
+      const gUser2 = { id: 99, title: 'Sekiro', steam_id: 814380 };
+
+      // Make external fetch throw to prove it NEVER hits external network
+      const result = await resolveWebCoversForGame(db, gUser2, {
+        fetchImpl: async () => {
+          throw new Error('Should not hit external network when cached in cloud!');
+        },
+      });
+
+      assert.ok(result.poster);
+      assert.ok(result.poster.includes('/api/images/cover_814380_poster'));
+    });
+
+    test('2.3: autoEnrichAllGameCovers enriches missing covers by storing permanently in cloud', async () => {
+      // Game without cover art
+      const game = createGame({
+        title: 'Cyberpunk 2077',
+        steam_id: 1091500,
+      });
+
+      assert.equal(game.cover_url, null);
+
+      // Run auto-enrich pass
+      const updatedCount = await autoEnrichAllGameCovers(undefined, {
+        fetchImpl: async () => new Response(samplePngBuffer, { headers: { 'Content-Type': 'image/png' } }),
+      });
+
+      assert.ok(updatedCount >= 1);
+
+      // Verify the game in SQLite local database now points to the permanent cloud URL
+      const refreshed = getGameById(game.id);
+      assert.ok(refreshed.cover_url.includes('/api/images/cover_1091500_poster'));
+      assert.ok(refreshed.banner_url.includes('/api/images/cover_1091500_banner'));
+    });
+
+    test('2.4: migrateExternalCoversToCloud migrates fragile external URLs to durable cloud URLs', async () => {
+      const game = createGame({
+        title: 'Death Stranding 2',
+        steam_id: 3280350,
+        cover_url: 'https://external-art.test/ds2_poster.png',
+        banner_url: 'https://external-art.test/ds2_banner.png',
+      });
+
+      assert.ok(game.cover_url.startsWith('https://external-art.test'));
+
+      const migrated = await migrateExternalCoversToCloud();
+      assert.ok(migrated >= 1);
+
+      const refreshed = getGameById(game.id);
+      assert.ok(refreshed.cover_url.includes('/api/images/cover_3280350_poster'));
+      assert.ok(refreshed.banner_url.includes('/api/images/cover_3280350_banner'));
+    });
+  });
+
+  // ==========================================================================
+  // Part 3: Admin Covers Management & Security Enforcement
+  // ==========================================================================
+  describe('Admin Covers Management API & Access Control', () => {
+    test('3.1: Unauthenticated request to GET /api/admin/covers returns 401', async () => {
+      const res = await worker.fetch(new Request('http://localhost/api/admin/covers'), env);
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.ok(data.error.includes('Authentication required'));
+    });
+
+    test('3.2: Non-admin user (Alice / Bob) is rejected from GET /api/admin/covers with 403', async () => {
+      const res = await worker.fetch(
+        new Request('http://localhost/api/admin/covers', {
+          headers: authHeader(aliceToken),
+        }),
+        env
+      );
+      assert.equal(res.status, 403);
+      const data = await res.json();
+      assert.ok(data.error.includes('Admin access required'));
+    });
+
+    test('3.3: Admin user (son6232000@gmail.com) can list and search game covers with pagination', async () => {
+      // Seed some game covers
+      await d1.prepare(`
+        INSERT INTO game_covers (game_key, title, steam_id, cover_url, banner_url, updated_at)
+        VALUES ('t_elden_ring', 'Elden Ring', 1245620, '/api/images/elden.jpg', '/api/images/elden_hero.jpg', datetime('now')),
+               ('t_hades_2', 'Hades II', 1145350, '/api/images/hades.jpg', '/api/images/hades_hero.jpg', datetime('now'))
+      `).run();
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/admin/covers?query=elden', {
+          headers: authHeader(adminToken),
+        }),
+        env
+      );
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.total, 1);
+      assert.equal(data.covers.length, 1);
+      assert.equal(data.covers[0].game_key, 't_elden_ring');
+      assert.equal(data.covers[0].title, 'Elden Ring');
+    });
+
+    test('3.4: Non-admin user cannot update covers (PUT /api/admin/covers/:gameKey returns 403)', async () => {
+      const res = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/t_elden_ring', {
+          method: 'PUT',
+          headers: {
+            ...authHeader(aliceToken),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title: 'Hacked Title' }),
+        }),
+        env
+      );
+      assert.equal(res.status, 403);
+    });
+
+    test('3.5: Admin user can update/override poster and banner URLs and external image gets ingested', async () => {
+      const payload = {
+        title: 'Elden Ring Shadow of the Erdtree',
+        steamId: 1245620,
+        sourcePosterUrl: 'https://external-art.test/er_new_poster.png',
+        sourceBannerUrl: 'https://external-art.test/er_new_banner.png',
+      };
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/t_elden_ring', {
+          method: 'PUT',
+          headers: {
+            ...authHeader(adminToken),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }),
+        env
+      );
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.cover.title, 'Elden Ring Shadow of the Erdtree');
+      assert.ok(data.cover.cover_url.startsWith('/api/images/cover_t_elden_ring_poster'));
+      assert.ok(data.cover.banner_url.startsWith('/api/images/cover_t_elden_ring_banner'));
+
+      // Verify any regular user fetching this game gets the admin-updated images
+      const checkRes = await worker.fetch(new Request('http://localhost/api/covers/t_elden_ring'), env);
+      assert.equal(checkRes.status, 200);
+      const checkData = await checkRes.json();
+      assert.equal(checkData.coverUrl, data.cover.cover_url);
+      assert.equal(checkData.bannerUrl, data.cover.banner_url);
+    });
+
+    test('3.6: Admin user can delete a cover from the cloud catalog (DELETE /api/admin/covers/:gameKey)', async () => {
+      const res = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/t_elden_ring', {
+          method: 'DELETE',
+          headers: authHeader(adminToken),
+        }),
+        env
+      );
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+
+      // Verify it is no longer in catalog
+      const checkRes = await worker.fetch(new Request('http://localhost/api/covers/t_elden_ring'), env);
+      assert.equal(checkRes.status, 404);
+    });
+
+    test('3.7: Client methods adminGetCloudCovers, adminUpdateCloudCover, adminDeleteCloudCover function properly', async () => {
+      // Configure client auth with admin token
+      configureAuth({
+        config: { workerApiUrl: 'http://localhost' },
+        userDataDir: tmpUserDataDir,
+      });
+      configureCloudDb({
+        workerApiUrl: 'http://localhost',
+        userDataDir: tmpUserDataDir,
+        fetchImpl: async (url, init = {}) => worker.fetch(new Request(url, init), env),
+      });
+
+      persistSession(
+        {
+          sessionToken: adminToken,
+          expiresAt: Date.now() + 3600 * 1000,
+          user: {
+            uid: 'admin_pawpaw',
+            email: 'son6232000@gmail.com',
+            displayName: 'PawPaw',
+          },
+        },
+        { userDataDir: tmpUserDataDir }
+      );
+
+      // 1. Create/update a cover via client admin method
+      const updateRes = await adminUpdateCloudCover('2358720', {
+        title: 'Black Myth Wukong Remastered',
+        steamId: 2358720,
+        sourcePosterUrl: 'https://external-art.test/wukong_custom.png',
+      });
+      assert.equal(updateRes.success, true);
+      assert.equal(updateRes.cover.title, 'Black Myth Wukong Remastered');
+      assert.ok(updateRes.cover.cover_url.includes('/api/images/cover_2358720_poster'));
+
+      // 2. Fetch via client admin method
+      const listRes = await adminGetCloudCovers({ query: 'Wukong' });
+      assert.equal(listRes.total, 1);
+      assert.equal(listRes.covers[0].title, 'Black Myth Wukong Remastered');
+
+      // 3. Delete via client admin method
+      const delRes = await adminDeleteCloudCover('2358720');
+      assert.equal(delRes.success, true);
+
+      const checkDel = await getCloudGameCover('2358720');
+      assert.equal(checkDel.found, false);
+    });
+  });
+});

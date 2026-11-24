@@ -33,6 +33,7 @@ import {
   getGameMedia,
   getGameFolderPath,
   setMediaBaseDir,
+  normalizeForMatch,
 } from './media.js';
 import { getPlaytimeWatchImporter } from './ptwatch.js';
 import {
@@ -79,6 +80,10 @@ import {
   unvotePick,
   syncLibraryWithCloud,
   getCloudLibrary,
+  adminGetCloudCovers,
+  adminUpdateCloudCover,
+  adminDeleteCloudCover,
+  uploadCloudGameCover,
 } from './cloud-db.js';
 import {
   getSavesList,
@@ -250,6 +255,10 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc) => {
     console.error('[main] Window failed to load:', code, desc);
+  });
+
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    console.error(`[Renderer Log ${level}] ${message} (${sourceId}:${line})`);
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -743,22 +752,113 @@ function registerIpcHandlers(): void {
     return getCloudLibrary();
   });
 
+  // Admin Covers Management
+  ipcMain.handle('admin:getCovers', async (_event, params?: { query?: string; limit?: number; offset?: number }) => {
+    return adminGetCloudCovers(params);
+  });
+
+  ipcMain.handle('admin:updateCover', async (_event, gameKey: string, payload: any) => {
+    const result = await adminUpdateCloudCover(gameKey, payload);
+    try {
+      const localGames = getGames();
+      for (const g of localGames) {
+        const key1 = g.steam_id ? String(g.steam_id) : '';
+        const key2 = `t_${normalizeForMatch(g.title)}`;
+        if (key1 === gameKey || key2 === gameKey || g.title.toLowerCase().trim() === (payload.title || '').toLowerCase().trim()) {
+          const patch: any = {};
+          if (result.cover?.cover_url) patch.cover_url = result.cover.cover_url;
+          if (result.cover?.banner_url) patch.banner_url = result.cover.banner_url;
+          if (Object.keys(patch).length > 0) {
+            const updated = updateGame(g.id, patch);
+            mainWindow?.webContents?.send('game:updated', updated);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[main] Failed to sync admin cover update to local game:', err);
+    }
+    return result;
+  });
+
+  ipcMain.handle('admin:deleteCover', async (_event, gameKey: string) => {
+    return adminDeleteCloudCover(gameKey);
+  });
+
+  ipcMain.handle('admin:uploadCover', async (_event, gameKey: string, type: 'poster' | 'banner', filePath?: string, meta?: { title?: string; steamId?: number }) => {
+    let targetPath = filePath;
+    if (!targetPath) {
+      const res = await dialog.showOpenDialog(mainWindow!, {
+        title: `Chọn ảnh ${type === 'poster' ? 'Poster (2:3)' : 'Banner (16:9)'}`,
+        properties: ['openFile'],
+        filters: [{ name: 'Hình ảnh', extensions: ['jpg', 'jpeg', 'png', 'webp', 'avif'] }],
+      });
+      if (res.canceled || res.filePaths.length === 0) return null;
+      targetPath = res.filePaths[0];
+    }
+    const ext = path.extname(targetPath).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.avif': 'image/avif',
+    };
+    const mimeType = mimeMap[ext] || 'image/jpeg';
+    const buf = fs.readFileSync(targetPath);
+    const cloudUrl = await uploadCloudGameCover(gameKey, type, buf, mimeType, meta);
+    return cloudUrl;
+  });
+
   // Media (Screenshot) sync via Google Drive
   ipcMain.handle('drive:uploadMedia', async (_event, options?: { gameTitle?: string; localMediaBaseDir?: string }) => {
-    return uploadMediaToDrive({
-      ...options,
-      onProgress: (prog) => {
-        mainWindow?.webContents.send('drive:mediaProgress', prog);
-      },
-    });
+    try {
+      return await uploadMediaToDrive({
+        ...options,
+        onProgress: (prog) => {
+          mainWindow?.webContents.send('drive:mediaProgress', prog);
+        },
+      });
+    } finally {
+      mainWindow?.webContents.send('drive:mediaProgress', {
+        type: 'upload',
+        current: 0,
+        total: 0,
+        percent: 100,
+        currentFile: '',
+        currentGame: '',
+        bytesTransferred: 0,
+        totalBytes: 0,
+        speedBytesPerSec: 0,
+        formattedSpeed: '0 KB/s',
+        formattedTransferred: '0 MB',
+        formattedTotal: '0 MB',
+      });
+    }
   });
   ipcMain.handle('drive:downloadMedia', async (_event, options?: { gameTitle?: string; localMediaBaseDir?: string }) => {
-    return downloadMediaFromDrive({
-      ...options,
-      onProgress: (prog) => {
-        mainWindow?.webContents.send('drive:mediaProgress', prog);
-      },
-    });
+    try {
+      return await downloadMediaFromDrive({
+        ...options,
+        onProgress: (prog) => {
+          mainWindow?.webContents.send('drive:mediaProgress', prog);
+        },
+      });
+    } finally {
+      mainWindow?.webContents.send('drive:mediaProgress', {
+        type: 'download',
+        current: 0,
+        total: 0,
+        percent: 100,
+        currentFile: '',
+        currentGame: '',
+        bytesTransferred: 0,
+        totalBytes: 0,
+        speedBytesPerSec: 0,
+        formattedSpeed: '0 KB/s',
+        formattedTransferred: '0 MB',
+        formattedTotal: '0 MB',
+      });
+    }
   });
   ipcMain.handle('drive:getMediaStats', async () => {
     return getDriveMediaStats();

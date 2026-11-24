@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { getDb, recordScreenshotSync, getUnmatchedF6Captures, markF6CaptureMatched } from './db.ts';
+import { getGoogleDriveDesktopMediaDir } from './google-drive-desktop.ts';
 import type { ScreenshotSyncOptions, ScreenshotSyncSummary } from '../shared/types.js';
 
 export const DEFAULT_SCREENSHOTS_DIR: string = process.env.USERPROFILE
@@ -22,6 +23,7 @@ export const SUPPORTED_EXTENSIONS = new Set([
 export interface ExtendedSyncOptions extends ScreenshotSyncOptions {
   sourceDir?: string;
   mediaBaseDir?: string;
+  gdriveBaseDir?: string | null;
   targetDb?: DatabaseSync;
   bufferSeconds?: number;
   targetGameId?: number;
@@ -318,11 +320,36 @@ export function syncScreenshots(options?: ExtendedSyncOptions): ScreenshotSyncSu
 
     results.matched++;
 
-    const folderName = matchedSession.media_folder || sanitizeTitleForFolder(matchedSession.title);
-    const destFolder = path.join(mediaBaseDir, folderName);
+    let folderName = matchedSession.media_folder || sanitizeTitleForFolder(matchedSession.title);
+    let destFolder = '';
+    if (path.isAbsolute(folderName)) {
+      destFolder = folderName;
+      folderName = path.basename(folderName);
+    } else {
+      destFolder = path.join(mediaBaseDir, folderName);
+    }
 
     if (!dryRun) {
       try {
+        // Ensure Google Drive has a copy before moving from C: to E:
+        try {
+          const gdriveDir = options?.gdriveBaseDir !== undefined
+            ? options.gdriveBaseDir
+            : (options?.targetDb ? null : getGoogleDriveDesktopMediaDir());
+          if (gdriveDir) {
+            const gdriveFolder = path.join(gdriveDir, folderName);
+            if (!fs.existsSync(gdriveFolder)) {
+              fs.mkdirSync(gdriveFolder, { recursive: true });
+            }
+            const gdriveTarget = path.join(gdriveFolder, filename);
+            if (!fs.existsSync(gdriveTarget)) {
+              fs.copyFileSync(fullPath, gdriveTarget);
+            }
+          }
+        } catch (gErr) {
+          console.warn(`[syncScreenshots] Google Drive mirror skipped for ${filename}:`, gErr);
+        }
+
         const moveResult = copyAndUnlink(fullPath, destFolder, filename);
         
         // Log to history table

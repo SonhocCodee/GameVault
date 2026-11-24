@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LogIn, LogOut, Cpu, ChevronDown, Loader2, User } from 'lucide-react';
-import type { AuthStatus, HardwareProfile } from '../../shared/types.js';
+import { LogIn, LogOut, Cpu, ChevronDown, Loader2, User, ShieldCheck } from 'lucide-react';
+import { type AuthStatus, type HardwareProfile, isAdminEmail } from '../../shared/types.js';
 
 interface AuthBadgeProps {
   onChanged?: (status: AuthStatus) => void;
+  onOpenAdminModal?: () => void;
 }
 
 /**
  * Navbar identity widget: "Đăng nhập" button when logged out (opens the system
  * browser via OAuth loopback), avatar + dropdown when logged in.
  */
-export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged }) => {
+export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged, onOpenAdminModal }) => {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,8 +143,23 @@ export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged }) => {
             <ChevronDown className="h-3 w-3 text-[#8e95a5]" />
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-xl border border-[#2a2e3d] bg-[#161821] p-1.5 shadow-2xl">
-              <div className="px-2.5 py-1.5 text-[10px] text-[#8e95a5]">{profile.email}</div>
+            <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-xl border border-[#2a2e3d] bg-[#161821] p-1.5 shadow-2xl">
+              <div className="px-2.5 py-1.5 text-[10px] text-[#8e95a5] border-b border-[#2a2e3d]/60 mb-1">
+                <div className="font-semibold text-white truncate">{profile.displayName}</div>
+                <div className="truncate">{profile.email}</div>
+              </div>
+              {isAdminEmail(profile.email) && onOpenAdminModal && (
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenAdminModal();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-amber-400 font-semibold transition hover:bg-amber-500/10 hover:text-amber-300"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Quản trị Bìa Game
+                </button>
+              )}
               <button
                 onClick={openHwModal}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-[#8e95a5] transition hover:bg-[#0e1015] hover:text-white"

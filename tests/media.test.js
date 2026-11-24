@@ -373,6 +373,13 @@ describe('Media Management & HTTP 206 Streaming Suite (R5 & R6)', () => {
         'tiny names must not match via title-contains poisoning'
       );
 
+      // Sequel distinction: 'Alan Wake 2' must never match prequel 'Alan Wake'
+      assert.equal(
+        pickBestAppMatch('Alan Wake 2', [{ appid: 108710, name: 'Alan Wake' }]),
+        null,
+        'sequel query must never match prequel without the sequel number'
+      );
+
       const typo = pickBestAppMatch('Eldne Ring', [{ appid: 1245620, name: 'ELDEN RING' }]);
       assert.equal(typo.appid, 1245620, 'small typos still resolve via levenshtein tolerance');
     });

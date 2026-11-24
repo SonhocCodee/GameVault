@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getDb, recalculatePlaytime } from './db.ts';
 import { extractTitleFromExe } from './importer.ts';
 import { ensureGameFolder, sanitizeTitleForFolder } from './media.ts';
-import { searchSteamCovers, detectSteamAppIdFromExe, resolveSteamAppId, CURATED_STEAM_APP_IDS } from './covers.ts';
+import { searchSteamCovers, detectSteamAppIdFromExe, resolveSteamAppId, CURATED_STEAM_APP_IDS, resolveWebCoversForGame } from './covers.ts';
 import type { TrackerStatus, Game } from '../shared/types.js';
 
 // Native Win32 API binding via koffi for zero-impact polling (0.0001ms / 0.000004% CPU)
@@ -126,7 +126,10 @@ export const GAME_PLATFORM_DIR_REGEX = /\\(steamapps\\common|epic games|gog game
 export const USER_GAME_DIR_REGEX = /(?:^[a-zA-Z]:\\(?:games?|gaming|tro choi|my games)\b|\\(?:games?|gaming|my games)\\[^\\]+\\)/i;
 
 /** Common installer / updater / tool executables to skip even within game folders */
-export const INSTALLER_OR_TOOL_EXE_REGEX = /^(unins\d*|setup|installer?|updater?|crashpad_handler|crashreporter|unitycrashhandler.*|vc_redist.*|dxsetup|easyanticheat.*|battleye.*)\.exe$/i;
+export const INSTALLER_OR_TOOL_EXE_REGEX = /(?:^|[._-])(?:unins\d*|setup|installer?|updater?|crashpad_handler|crashreporter|unitycrashhandler.*|vc_redist.*|dxsetup|easyanticheat.*|battleye.*)(?:[._-]|\.exe$)/i;
+
+/** Known game launchers, client frontends, cloud tools and store managers that are NOT games */
+export const KNOWN_LAUNCHER_OR_CLIENT_REGEX = /^(?:leagueclient.*|riot\s*client.*|riotclient.*|googledrive.*|steam|steamwebhelper|steamservice|epicgameslauncher|epicwebhelper|galaxyclient.*|ea|eadesktop|ealauncher|eabackgroundservice|link2ea|battle\.net.*|agent|upc|ubisoftconnect.*|ubisoftgamelauncher.*|garena.*|onedrive.*|dropbox.*|ultraviewer.*)\.exe$/i;
 
 /** Core game SDK / runtime files to look for in the executable's directory */
 export const GAME_SDK_FINGERPRINTS = [
@@ -156,8 +159,8 @@ export function isLikelyGame(
     return false;
   }
 
-  // 1. Skip obvious installers, updaters, crash reporters, anticheat launchers
-  if (INSTALLER_OR_TOOL_EXE_REGEX.test(foregroundExe)) {
+  // 1. Skip obvious installers, updaters, crash reporters, anticheat launchers, store clients
+  if (INSTALLER_OR_TOOL_EXE_REGEX.test(foregroundExe) || KNOWN_LAUNCHER_OR_CLIENT_REGEX.test(foregroundExe)) {
     return false;
   }
 
@@ -393,17 +396,47 @@ export class PlaytimeTracker {
     'zoom.exe',
     'whatsapp.exe',
 
-    // Launchers & Overlays (not games themselves)
+    // Launchers, Clients & Overlays (not games themselves)
     'steam.exe',
     'steamwebhelper.exe',
+    'steamservice.exe',
     'epicgameslauncher.exe',
+    'epicwebhelper.exe',
     'galaxyclient.exe',
+    'galaxyclientservice.exe',
+    'galaxycommunication.exe',
     'ea.exe',
     'eadesktop.exe',
+    'ealauncher.exe',
+    'eabackgroundservice.exe',
+    'link2ea.exe',
     'upc.exe',
     'ubisoftconnect.exe',
+    'ubisoftgamelauncher.exe',
+    'ubisoftgamelauncher64.exe',
     'battle.net.exe',
+    'battlenet.exe',
+    'battle.net launcher.exe',
+    'agent.exe',
+    'riot client.exe',
+    'riotclient.exe',
+    'riotclientux.exe',
+    'riotclientuxrender.exe',
     'riotclientservices.exe',
+    'leagueclient.exe',
+    'leagueclientux.exe',
+    'leagueclientuxrender.exe',
+    'leaguecrashhandler.exe',
+    'googledrivefs.exe',
+    'googledrivesetup.exe',
+    'googledrivesync.exe',
+    'garena.exe',
+    'garenaplatform.exe',
+    'onedrive.exe',
+    'onedrivesetup.exe',
+    'dropbox.exe',
+    'ultraviewer.exe',
+    'ultraviewer_desktop.exe',
     'radeonsoftware.exe',
     'amdrsserv.exe',
     'nvcontainer.exe',
@@ -465,6 +498,7 @@ export class PlaytimeTracker {
     ) {
       return true;
     }
+    if (KNOWN_LAUNCHER_OR_CLIENT_REGEX.test(lower)) return true;
     return this.ignoreList.has(lower);
   }
 
@@ -485,7 +519,12 @@ export class PlaytimeTracker {
       lower.includes('\\program files (x86)\\common files') ||
       lower.includes('\\microsoft\\') ||
       lower.includes('\\windowsapps\\') ||
-      lower.includes('\\appdata\\local\\temp')
+      lower.includes('\\appdata\\local\\temp') ||
+      lower.includes('\\google\\drive') ||
+      lower.includes('\\google\\drive file stream\\') ||
+      lower.includes('\\riot client\\') ||
+      lower.includes('\\epic games\\launcher\\') ||
+      lower.includes('\\steam\\bin\\')
     ) {
       return true;
     }
@@ -625,11 +664,16 @@ export class PlaytimeTracker {
         console.warn(`[tracker] Failed to auto-create folder for ${cleanTitle}:`, err);
       }
 
-      // 2. Asynchronously enrich cover art
+      // 2. Asynchronously enrich cover art and cache to cloud (Single source of truth)
       try {
-        searchSteamCovers(cleanTitle, detectedSteamId > 0 ? detectedSteamId : undefined).then((covers) => {
-          const poster = covers.posterUrl || covers.poster;
-          const banner = covers.bannerUrl || covers.banner;
+        resolveWebCoversForGame(this.db, {
+          id: newId,
+          title: cleanTitle,
+          steam_id: detectedSteamId > 0 ? detectedSteamId : undefined,
+          exe_path: info.exePath,
+        }).then((covers) => {
+          const poster = covers.poster;
+          const banner = covers.banner;
           if (poster || banner) {
             this.db
               .prepare(`

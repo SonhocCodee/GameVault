@@ -17,9 +17,9 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
-// OpenID + Profile for Worker Auth, Drive for Save Vault & Screenshot backup
+// OpenID + Profile for Worker Auth, Drive for Save Vault & Screenshot backup (visible My Drive + appData)
 const OAUTH_SCOPE =
-  'openid email profile https://www.googleapis.com/auth/drive.appdata';
+  'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
 
 export type FetchLike = (url: string, init?: any) => Promise<any>;
 

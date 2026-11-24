@@ -20,6 +20,9 @@ import type {
   LibrarySyncResponse,
   LibrarySyncResult,
   UserLibraryItem,
+  AdminCoverItem,
+  AdminCoversResponse,
+  AdminUpdateCoverPayload,
 } from '../shared/types.js';
 
 let cloudOverrides: { fetchImpl?: FetchLike; workerApiUrl?: string; projectId?: string; userDataDir?: string } = {};
@@ -80,6 +83,177 @@ async function apiFetch(path: string, init: RequestInit = {}, requiresAuth = fal
 export function computeGameKey(game: Game): string {
   if (game.steam_id && Number(game.steam_id) > 0) return String(Number(game.steam_id));
   return `t_${normalizeForMatch(game.title)}`;
+}
+
+export interface CloudCoverResult {
+  found: boolean;
+  gameKey: string;
+  title?: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+  bannerUrl?: string | null;
+  fromCache?: boolean;
+}
+
+export function qualifyCloudUrl(url?: string | null): string | null {
+  if (!url) return null;
+  if (url.startsWith('/api/images/')) {
+    const baseUrl = getWorkerBaseUrl();
+    return `${baseUrl}${url}`;
+  }
+  return url;
+}
+
+export async function getCloudGameCover(gameKey: string): Promise<CloudCoverResult | null> {
+  try {
+    const resp = await apiFetch(`/api/covers/${encodeURIComponent(gameKey)}`, { method: 'GET' }, false);
+    if (resp.status === 404) return { found: false, gameKey };
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return {
+      found: Boolean(data.found),
+      gameKey: data.gameKey || gameKey,
+      title: data.title,
+      steamId: data.steamId,
+      coverUrl: qualifyCloudUrl(data.coverUrl),
+      bannerUrl: qualifyCloudUrl(data.bannerUrl),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function cacheCloudGameCover(payload: {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  sourcePosterUrl?: string | null;
+  sourceBannerUrl?: string | null;
+}): Promise<CloudCoverResult | null> {
+  try {
+    const resp = await apiFetch(
+      '/api/covers/cache',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      false
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return {
+      found: Boolean(data.coverUrl || data.bannerUrl),
+      gameKey: data.gameKey || payload.gameKey,
+      title: data.title || payload.title,
+      steamId: data.steamId ?? payload.steamId,
+      coverUrl: qualifyCloudUrl(data.coverUrl),
+      bannerUrl: qualifyCloudUrl(data.bannerUrl),
+      fromCache: Boolean(data.fromCache),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function uploadCloudGameCover(
+  gameKey: string,
+  type: 'poster' | 'banner',
+  imageBuffer: Buffer | Uint8Array,
+  mimeType: string,
+  meta?: { title?: string; steamId?: number }
+): Promise<string | null> {
+  try {
+    const q = new URLSearchParams({
+      gameKey,
+      type,
+      title: meta?.title || '',
+    });
+    if (meta?.steamId) q.set('steamId', String(meta.steamId));
+    const resp = await apiFetch(
+      `/api/covers/upload?${q.toString()}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': mimeType,
+          'X-Game-Key': gameKey,
+          'X-Cover-Type': type,
+          'X-Game-Title': meta?.title || '',
+        },
+        body: imageBuffer as any,
+      },
+      false
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return qualifyCloudUrl(data.url);
+  } catch {
+    return null;
+  }
+}
+
+export async function adminGetCloudCovers(params: {
+  query?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<AdminCoversResponse> {
+  const q = new URLSearchParams();
+  if (params.query) q.set('query', params.query);
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  if (params.offset !== undefined) q.set('offset', String(params.offset));
+
+  const resp = await apiFetch(`/api/admin/covers?${q.toString()}`, { method: 'GET' }, true);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Lỗi tải danh sách bìa: ${resp.status}`);
+  }
+  const data = await resp.json();
+  return {
+    covers: (data.covers || []).map((c: any) => ({
+      ...c,
+      cover_url: qualifyCloudUrl(c.cover_url),
+      banner_url: qualifyCloudUrl(c.banner_url),
+    })),
+    total: data.total || 0,
+    limit: data.limit || params.limit || 50,
+    offset: data.offset || params.offset || 0,
+  };
+}
+
+export async function adminUpdateCloudCover(
+  gameKey: string,
+  payload: AdminUpdateCoverPayload
+): Promise<{ success: boolean; gameKey: string; cover?: AdminCoverItem }> {
+  const resp = await apiFetch(
+    `/api/admin/covers/${encodeURIComponent(gameKey)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+    true
+  );
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Lỗi cập nhật bìa game: ${resp.status}`);
+  }
+  const data = await resp.json();
+  if (data.cover) {
+    data.cover.cover_url = qualifyCloudUrl(data.cover.cover_url);
+    data.cover.banner_url = qualifyCloudUrl(data.cover.banner_url);
+  }
+  return data;
+}
+
+export async function adminDeleteCloudCover(gameKey: string): Promise<{ success: boolean; gameKey: string }> {
+  const resp = await apiFetch(
+    `/api/admin/covers/${encodeURIComponent(gameKey)}`,
+    { method: 'DELETE' },
+    true
+  );
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Lỗi xóa bìa game: ${resp.status}`);
+  }
+  return resp.json();
 }
 
 export function computeGuMatch(

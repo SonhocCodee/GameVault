@@ -3,8 +3,8 @@ import path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { GoogleDriveDesktopStatus, AppSettings } from '../shared/types.js';
-import { loadAppSettings, saveAppSettings } from './settings.js';
-import { setMediaBaseDir, resolveMediaRoot } from './media.js';
+import { loadAppSettings, saveAppSettings } from './settings.ts';
+import { setMediaBaseDir, resolveMediaRoot } from './media.ts';
 
 const execAsync = promisify(exec);
 
@@ -137,6 +137,56 @@ export async function detectGoogleDriveDesktop(currentMediaDir?: string): Promis
     suggestedMediaDir,
     isCurrentlyUsed,
   };
+}
+
+/**
+ * Synchronously checks if Google Drive Desktop is available and returns the GameVault media directory (e.g. G:\My Drive\GameVault).
+ * Automatically ensures the GameVault folder exists.
+ */
+export function getGoogleDriveDesktopMediaDir(): string | null {
+  const driveLetters = 'GHIJKLMNOPQRSTUVWXYZFED'.split('');
+  for (const letter of driveLetters) {
+    const root = `${letter}:\\`;
+    try {
+      if (fs.existsSync(root)) {
+        const subfolders = ['My Drive', 'Drive của tôi'];
+        for (const sub of subfolders) {
+          const testPath = path.join(root, sub);
+          if (fs.existsSync(testPath)) {
+            const gvDir = path.join(testPath, 'GameVault');
+            try {
+              if (!fs.existsSync(gvDir)) {
+                fs.mkdirSync(gvDir, { recursive: true });
+              }
+            } catch {}
+            return gvDir;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // Also check local mirror path in userprofile
+  if (process.env.USERPROFILE) {
+    const localCandidates = [
+      path.join(process.env.USERPROFILE, 'Google Drive', 'My Drive'),
+      path.join(process.env.USERPROFILE, 'Google Drive'),
+      path.join(process.env.USERPROFILE, 'My Drive'),
+    ];
+    for (const lc of localCandidates) {
+      if (fs.existsSync(lc)) {
+        const gvDir = path.join(lc, 'GameVault');
+        try {
+          if (!fs.existsSync(gvDir)) {
+            fs.mkdirSync(gvDir, { recursive: true });
+          }
+        } catch {}
+        return gvDir;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

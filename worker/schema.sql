@@ -73,6 +73,25 @@ CREATE TABLE IF NOT EXISTS user_library (
     PRIMARY KEY (uid, game_key)
 );
 
+-- 6. Central Game Covers Catalog (Single source of truth for all users)
+CREATE TABLE IF NOT EXISTS game_covers (
+    game_key TEXT PRIMARY KEY NOT NULL,
+    title TEXT NOT NULL,
+    steam_id INTEGER,
+    cover_url TEXT,
+    banner_url TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 7. Image Store (D1 fallback when R2 IMAGES_BUCKET is not bound)
+CREATE TABLE IF NOT EXISTS image_store (
+    key TEXT PRIMARY KEY NOT NULL,
+    mime_type TEXT NOT NULL,
+    data BLOB NOT NULL,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_ratings_game_key ON ratings(game_key);
 CREATE INDEX IF NOT EXISTS idx_ratings_uid ON ratings(uid);
@@ -83,3 +102,5 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_user_library_uid ON user_library(uid);
 CREATE INDEX IF NOT EXISTS idx_user_library_status ON user_library(uid, status);
 CREATE INDEX IF NOT EXISTS idx_user_library_updated ON user_library(uid, server_updated_at);
+CREATE INDEX IF NOT EXISTS idx_game_covers_key ON game_covers(game_key);
+CREATE INDEX IF NOT EXISTS idx_image_store_key ON image_store(key);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { Game, TrackerStatus, WishlistSearchResult } from '../shared/types.js';
 import { Navbar } from './components/Navbar.js';
 import { GameCard } from './components/GameCard.js';
@@ -7,6 +7,7 @@ import { ImportModal } from './components/ImportModal.js';
 import { SyncModal } from './components/SyncModal.js';
 import { WishlistModal } from './components/WishlistModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
+import { AdminCoversModal } from './components/AdminCoversModal.js';
 import { FirstRunSetupModal } from './components/FirstRunSetupModal.js';
 import { CommunityView } from './components/CommunityView.js';
 import { AddGameDetailsModal, type PendingAddGame } from './components/AddGameDetailsModal.js';
@@ -109,9 +110,11 @@ export default function App() {
   // Modals
   const [importModalOpen, setImportModalOpen] = useState<boolean>(false);
   const [syncModalOpen, setSyncModalOpen] = useState<boolean>(false);
+  const [syncModalTab, setSyncModalTab] = useState<'library' | 'drive_media' | 'local_f6'>('library');
   const [addGameModalOpen, setAddGameModalOpen] = useState<boolean>(false);
   const [wishlistModalOpen, setWishlistModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
+  const [adminCoversModalOpen, setAdminCoversModalOpen] = useState<boolean>(false);
 
   // Add Game form fields
   const [newTitle, setNewTitle] = useState('');
@@ -124,7 +127,7 @@ export default function App() {
     try {
       if (window.electronAPI?.getGames) {
         const fetched = await window.electronAPI.getGames({
-          status: statusFilter !== 'all' ? statusFilter : undefined,
+          status: libraryLayout === 'timeline' ? undefined : (statusFilter !== 'all' ? statusFilter : undefined),
           search: searchQuery.trim() || undefined,
           sort: sortBy,
         });
@@ -135,7 +138,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, searchQuery, sortBy]);
+  }, [statusFilter, searchQuery, sortBy, libraryLayout]);
 
   // Initial load & when filters change
   useEffect(() => {
@@ -583,10 +586,14 @@ export default function App() {
         libraryLayout={libraryLayout}
         onLibraryLayoutChange={setLibraryLayout}
         onOpenImportModal={() => setImportModalOpen(true)}
-        onOpenSyncModal={() => setSyncModalOpen(true)}
+        onOpenSyncModal={(tab) => {
+          if (tab) setSyncModalTab(tab);
+          setSyncModalOpen(true);
+        }}
         onOpenAddGameModal={() => setAddGameModalOpen(true)}
         onOpenWishlistModal={() => setWishlistModalOpen(true)}
         onOpenSettingsModal={() => setSettingsModalOpen(true)}
+        onOpenAdminModal={() => setAdminCoversModalOpen(true)}
         onEnrichCovers={handleEnrichCovers}
         onOpenCommunity={() => {
           setView('community');
@@ -603,6 +610,7 @@ export default function App() {
             gameId={selectedGameId}
             onBack={handleBackToLibrary}
             onGameUpdated={handleGameUpdated}
+            onShowToast={showToast}
             onOpenCommunity={() => {
               setView('community');
               window.scrollTo({ top: 0 });
@@ -927,6 +935,7 @@ export default function App() {
       {/* Sync Modal */}
       <SyncModal
         isOpen={syncModalOpen}
+        initialTab={syncModalTab}
         onClose={() => setSyncModalOpen(false)}
         onSuccess={() => fetchGames()}
       />
@@ -1031,6 +1040,13 @@ export default function App() {
           setSettingsModalOpen(false);
           setSyncModalOpen(true);
         }}
+      />
+
+      {/* Admin Game Covers Management Modal */}
+      <AdminCoversModal
+        isOpen={adminCoversModalOpen}
+        onClose={() => setAdminCoversModalOpen(false)}
+        onCoversChanged={() => fetchGames()}
       />
 
       {/* One-time first-run storage setup wizard */}

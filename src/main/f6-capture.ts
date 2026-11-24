@@ -20,7 +20,8 @@ import {
   DEFAULT_MEDIA_DIR,
   SUPPORTED_EXTENSIONS,
 } from './sync-screenshots.ts';
-import { ensureGameFolder } from './media.ts';
+import { ensureGameFolder, sanitizeTitleForFolder } from './media.ts';
+import { getGoogleDriveDesktopMediaDir } from './google-drive-desktop.ts';
 import type { Game } from '../shared/types.js';
 
 let win32Ready = false;
@@ -49,6 +50,7 @@ export class F6CaptureManager {
   private db: DatabaseSync;
   public screenshotsDir: string;
   public mediaDir: string;
+  public gdriveMediaDir: string | null = null;
   public isF6Down: boolean = false;
   public isEnabled: boolean = true;
   public hddMode: boolean = true;
@@ -65,11 +67,13 @@ export class F6CaptureManager {
   constructor(
     customDb?: DatabaseSync,
     screenshotsDir: string = DEFAULT_SCREENSHOTS_DIR,
-    mediaDir: string = DEFAULT_MEDIA_DIR
+    mediaDir: string = DEFAULT_MEDIA_DIR,
+    gdriveMediaDir?: string | null
   ) {
     this.db = customDb || getDb();
     this.screenshotsDir = screenshotsDir;
     this.mediaDir = mediaDir;
+    this.gdriveMediaDir = gdriveMediaDir !== undefined ? gdriveMediaDir : (customDb ? null : getGoogleDriveDesktopMediaDir());
   }
 
   public setHotkey(keyName: string, vk?: number): void {
@@ -102,11 +106,93 @@ export class F6CaptureManager {
     if (mediaDir) {
       this.mediaDir = mediaDir;
     }
+    this.gdriveMediaDir = getGoogleDriveDesktopMediaDir();
   }
 
   public setHddMode(mode: boolean): void {
     this.hddMode = mode;
     console.log(`[F6Capture] HDD Mode ${mode ? 'ENABLED (buffer & sync)' : 'DISABLED (direct save / SSD)'}`);
+  }
+
+  /**
+   * Instantly copies a screenshot from C: buffer to Google Drive Desktop (G:\My Drive\GameVault\<GameTitle>).
+   * Leaves the original file on C: untouched.
+   */
+  public mirrorScreenshotToGoogleDrive(filename: string, fullPath: string, explicitTitle?: string): boolean {
+    if (!this.gdriveMediaDir) {
+      this.gdriveMediaDir = getGoogleDriveDesktopMediaDir();
+    }
+    if (!this.gdriveMediaDir || !fs.existsSync(this.gdriveMediaDir)) {
+      return false;
+    }
+
+    let gameTitle = explicitTitle;
+
+    // 1. Try matching with pending F6 capture tokens in SQLite
+    if (!gameTitle) {
+      try {
+        const stat = fs.statSync(fullPath);
+        const fileTime = parseScreenshotTimestamp(filename, stat.mtime);
+        if (fileTime) {
+          const fileMs = fileTime.getTime();
+          const pending = getUnmatchedF6Captures(this.db);
+          let minDiff = Infinity;
+          for (const cap of pending) {
+            const capMs = new Date(cap.timestamp).getTime();
+            const diff = Math.abs(fileMs - capMs);
+            if (diff <= 30000 && diff < minDiff) {
+              minDiff = diff;
+              gameTitle = cap.game_title;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Try tracker active session
+    if (!gameTitle) {
+      const tracker = getTracker();
+      if (tracker?.activeSession?.gameTitle) {
+        gameTitle = tracker.activeSession.gameTitle;
+      }
+    }
+
+    // 3. Try foreground process lookup
+    if (!gameTitle) {
+      try {
+        const fg = getForegroundProcessInfo();
+        const tracker = getTracker();
+        if (fg.exeName) {
+          const matched = tracker.findGameByProcess(fg.exeName);
+          if (matched?.title) {
+            gameTitle = matched.title;
+          }
+        }
+      } catch {}
+    }
+
+    if (!gameTitle) {
+      gameTitle = 'Screenshots';
+    }
+
+    const folderName = sanitizeTitleForFolder(gameTitle);
+    const targetFolder = path.join(this.gdriveMediaDir, folderName);
+    const targetPath = path.join(targetFolder, filename);
+
+    try {
+      if (!fs.existsSync(targetFolder)) {
+        fs.mkdirSync(targetFolder, { recursive: true });
+      }
+
+      if (!fs.existsSync(targetPath)) {
+        fs.copyFileSync(fullPath, targetPath);
+        console.log(`[F6Capture] Instantly pushed screenshot to Google Drive (G:): ${targetPath}`);
+        return true;
+      }
+    } catch (err) {
+      console.warn(`[F6Capture] Failed to mirror screenshot to Google Drive:`, err);
+    }
+    return false;
   }
 
   /**
@@ -141,6 +227,7 @@ $bmp.Dispose()
       await execAsync(`powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`);
 
       if (fs.existsSync(targetPath)) {
+        this.mirrorScreenshotToGoogleDrive(filename, targetPath, gameTitle);
         if (captureId) {
           markF6CaptureMatched(captureId, this.db);
         }
@@ -302,19 +389,29 @@ $bmp.Dispose()
         const ext = path.extname(filename).toLowerCase();
         if (!SUPPORTED_EXTENSIONS.has(ext)) return;
 
-        // When HDD Mode is ON: do NOT immediately sync to HDD while in-game or right after capture.
-        // This keeps the HDD completely asleep during gameplay, buffering screenshots safely in SSD.
-        if (this.hddMode) {
-          const tracker = getTracker();
-          const isRecentCapture = Date.now() - this.lastCaptureTime < 60000;
-          if (tracker?.activeSession || isRecentCapture) {
-            console.log('[F6Capture] HDD Mode ON: screenshot buffered in temporary folder, keeping HDD asleep during gameplay.');
-            return;
-          }
-        }
-
         if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
         this.syncDebounceTimer = setTimeout(() => {
+          const fullPath = path.join(this.screenshotsDir, filename);
+          if (!fs.existsSync(fullPath)) return;
+          try {
+            const stat = fs.statSync(fullPath);
+            if (stat.isDirectory() || stat.size === 0) return;
+          } catch {
+            return;
+          }
+
+          // Step 1: Instantly mirror to Google Drive (G:)
+          this.mirrorScreenshotToGoogleDrive(filename, fullPath);
+
+          // Step 2: HDD Mode handling
+          // When HDD Mode is ON: do NOT cut to HDD E: automatically!
+          // HDD stays asleep. Screenshots stay buffered on C: until manual sync.
+          if (this.hddMode) {
+            console.log('[F6Capture] HDD Mode ON: screenshot mirrored to Google Drive (G:) and buffered on C:. HDD E: stays asleep until manual sync in app.');
+            return;
+          }
+
+          // If HDD Mode is explicitly OFF (SSD mode), sync and move immediately
           this.scanAndSync();
         }, 500);
       });
@@ -403,6 +500,9 @@ $bmp.Dispose()
         }
 
         try {
+          // Ensure Google Drive has a copy before moving
+          this.mirrorScreenshotToGoogleDrive(filename, fullPath, capture.game_title);
+
           const { fullPath: destFolder } = ensureGameFolder(capture.game_title, this.mediaDir);
           const moveRes = copyAndUnlink(fullPath, destFolder, filename);
 

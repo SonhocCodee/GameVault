@@ -49,6 +49,9 @@ import type {
   DriveMediaProgress,
   ActiveMediaSyncStatus,
   GoogleDriveDesktopStatus,
+  AdminCoverItem,
+  AdminCoversResponse,
+  AdminUpdateCoverPayload,
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
@@ -341,6 +344,28 @@ const electronAPI: ElectronAPI = {
   },
   openExternalUrl: (url: string): Promise<boolean> => {
     return ipcRenderer.invoke('shell:openExternal', url);
+  },
+
+  // Admin Covers Management
+  adminGetCovers: (params?: { query?: string; limit?: number; offset?: number }): Promise<AdminCoversResponse> => {
+    return ipcRenderer.invoke('admin:getCovers', params);
+  },
+  adminUpdateCover: (
+    gameKey: string,
+    payload: AdminUpdateCoverPayload
+  ): Promise<{ success: boolean; gameKey: string; cover?: AdminCoverItem }> => {
+    return ipcRenderer.invoke('admin:updateCover', gameKey, payload);
+  },
+  adminDeleteCover: (gameKey: string): Promise<{ success: boolean; gameKey: string }> => {
+    return ipcRenderer.invoke('admin:deleteCover', gameKey);
+  },
+  adminUploadCover: (
+    gameKey: string,
+    type: 'poster' | 'banner',
+    filePath?: string,
+    meta?: { title?: string; steamId?: number }
+  ): Promise<string | null> => {
+    return ipcRenderer.invoke('admin:uploadCover', gameKey, type, filePath, meta);
   },
 
   // Real-time Event Subscriptions

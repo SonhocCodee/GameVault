@@ -37,6 +37,7 @@ export interface GameDetailProps {
   onBack: () => void;
   onGameUpdated: (updatedGame: Game) => void;
   onOpenCommunity?: () => void;
+  onShowToast?: (msg: string) => void;
 }
 
 export const formatDisplayUrl = (
@@ -69,10 +70,12 @@ export const GameDetail: React.FC<GameDetailProps> = ({
   onBack,
   onGameUpdated,
   onOpenCommunity,
+  onShowToast,
 }) => {
   const [game, setGame] = useState<Game | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [syncingF6, setSyncingF6] = useState<boolean>(false);
 
   // Media Gallery state
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -330,10 +333,11 @@ const handleCompletedDateChange = async (dateStr: string) => {
   };
 // Trigger F6 screenshot sync
   const handleTriggerSync = async () => {
-    if (!game) return;
+    if (!game || syncingF6) return;
+    setSyncingF6(true);
     try {
       if (window.electronAPI?.syncScreenshots) {
-        await window.electronAPI.syncScreenshots({ dryRun: false, targetGameId: game.id });
+        const res = await window.electronAPI.syncScreenshots({ dryRun: false, targetGameId: game.id });
         await loadMedia(game.title, game);
         if (window.electronAPI?.getGameById) {
           const fresh = await window.electronAPI.getGameById(game.id);
@@ -342,9 +346,23 @@ const handleCompletedDateChange = async (dateStr: string) => {
             onGameUpdated(fresh);
           }
         }
+
+        // Tự động kích hoạt đồng bộ Drive ngay lập tức
+        if (window.electronAPI?.uploadMediaToDrive) {
+          window.electronAPI.uploadMediaToDrive({ gameTitle: game.title }).catch(console.error);
+        }
+
+        if (res && res.moved > 0) {
+          onShowToast?.(`📸 Đã gom ${res.moved} ảnh vào ổ E: & tự động đẩy lên Google Drive thành công!`);
+        } else {
+          onShowToast?.(`✨ Toàn bộ ảnh của "${game.title}" đã được lưu trên ổ E: & Google Drive!`);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to trigger sync:', err);
+      onShowToast?.(`❌ Lỗi đồng bộ ảnh: ${err?.message || 'Không xác định'}`);
+    } finally {
+      setSyncingF6(false);
     }
   };
 
@@ -535,10 +553,21 @@ const filteredMedia = useMemo(() => {
               {game.status !== 'backlog' && (
                 <button
                   onClick={handleTriggerSync}
-                  className="flex items-center gap-2 rounded-xl border border-[#2a2e3d] bg-[#161821] px-4 py-3 text-xs font-bold text-white transition-all hover:border-amber-400 hover:bg-[#1f2230]"
+                  disabled={syncingF6}
+                  className="flex items-center gap-2 rounded-xl border border-[#2a2e3d] bg-[#161821] px-4 py-3 text-xs font-bold text-white transition-all hover:border-amber-400 hover:bg-[#1f2230] disabled:opacity-50"
+                  title="Cut ảnh chụp F6 từ C: sang E:\Game và tự động đẩy lên Google Drive"
                 >
-                  <Zap className="h-4 w-4 text-amber-400" />
-                  <span>⚡ Đồng bộ ảnh F6</span>
+                  {syncingF6 ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                      <span>Đang gom &amp; đẩy lên Drive...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-4 w-4 text-amber-400" />
+                      <span>⚡ Đồng bộ ảnh F6 &amp; Drive</span>
+                    </>
+                  )}
                 </button>
               )}
 
@@ -814,10 +843,21 @@ const filteredMedia = useMemo(() => {
                 <button
                   type="button"
                   onClick={handleTriggerSync}
-                  className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2 text-xs font-bold text-amber-300 transition-all hover:bg-amber-400 hover:text-black"
+                  disabled={syncingF6}
+                  className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2 text-xs font-bold text-amber-300 transition-all hover:bg-amber-400 hover:text-black disabled:opacity-50"
+                  title="Cut ảnh chụp F6 từ C: sang E:\Game và tự động đẩy lên Google Drive"
                 >
-                  <Zap className="h-4 w-4" />
-                  <span>⚡ Đồng bộ ảnh F6</span>
+                  {syncingF6 ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                      <span>Đang gom &amp; đẩy lên Drive...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-4 w-4" />
+                      <span>⚡ Đồng bộ ảnh F6 &amp; Drive</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

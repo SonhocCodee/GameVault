@@ -269,5 +269,55 @@ describe('Auto-Detection & F6 Hotkey Screenshot Capture Suite', () => {
       const pendingAfter = getUnmatchedF6Captures(db);
       assert.equal(pendingAfter.length, 0);
     });
+
+    it('mirrors screenshot immediately to Google Drive while keeping buffer on C: and keeping E: untouched in HDD Mode', () => {
+      const gdriveDir = path.join(tempDir, 'GoogleDrive', 'GameVault');
+      fs.mkdirSync(gdriveDir, { recursive: true });
+
+      const gameRes = db.prepare('INSERT INTO games (title, media_folder) VALUES (?, ?)')
+        .run('Cyberpunk 2077', 'Cyberpunk 2077');
+      const gameId = Number(gameRes.lastInsertRowid);
+
+      const f6Manager = new F6CaptureManager(db, screenshotsDir, mediaDir, gdriveDir);
+      f6Manager.setHddMode(true);
+
+      const capTime = new Date(2026, 10, 24, 12, 0, 0);
+      recordPendingF6Capture(gameId, 'Cyberpunk 2077', capTime.toISOString(), db);
+
+      const shotFile = 'Screenshot-F6-20261124-120000.png';
+      const shotPath = path.join(screenshotsDir, shotFile);
+      fs.writeFileSync(shotPath, 'CYBERPUNK_SHOT_BUFFER');
+
+      // Trigger mirror to Google Drive
+      const mirrored = f6Manager.mirrorScreenshotToGoogleDrive(shotFile, shotPath, 'Cyberpunk 2077');
+      assert.equal(mirrored, true);
+
+      // Verify:
+      // 1. Google Drive (G:) has the file immediately in the game folder
+      const gdriveShotPath = path.join(gdriveDir, 'Cyberpunk 2077', shotFile);
+      assert.equal(fs.existsSync(gdriveShotPath), true);
+      assert.equal(fs.readFileSync(gdriveShotPath, 'utf8'), 'CYBERPUNK_SHOT_BUFFER');
+
+      // 2. Buffer on C: still retains the original file
+      assert.equal(fs.existsSync(shotPath), true);
+
+      // 3. HDD E: has NOT received the file yet (HDD stays asleep!)
+      const hddShotPath = path.join(mediaDir, 'Cyberpunk 2077', shotFile);
+      assert.equal(fs.existsSync(hddShotPath), false);
+
+      // 4. Now simulate user opening app and clicking "Đồng bộ" (Sync)
+      const syncSummary = syncScreenshots({
+        sourceDir: screenshotsDir,
+        mediaBaseDir: mediaDir,
+        gdriveBaseDir: gdriveDir,
+        targetDb: db,
+      });
+
+      assert.equal(syncSummary.moved, 1);
+      // Now it has been CUT from C: to E:!
+      assert.equal(fs.existsSync(shotPath), false);
+      assert.equal(fs.existsSync(hddShotPath), true);
+      assert.equal(fs.existsSync(gdriveShotPath), true);
+    });
   });
 });

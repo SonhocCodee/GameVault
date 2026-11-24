@@ -78,6 +78,7 @@ export interface Env {
   ENVIRONMENT?: string;
   ALLOW_MOCK_AUTH?: string;
   GOOGLE_TOKENINFO_URL?: string;
+  ADMIN_EMAILS?: string;
 }
 
 export interface AuthUser {
@@ -183,6 +184,33 @@ export interface LibrarySyncResponse {
   games: UserLibraryItem[];
   syncedAt: string;
   stats: LibrarySyncStats;
+}
+
+export interface GameCoverRecord {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+  bannerUrl?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CoverCachePayload {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  sourcePosterUrl?: string | null;
+  sourceBannerUrl?: string | null;
+}
+
+export interface CoverCacheResponse {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+  bannerUrl?: string | null;
+  fromCache: boolean;
 }
 
 export interface RouteContext {

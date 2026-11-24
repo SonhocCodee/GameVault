@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Vault - Xem Lại & Kéo Thả Cột Mốc Phá Đảo Game</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #141b2d;
+      --card-border: #232f4e;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent-blue: #38bdf8;
+      --accent-green: #34d399;
+      --accent-orange: #fb923c;
+      --accent-red: #f87171;
+      --accent-purple: #c084fc;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text-main);
+      padding: 24px;
+      min-height: 100vh;
+    }
+    header {
+      max-width: 1600px;
+      margin: 0 auto 24px auto;
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      padding: 20px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .header-title h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-title p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary {
+      background: #2563eb;
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #1d4ed8;
+      transform: translateY(-1px);
+    }
+    .btn-success {
+      background: #059669;
+      color: #fff;
+    }
+    .btn-success:hover {
+      background: #047857;
+    }
+    .btn-secondary {
+      background: #1f293d;
+      color: #cbd5e1;
+      border: 1px solid #334155;
+    }
+    .btn-secondary:hover {
+      background: #334155;
+    }
+    .search-box {
+      padding: 9px 14px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      width: 240px;
+    }
+    .search-box:focus {
+      border-color: var(--accent-blue);
+    }
+
+    .notice-bar {
+      max-width: 1600px;
+      margin: 0 auto 20px auto;
+      background: #1e1b4b;
+      border-left: 4px solid #818cf8;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #c7d2fe;
+    }
+    .notice-bar strong {
+      color: #fff;
+    }
+
+    /* Kanban board */
+    .board {
+      max-width: 1600px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+    .column {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      max-height: 85vh;
+      overflow: hidden;
+    }
+    .column.drag-over {
+      border-color: var(--accent-blue);
+      background: #13213c;
+    }
+    .col-header {
+      padding: 14px 16px;
+      background: #17223b;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .col-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .col-badge {
+      background: #334155;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 10px;
+    }
+    .col-body {
+      padding: 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex-grow: 1;
+      min-height: 150px;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      cursor: grab;
+      user-select: none;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+    }
+    .card:hover {
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 15px -3px rgba(0,0,0,0.5);
+    }
+    .card.dragging {
+      opacity: 0.4;
+      cursor: grabbing;
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .card-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.3;
+    }
+    .card-id {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 600;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 3px 7px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge-evidence {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent-blue);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .badge-missing {
+      background: rgba(248, 113, 113, 0.15);
+      color: var(--accent-red);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+    }
+    .badge-fixed {
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+    .badge-was-nov {
+      background: rgba(251, 146, 60, 0.15);
+      color: var(--accent-orange);
+      border: 1px solid rgba(251, 146, 60, 0.3);
+    }
+
+    .card-times {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: #0c1322;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      border: 1px solid #1a253d;
+    }
+    .time-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+    }
+    .time-label {
+      color: #64748b;
+      font-size: 11px;
+    }
+    .time-val {
+      font-family: monospace;
+      font-size: 11.5px;
+    }
+    .time-val.old {
+      color: #ea580c;
+      text-decoration: line-through;
+    }
+    .time-val.new {
+      color: #10b981;
+      font-weight: bold;
+    }
+    
+    .date-input-wrap {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .date-input-wrap label {
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .date-picker {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #fff;
+      padding: 5px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: monospace;
+      outline: none;
+      width: 100%;
+    }
+    .date-picker:focus {
+      border-color: #38bdf8;
+    }
+
+    .evidence-text {
+      font-size: 11.5px;
+      color: #94a3b8;
+      line-height: 1.4;
+      background: #111a2e;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border-left: 3px solid #3b82f6;
+    }
+    .evidence-text.missing {
+      border-left-color: #ef4444;
+      color: #cbd5e1;
+    }
+
+    /* Modal / Popups */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #059669;
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+      display: none;
+      z-index: 100;
+      animation: fadeIn 0.2s;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-title">
+      <h1>🎮 Game Vault - Xác Nhận Cột Mốc Phá Đảo Game</h1>
+      <p>Lục soát file save, log session driver AMD & screenshot F6 để phân bổ lại ngày giờ phá đảo chuẩn xác (tránh bị dồn hết về Tháng 11).</p>
+    </div>
+    <div class="actions">
+      <input type="text" id="searchInput" class="search-box" placeholder="🔍 Tìm kiếm game..." oninput="filterGames()">
+      <button class="btn btn-primary" onclick="copyConfirmedJson()">📋 Copy JSON Xác Nhận</button>
+      <button class="btn btn-success" onclick="downloadConfirmedJson()">💾 Tải File JSON</button>
+      <button class="btn btn-secondary" onclick="resetToInitial()">🔄 Đặt Lại Gốc</button>
+    </div>
+  </header>
+
+  <div class="notice-bar">
+    📌 <strong>Hướng dẫn:</strong> Bạn có thể <strong>kéo thả card game</strong> qua lại giữa các tháng, hoặc <strong>chỉnh sửa trực tiếp ngày giờ</strong> ở ô nhập bên trong card. Khi bạn ưng ý, bấm <strong>"Copy JSON Xác Nhận"</strong> rồi gửi lại vào khung chat để tôi tiến hành cập nhật vào SQLite database!
+  </div>
+
+  <div class="board" id="board">
+    <!-- Columns will be injected by JavaScript -->
+  </div>
+
+  <div id="toast" class="toast">Đã copy JSON xác nhận vào clipboard!</div>
+
+  <script>
+    const initialData = {"generated_at": "2026-11-24T16:58:00", "completed_with_exact_date": [{"id": 69, "title": "Detroit: Become Human", "current_completed_at": "2026-06-10T12:00:00", "proposed_completed_at": "2026-06-10T22:45:43", "proposed_month": "2026-06", "month_label": "Tháng 06/2026", "evidence_type": "Save file & Screenshot", "evidence_detail": "Screenshot kết thúc lúc 22:45:43 (10/06/2026); Save file 'Touched.qdsav' ghi nhận ngày 11/06/2026 08:59:40.", "status": "completed", "playtime_minutes": 780}, {"id": 65082, "title": "007 First Light", "current_completed_at": "2026-06-24 12:40:33", "proposed_completed_at": "2026-06-24T12:40:33", "proposed_month": "2026-06", "month_label": "Tháng 06/2026", "evidence_type": "Session & Screenshot", "evidence_detail": "Ảnh kết thúc Screenshot (108).png lúc 09:31:51 (24/06/2026); Phiên chơi kết thúc 12:40:33.", "status": "completed", "playtime_minutes": 1419}, {"id": 5, "title": "Horizon Forbidden West Complete Edition", "current_completed_at": "2026-06-26T12:00:00", "proposed_completed_at": "2026-06-26T20:56:11", "proposed_month": "2026-06", "month_label": "Tháng 06/2026", "evidence_type": "Save & Final Screenshot", "evidence_detail": "Ảnh phá đảo chính thức lúc 20:56:11 (26/06/2026); Save autosave3.dat ghi nhận cùng ngày.", "status": "completed", "playtime_minutes": 2554}, {"id": 21, "title": "Dead Space", "current_completed_at": "2026-07-14T12:00:00", "proposed_completed_at": "2026-07-16T22:11:28", "proposed_month": "2026-07", "month_label": "Tháng 07/2026", "evidence_type": "Save File New Game Plus", "evidence_detail": "File save 'NGP1-0.ngp' (tạo tự động khi hoàn thành cốt truyện để mở New Game Plus) lúc 22:11:28 (16/07/2026). Ảnh credit lúc 14/07 20:53.", "status": "completed", "playtime_minutes": 2232}, {"id": 22, "title": "The Callisto Protocol", "current_completed_at": "2026-07-24T12:00:00", "proposed_completed_at": "2026-07-24T21:05:06", "proposed_month": "2026-07", "month_label": "Tháng 07/2026", "evidence_type": "Save File & Photo Mode", "evidence_detail": "File save config cuối cùng lúc 21:05:06 (24/07/2026); Ảnh chụp photomode_00015.png lúc 21:01:19.", "status": "completed", "playtime_minutes": 456}, {"id": 27, "title": "Resident Evil 2", "current_completed_at": "2026-11-20T12:00:00", "proposed_completed_at": "2026-07-28T21:22:40", "proposed_month": "2026-07", "month_label": "Tháng 07/2026", "evidence_type": "Steam Cloud Save File", "evidence_detail": "File save Steam userdata 743735161\\883710 data00-1.bin & data021Slot.bin lưu lúc 21:22:40 (28/07/2026). Bị gán nhầm tháng 11 khi import!", "status": "completed", "playtime_minutes": 2232}, {"id": 25, "title": "Death Stranding 2: On the Beach", "current_completed_at": "2026-08-09T15:42:39", "proposed_completed_at": "2026-08-09T15:42:39", "proposed_month": "2026-08", "month_label": "Tháng 08/2026", "evidence_type": "Save File & Screenshot F6", "evidence_detail": "Save file UserHashDB.bin lúc 15:38:54 và Screenshot F6 lúc 15:42:39 (09/08/2026). Khớp chuẩn.", "status": "completed", "playtime_minutes": 2358}, {"id": 34, "title": "Warhammer 40,000: Space Marine 2", "current_completed_at": "2026-08-22T21:26:37", "proposed_completed_at": "2026-08-22T21:26:37", "proposed_month": "2026-08", "month_label": "Tháng 08/2026", "evidence_type": "Final Screenshot F6 & AMD Session", "evidence_detail": "Screenshot-F6 lúc 21:26:37 (22/08/2026); Phiên chơi AMD ghi nhận kết thúc lúc 21:34:03.", "status": "completed", "playtime_minutes": 445}, {"id": 38, "title": "FINAL FANTASY VII REBIRTH", "current_completed_at": "2026-11-20T12:00:00", "proposed_completed_at": "2026-09-06T16:00:42", "proposed_month": "2026-09", "month_label": "Tháng 09/2026", "evidence_type": "Save File (.sav) trong My Games", "evidence_detail": "File save ff7rebirth000.sav trong Documents/My Games lúc 16:00:42 (06/09/2026); Chuỗi 505 ảnh kết thúc ngày 06/09. Bị gán nhầm tháng 11!", "status": "completed", "playtime_minutes": 5052}, {"id": 42, "title": "ELDEN RING", "current_completed_at": "2026-09-13T12:00:00", "proposed_completed_at": "2026-09-13T09:28:12", "proposed_month": "2026-09", "month_label": "Tháng 09/2026", "evidence_type": "Save File ER0000.sl2", "evidence_detail": "Save file gốc ER0000.sl2 ghi nhận 09:28:12 (13/09/2026); Ảnh kết thúc lúc 09:21:20; Save Seamless Co-op ER0000.co2 chơi thêm đến 16/09 22:17.", "status": "completed", "playtime_minutes": 3799}, {"id": 59, "title": "CONTROL Resonant", "current_completed_at": "2026-11-20T08:39:13.078Z", "proposed_completed_at": "2026-10-04T13:40:06", "proposed_month": "2026-10", "month_label": "Tháng 10/2026", "evidence_type": "AMD Session & AppData Config", "evidence_detail": "Phiên chơi AMD cuối cùng ghi nhận 13:40:06 (04/10/2026); Config AppData/Local/Remedy lúc 12:42:20. Bị gán nhầm tháng 11!", "status": "completed", "playtime_minutes": 1838}, {"id": 61, "title": "Bloodborne", "current_completed_at": "2026-11-20T12:00:00", "proposed_completed_at": "2026-10-25T19:58:12", "proposed_month": "2026-10", "month_label": "Tháng 10/2026", "evidence_type": "AMD 396 Sessions & Launcher Config", "evidence_detail": "396 phiên chơi cày cuốc kết thúc đúng 19:58:12 (25/10/2026); Cấu hình bbport-launcher ghi nhận 19:51:38 cùng ngày. Bị gán nhầm tháng 11!", "status": "completed", "playtime_minutes": 1452}, {"id": 65, "title": "Phantom Blade Zero", "current_completed_at": "2026-11-08T00:00:00", "proposed_completed_at": "2026-11-08T10:56:25", "proposed_month": "2026-11", "month_label": "Tháng 11/2026", "evidence_type": "Steam Userdata & Session", "evidence_detail": "Phiên chơi cuối cùng kết thúc 10:56:25 (08/11/2026); Steam cache userdata 4115450 lúc 08:30:49.", "status": "completed", "playtime_minutes": 2244}, {"id": 68, "title": "Onimusha: The Way of the Sword", "current_completed_at": "2026-11-20T12:00:00", "proposed_completed_at": "2026-11-20T20:58:13", "proposed_month": "2026-11", "month_label": "Tháng 11/2026", "evidence_type": "Save Backup & Screenshot F6", "evidence_detail": "File save backup data001.bin-9 trong Documents/CAPCOM lúc 20:46:44; Ảnh F6 cuối 20:56:43; Phiên chơi kết thúc 20:58:13 (20/11/2026).", "status": "completed", "playtime_minutes": 1012}, {"id": 3, "title": "Crimson Desert", "current_completed_at": "2026-11-20T12:00:00", "proposed_completed_at": "2026-11-20T16:09:46", "proposed_month": "2026-11", "month_label": "Tháng 11/2026", "evidence_type": "Screenshot & Session", "evidence_detail": "Screenshot cuối cùng lúc 16:09:46 (20/11/2026); Phiên chơi AMD cuối cùng ghi nhận 12/11 19:32.", "status": "completed", "playtime_minutes": 13249}, {"id": 58, "title": "Sekiro: Shadows Die Twice", "current_completed_at": "2026-11-20T12:00:00", "proposed_completed_at": "2026-11-20T11:22:13", "proposed_month": "2026-11", "month_label": "Tháng 11/2026", "evidence_type": "Save File S0000.sl2", "evidence_detail": "Save file S0000.sl2 cập nhật mới nhất lúc 11:22:13 (20/11/2026); Screenshot F6 lúc 23:15:00.", "status": "completed", "playtime_minutes": 6265}, {"id": 133, "title": "Resident Evil Requiem", "current_completed_at": "2026-11-24T12:00:00", "proposed_completed_at": "2026-11-24T16:00:36", "proposed_month": "2026-11", "month_label": "Tháng 11/2026", "evidence_type": "Screenshot F6 & Live Session", "evidence_detail": "Ảnh kết thúc Screenshot-F6 lúc 15:58:35 (24/11/2026); Phiên chơi kết thúc lúc 16:00:36.", "status": "completed", "playtime_minutes": 906}], "completed_missing_info": [{"id": 70, "title": "Ghost of Tsushima DIRECTOR'S CUT", "current_completed_at": null, "proposed_completed_at": null, "proposed_month": "Chưa có thông tin", "month_label": "Chưa có thông tin", "evidence_type": "Không tìm thấy file save", "evidence_detail": "Có 56 giờ chơi (3386m) được ghi nhận trong app. Thư mục game cũ 'D:\\Games\\Ghost of Tsushima DC' không còn tồn tại trên máy, không tìm thấy file save trên máy.", "status": "completed", "playtime_minutes": 3386}, {"id": 679, "title": "Red Dead Redemption 2", "current_completed_at": "2026-11-21T12:00:00", "proposed_completed_at": null, "proposed_month": "Chưa có thông tin", "month_label": "Chưa có thông tin", "evidence_type": "Không tìm thấy file save", "evidence_detail": "Có 90 giờ chơi (5400m) được ghi nhận. Ngày 21/11/2026 hiện tại là ngày gán tự động khi import. Không tìm thấy file save 'SRDR3*' trên máy.", "status": "completed", "playtime_minutes": 5400}, {"id": 1190, "title": "God of War", "current_completed_at": null, "proposed_completed_at": null, "proposed_month": "Chưa có thông tin", "month_label": "Chưa có thông tin", "evidence_type": "Không tìm thấy file save PC", "evidence_detail": "Chỉ có 5 clip video quay điện thoại của God of War Ragnarok (tháng 08-09/2025). Không có save PC cho GoW 2018.", "status": "completed", "playtime_minutes": 0}, {"id": 1185, "title": "Tomb Raider Game of the Year", "current_completed_at": null, "proposed_completed_at": null, "proposed_month": "Chưa có thông tin", "month_label": "Chưa có thông tin", "evidence_type": "Không tìm thấy file save", "evidence_detail": "Không có file save hay log session trên máy (có thể chơi trên máy khác hoặc tài khoản khác).", "status": "completed", "playtime_minutes": 0}, {"id": 1187, "title": "Rise of the Tomb Raider", "current_completed_at": null, "proposed_completed_at": null, "proposed_month": "Chưa có thông tin", "month_label": "Chưa có thông tin", "evidence_type": "Không tìm thấy file save", "evidence_detail": "Không có file save hay log session trên máy.", "status": "completed", "playtime_minutes": 0}, {"id": 1186, "title": "Shadow of the Tomb Raider: Definitive Edition", "current_completed_at": null, "proposed_completed_at": null, "proposed_month": "Chưa có thông tin", "month_label": "Chưa có thông tin", "evidence_type": "Không tìm thấy file save", "evidence_detail": "Không có file save hay log session trên máy.", "status": "completed", "playtime_minutes": 0}]};
+    let currentData = JSON.parse(JSON.stringify(initialData));
+
+    const monthColumns = [
+      { id: "2026-06", title: "Tháng 06/2026", color: "#38bdf8" },
+      { id: "2026-07", title: "Tháng 07/2026", color: "#818cf8" },
+      { id: "2026-08", title: "Tháng 08/2026", color: "#c084fc" },
+      { id: "2026-09", title: "Tháng 09/2026", color: "#f472b6" },
+      { id: "2026-10", title: "Tháng 10/2026", color: "#fb923c" },
+      { id: "2026-11", title: "Tháng 11/2026", color: "#34d399" },
+      { id: "missing", title: "Chưa Có Save / Thiếu Thông Tin", color: "#f87171" }
+    ];
+
+    function getAllGames() {
+      const games = [];
+      currentData.completed_with_exact_date.forEach(g => {
+        games.push({ ...g, isMissing: false });
+      });
+      currentData.completed_missing_info.forEach(g => {
+        games.push({ ...g, isMissing: true });
+      });
+      return games;
+    }
+
+    function renderBoard() {
+      const board = document.getElementById("board");
+      board.innerHTML = "";
+
+      const games = getAllGames();
+
+      monthColumns.forEach(col => {
+        const colDiv = document.createElement("div");
+        colDiv.className = "column";
+        colDiv.dataset.colId = col.id;
+
+        // Filter games for this column
+        const colGames = games.filter(g => {
+          if (col.id === "missing") {
+            return g.proposed_month === "Chưa có thông tin" || !g.proposed_completed_at;
+          }
+          return g.proposed_month === col.id;
+        });
+
+        colDiv.innerHTML = `
+          <div class="col-header">
+            <span class="col-title" style="color: ${col.color}">● ${col.title}</span>
+            <span class="col-badge" id="badge-${col.id}">${colGames.length}</span>
+          </div>
+          <div class="col-body" id="col-body-${col.id}" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event, '${col.id}')">
+          </div>
+        `;
+
+        const body = colDiv.querySelector(`#col-body-${col.id}`);
+        colGames.forEach(g => {
+          body.appendChild(createCard(g));
+        });
+
+        board.appendChild(colDiv);
+      });
+    }
+
+    function createCard(g) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.draggable = true;
+      card.id = `card-${g.id}`;
+      card.dataset.gameId = g.id;
+
+      card.ondragstart = (e) => {
+        e.dataTransfer.setData("text/plain", g.id);
+        card.classList.add("dragging");
+      };
+      card.ondragend = () => {
+        card.classList.remove("dragging");
+      };
+
+      const wasNov = g.current_completed_at && g.current_completed_at.includes("2026-11-20") && g.proposed_month !== "2026-11";
+      const isMissing = !g.proposed_completed_at;
+
+      let dateValForInput = "";
+      if (g.proposed_completed_at) {
+        dateValForInput = g.proposed_completed_at.replace(" ", "T").substring(0, 16);
+      }
+
+      card.innerHTML = `
+        <div class="card-top">
+          <span class="card-title">${g.title}</span>
+          <span class="card-id">#${g.id}</span>
+        </div>
+        <div>
+          ${isMissing ? `<span class="badge badge-missing">Thiếu File Save</span>` : `<span class="badge badge-evidence">${g.evidence_type}</span>`}
+          ${wasNov ? `<span class="badge badge-was-nov">Sửa từ 11/2026</span>` : ''}
+        </div>
+        <div class="card-times">
+          <div class="time-row">
+            <span class="time-label">Cũ trong DB:</span>
+            <span class="time-val ${wasNov ? 'old' : ''}">${g.current_completed_at ? g.current_completed_at.replace('T', ' ') : '(Chưa có)'}</span>
+          </div>
+          <div class="time-row">
+            <span class="time-label">Mới đề xuất:</span>
+            <span class="time-val new">${g.proposed_completed_at ? g.proposed_completed_at.replace('T', ' ') : '(Cần bạn chọn)'}</span>
+          </div>
+          <div class="date-input-wrap">
+            <label>Chỉnh sửa ngày giờ phá đảo:</label>
+            <input type="datetime-local" class="date-picker" value="${dateValForInput}" onchange="onDateChange(${g.id}, this.value)">
+          </div>
+        </div>
+        <div class="evidence-text ${isMissing ? 'missing' : ''}">
+          ${g.evidence_detail}
+        </div>
+      `;
+      return card;
+    }
+
+    function onDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.parentElement.classList.add("drag-over");
+    }
+    function onDragLeave(e) {
+      e.currentTarget.parentElement.classList.remove("drag-over");
+    }
+    function onDrop(e, targetColId) {
+      e.preventDefault();
+      e.currentTarget.parentElement.classList.remove("drag-over");
+      const gameId = parseInt(e.dataTransfer.getData("text/plain"));
+      moveGameToColumn(gameId, targetColId);
+    }
+
+    function moveGameToColumn(gameId, targetColId) {
+      // Find game
+      let game = currentData.completed_with_exact_date.find(g => g.id === gameId);
+      let isExact = true;
+      if (!game) {
+        game = currentData.completed_missing_info.find(g => g.id === gameId);
+        isExact = false;
+      }
+      if (!game) return;
+
+      if (targetColId === "missing") {
+        game.proposed_month = "Chưa có thông tin";
+        game.month_label = "Chưa có thông tin";
+        game.proposed_completed_at = null;
+        if (isExact) {
+          currentData.completed_with_exact_date = currentData.completed_with_exact_date.filter(g => g.id !== gameId);
+          currentData.completed_missing_info.push(game);
+        }
+      } else {
+        game.proposed_month = targetColId;
+        const colDef = monthColumns.find(c => c.id === targetColId);
+        game.month_label = colDef ? colDef.title : targetColId;
+        if (!game.proposed_completed_at) {
+          // Assign 15th of that month as default
+          game.proposed_completed_at = `${targetColId}-15T12:00:00`;
+        } else {
+          // Adjust year-month portion
+          const timePart = game.proposed_completed_at.includes("T") ? game.proposed_completed_at.split("T")[1] : "12:00:00";
+          game.proposed_completed_at = `${targetColId}-15T${timePart}`;
+        }
+        if (!isExact) {
+          currentData.completed_missing_info = currentData.completed_missing_info.filter(g => g.id !== gameId);
+          currentData.completed_with_exact_date.push(game);
+        }
+      }
+      renderBoard();
+    }
+
+    function onDateChange(gameId, newIsoValue) {
+      let game = currentData.completed_with_exact_date.find(g => g.id === gameId);
+      let isExact = true;
+      if (!game) {
+        game = currentData.completed_missing_info.find(g => g.id === gameId);
+        isExact = false;
+      }
+      if (!game) return;
+
+      if (!newIsoValue) {
+        game.proposed_completed_at = null;
+        game.proposed_month = "Chưa có thông tin";
+        game.month_label = "Chưa có thông tin";
+        if (isExact) {
+          currentData.completed_with_exact_date = currentData.completed_with_exact_date.filter(g => g.id !== gameId);
+          currentData.completed_missing_info.push(game);
+        }
+      } else {
+        game.proposed_completed_at = newIsoValue;
+        const newMonth = newIsoValue.substring(0, 7);
+        game.proposed_month = newMonth;
+        const colDef = monthColumns.find(c => c.id === newMonth);
+        game.month_label = colDef ? colDef.title : newMonth;
+        if (!isExact) {
+          currentData.completed_missing_info = currentData.completed_missing_info.filter(g => g.id !== gameId);
+          currentData.completed_with_exact_date.push(game);
+        }
+      }
+      renderBoard();
+    }
+
+    function filterGames() {
+      const query = document.getElementById("searchInput").value.toLowerCase();
+      document.querySelectorAll(".card").forEach(card => {
+        const title = card.querySelector(".card-title").innerText.toLowerCase();
+        if (title.includes(query)) {
+          card.style.display = "flex";
+        } else {
+          card.style.display = "none";
+        }
+      });
+    }
+
+    function copyConfirmedJson() {
+      const payload = generateConfirmationPayload();
+      navigator.clipboard.writeText(JSON.stringify(payload, null, 2)).then(() => {
+        const toast = document.getElementById("toast");
+        toast.style.display = "block";
+        setTimeout(() => { toast.style.display = "none"; }, 3000);
+      });
+    }
+
+    function downloadConfirmedJson() {
+      const payload = generateConfirmationPayload();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "games_completion_confirmed.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function generateConfirmationPayload() {
+      return {
+        confirmed_at: new Date().toISOString(),
+        updates: getAllGames().map(g => ({
+          id: g.id,
+          title: g.title,
+          completed_at: g.proposed_completed_at,
+          month: g.proposed_month
+        }))
+      };
+    }
+
+    function resetToInitial() {
+      currentData = JSON.parse(JSON.stringify(initialData));
+      renderBoard();
+    }
+
+    // Initial render
+    renderBoard();
+  </script>
+</body>
+</html>

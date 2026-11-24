@@ -427,6 +427,14 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
       assert.equal(isLikelyGame('notepad++.exe', 'C:\\Program Files\\Notepad++\\notepad++.exe', db), false);
     });
 
+    it('rejects launchers, store clients, updaters and cloud tools (LeagueClientUx, Riot Client, GoogleDriveFS, Setup)', () => {
+      assert.equal(isLikelyGame('LeagueClientUx.exe', 'C:\\Riot Games\\League of Legends\\LeagueClientUx.exe', db), false);
+      assert.equal(isLikelyGame('Riot Client.exe', 'C:\\Riot Games\\Riot Client\\Riot Client.exe', db), false);
+      assert.equal(isLikelyGame('RiotClientServices.exe', 'C:\\Riot Games\\Riot Client\\RiotClientServices.exe', db), false);
+      assert.equal(isLikelyGame('GoogleDriveFS.exe', 'C:\\Program Files\\Google\\Drive File Stream\\GoogleDriveFS.exe', db), false);
+      assert.equal(isLikelyGame('GoogleDriveSetup.exe', 'C:\\Users\\User\\Downloads\\GoogleDriveSetup.exe', db), false);
+    });
+
     it('positively identifies games in standard gaming platforms & folders', () => {
       // Steam
       assert.equal(isLikelyGame('sekiro.exe', 'D:\\SteamLibrary\\steamapps\\common\\Sekiro\\sekiro.exe', db), true);

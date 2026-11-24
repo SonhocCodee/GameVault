@@ -11,6 +11,14 @@ import { handleGetUser, handleUpdateHardware } from './routes/users.ts';
 import { handleGetCurrentPick, handleVotePick, handleUnvotePick } from './routes/picks.ts';
 import { handleImageUpload, handleImageGet } from './routes/images.ts';
 import { handleGetLibrary, handleSyncLibrary } from './routes/library.ts';
+import {
+  handleGetCover,
+  handleCacheCover,
+  handleUploadCover,
+  handleAdminGetCovers,
+  handleAdminUpdateCover,
+  handleAdminDeleteCover,
+} from './routes/covers.ts';
 
 export const router = new Router();
 
@@ -42,9 +50,19 @@ router.delete('/api/picks/vote', handleUnvotePick);
 router.get('/api/library', handleGetLibrary);
 router.post('/api/library/sync', handleSyncLibrary);
 
-// Images (R2)
+// Images (R2 / D1)
 router.post('/api/images/upload', handleImageUpload);
 router.get('/api/images/:key', handleImageGet);
+
+// Central Game Covers Catalog (Single Source of Truth)
+router.get('/api/covers/:gameKey', handleGetCover);
+router.post('/api/covers/cache', handleCacheCover);
+router.post('/api/covers/upload', handleUploadCover);
+
+// Admin Game Covers Management
+router.get('/api/admin/covers', handleAdminGetCovers);
+router.put('/api/admin/covers/:gameKey', handleAdminUpdateCover);
+router.delete('/api/admin/covers/:gameKey', handleAdminDeleteCover);
 
 export default {
   async fetch(request: Request, env: Env, executionCtx?: any): Promise<Response> {

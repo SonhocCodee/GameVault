@@ -124,6 +124,15 @@ export async function authenticate(request: Request, env: Env): Promise<AuthUser
   };
 }
 
+export function isAdminUser(user: AuthUser | null, env?: Env): boolean {
+  if (!user || !user.email) return false;
+  const configured = env?.ADMIN_EMAILS
+    ? env.ADMIN_EMAILS.split(',').map(s => s.trim().toLowerCase())
+    : [];
+  const allowed = new Set(['son6232000@gmail.com', ...configured]);
+  return allowed.has(user.email.toLowerCase().trim());
+}
+
 export async function verifyGoogleIdToken(
   idToken: string,
   env: Env,

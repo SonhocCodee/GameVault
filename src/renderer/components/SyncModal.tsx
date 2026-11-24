@@ -33,16 +33,24 @@ export interface SyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  initialTab?: SyncTab;
 }
 
-type SyncTab = 'library' | 'drive_media' | 'local_f6';
+export type SyncTab = 'library' | 'drive_media' | 'local_f6';
 
 export const SyncModal: React.FC<SyncModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  initialTab,
 }) => {
-  const [activeTab, setActiveTab] = useState<SyncTab>('library');
+  const [activeTab, setActiveTab] = useState<SyncTab>(initialTab || 'library');
+
+  useEffect(() => {
+    if (initialTab && isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, isOpen]);
 
   // Auth status
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
@@ -122,7 +130,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               if (res.filesUploaded > 0) {
                 msg = `Đã sao lưu thành công ${res.filesUploaded} file media (${formattedSize}) từ ${res.gamesProcessed} game lên Google Drive!`;
               } else {
-                msg = `Toàn bộ ảnh & video từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước.`;
+                msg = `Toàn bộ ảnh & video từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước (Các ảnh F6 vừa chụp đã tự động có trên ổ G:).`;
               }
               if (res.errors && res.errors.length > 0) {
                 msg += ` (Có ${res.errors.length} file gặp lỗi tải)`;
@@ -187,7 +195,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         if (res.filesUploaded > 0) {
           msg = `Đã sao lưu thành công ${res.filesUploaded} file media (${formattedSize}) từ ${res.gamesProcessed} game lên Google Drive!`;
         } else {
-          msg = `Toàn bộ ảnh & video từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước (không có file mới cần tải lên).`;
+          msg = `Toàn bộ ảnh & video từ ${res.gamesProcessed} game đã đồng bộ trên Google Drive từ trước (Các ảnh F6 vừa chụp đã tự động có trên ổ G:).`;
         }
         if (res.errors && res.errors.length > 0) {
           msg += ` (Có ${res.errors.length} file gặp lỗi tải)`;
@@ -247,6 +255,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         const res = await window.electronAPI.syncScreenshots({ dryRun: isDryRun });
         setF6Summary(res);
         if (!isDryRun && res.moved > 0) {
+          if (window.electronAPI?.uploadMediaToDrive) {
+            window.electronAPI.uploadMediaToDrive().catch(console.error);
+          }
           onSuccess();
         }
       } else {
@@ -344,7 +355,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             }`}
           >
             <Zap className="h-4 w-4 text-amber-400" />
-            <span>Gom ảnh F6 máy này</span>
+            <span>Gom ảnh (C: ➔ E: &amp; G:)</span>
           </button>
         </div>
 
@@ -560,7 +571,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] text-[#8e95a5]">
-                    <span>Không gian riêng tư (appDataFolder ẩn, 15GB miễn phí, ảnh &amp; video không bị nén)</span>
+                    <span>Thư mục hiển thị: <strong className="text-emerald-400">Drive của tôi / GameVault</strong> (hoặc ổ ảo <strong className="text-emerald-400">G:\My Drive\GameVault</strong>)</span>
                     <button
                       onClick={fetchQuota}
                       disabled={quotaLoading}
@@ -659,7 +670,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <span>Tại sao Google Drive tốt hơn Google Photos?</span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Lưu vào <strong>Google Drive (appDataFolder riêng tư)</strong> giữ nguyên vẹn 100% cấu trúc thư mục game (<code className="text-white">E:\Game\&lt;Tên Game&gt;</code>) và toàn bộ ảnh chụp (F6) lẫn video gameplay (.mp4, .mov...) gốc không bị Google nén giảm chất lượng. Khi sang máy mới, bạn chỉ cần bấm nút <strong>"Kéo toàn bộ về máy"</strong> là xong!
+                  Lưu vào <strong>Google Drive (Thư mục &quot;Drive của tôi / GameVault&quot; hiển thị trực quan hoặc ổ ảo G:)</strong> giữ nguyên vẹn 100% cấu trúc thư mục game (<code className="text-white">E:\Game\&lt;Tên Game&gt;</code>) và toàn bộ ảnh chụp (F6) lẫn video gameplay (.mp4, .mov...) gốc không bị Google nén giảm chất lượng. Bạn có thể mở web <strong className="text-emerald-400">drive.google.com</strong> hoặc ứng dụng trên điện thoại để lướt xem ảnh bất cứ lúc nào! Khi sang máy mới, chỉ cần bấm nút <strong>&quot;Kéo toàn bộ về máy&quot;</strong> là xong!
                 </p>
               </div>
 
@@ -745,7 +756,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                     <span>
                       {dryRun
                         ? `Kết quả quét thử nghiệm: Khớp ${f6Summary.matched} ảnh.`
-                        : `Gom ảnh thành công! Đã chuyển ${f6Summary.moved} ảnh vào E:\\Game.`}
+                        : `Gom ảnh thành công! Đã cut ${f6Summary.moved} ảnh từ C: sang E:\\Game và đồng bộ lên Google Drive (G:).`}
                     </span>
                   </div>
 
@@ -821,11 +832,12 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 <div className="rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-4 text-xs text-[#8e95a5] space-y-2">
                   <div className="flex items-center gap-2 font-bold text-white">
                     <Zap className="h-4 w-4 text-amber-400" />
-                    <span>Gom ảnh chụp màn hình F6 trên máy này:</span>
+                    <span>Quy trình Gom ảnh màn hình (C: ➔ E:\Game &amp; Ổ G:):</span>
                   </div>
                   <ul className="list-disc pl-5 space-y-1 text-[11px]">
-                    <li>Quét thư mục <code className="text-white">Pictures\Screenshots</code> tìm ảnh chụp phím F6.</li>
-                    <li>Đối chiếu timestamp với lịch sử phiên chơi để chuyển sang <code className="text-white">E:\Game\&lt;Tên Game&gt;</code>.</li>
+                    <li>Khi chụp ảnh: Lưu tạm trên ổ SSD C: (<code className="text-white">Pictures\Screenshots</code>) và tự động đẩy ngay 1 bản sang Google Drive G: (<code className="text-white">G:\My Drive\GameVault</code>).</li>
+                    <li>Khi bấm nút gom ảnh: App đối chiếu thời gian chơi game, tự động <strong className="text-white">Cut (di chuyển)</strong> toàn bộ ảnh từ C: sang ổ HDD <code className="text-white">E:\Game\&lt;Tên Game&gt;</code> để lưu trữ vĩnh viễn và dọn sạch ổ C:.</li>
+                    <li>Ổ HDD E: hoàn toàn ngủ (spin-down) khi đang chơi game, chỉ khởi động khi bạn chủ động bấm nút dưới đây.</li>
                   </ul>
                 </div>
               )}
@@ -839,13 +851,13 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   {f6Loading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Đang quét ảnh F6...</span>
+                      <span>Đang quét và gom ảnh...</span>
                     </>
                   ) : (
                     <>
                       <Zap className="h-4 w-4" />
                       <span>
-                        {dryRun ? 'Chạy thử nghiệm (Xem trước kết quả)' : 'Bắt đầu Gom ảnh F6 ngay'}
+                        {dryRun ? 'Chạy thử nghiệm (Xem trước kết quả)' : 'Bắt đầu Gom ảnh từ C: sang E: & G:'}
                       </span>
                     </>
                   )}

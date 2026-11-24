@@ -51,8 +51,12 @@ export const FOLDER_ALIASES: Record<string, string> = {
   '007 first light': '007 First Light',
   'mortal shell 2': 'Mortal Shell 2',
   'onimusha': 'Onimusha: The Way of the Sword',
+  'tlou': 'The Last of Us Part I',
+  'tlou-i': 'The Last of Us Part I',
+  'tloui': 'The Last of Us Part I',
 
   // Canonical -> Common folder name on disk
+  'the last of us part i': 'The Last of Us Part I',
   'phantom blade zero': 'PBZ',
   'crimson desert': 'CrimsonDersert',
   'dead space 2': 'DS2',

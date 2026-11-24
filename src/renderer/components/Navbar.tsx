@@ -21,6 +21,8 @@ import {
   RefreshCw,
   Loader2,
   Sparkles,
+  FolderSync,
+  ShieldCheck,
 } from 'lucide-react';
 import type { GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
@@ -41,10 +43,11 @@ export interface NavbarProps {
   completedGamesCount: number;
   trackerStatus?: TrackerStatus | null;
   onOpenImportModal: () => void;
-  onOpenSyncModal: () => void;
+  onOpenSyncModal: (tab?: 'library' | 'drive_media' | 'local_f6') => void;
   onOpenAddGameModal: () => void;
   onOpenWishlistModal?: () => void;
   onOpenSettingsModal?: () => void;
+  onOpenAdminModal?: () => void;
   onOpenCommunity?: () => void;
   onEnrichCovers?: () => void | Promise<void>;
   libraryLayout?: 'grid' | 'timeline';
@@ -87,6 +90,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAddGameModal,
   onOpenWishlistModal,
   onOpenSettingsModal,
+  onOpenAdminModal,
   onOpenCommunity,
   onEnrichCovers,
   libraryLayout = 'grid',
@@ -105,14 +109,29 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isSyncingMedia, setIsSyncingMedia] = useState<boolean>(false);
 
   useEffect(() => {
-    window.electronAPI?.getActiveMediaSyncStatus?.().then((status) => {
-      setIsSyncingMedia(!!status?.isRunning);
-    }).catch(() => {});
+    let isMounted = true;
+    const checkSyncStatus = () => {
+      window.electronAPI?.getActiveMediaSyncStatus?.().then((status) => {
+        if (isMounted) {
+          setIsSyncingMedia(!!status?.isRunning);
+        }
+      }).catch(() => {});
+    };
+
+    checkSyncStatus();
+    const interval = setInterval(checkSyncStatus, 2500);
 
     const unsub = window.electronAPI?.onDriveMediaProgress?.((p) => {
-      setIsSyncingMedia(p.percent < 100);
+      if (isMounted) {
+        setIsSyncingMedia(p.percent < 100);
+      }
     });
-    return () => unsub?.();
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      unsub?.();
+    };
   }, []);
 
   // Click outside listener for Tools dropdown
@@ -250,7 +269,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           {/* Direct Prominent Sync Button */}
           <button
-            onClick={onOpenSyncModal}
+            onClick={() => onOpenSyncModal('library')}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0 whitespace-nowrap ${
               isSyncingMedia
                 ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300 animate-pulse'
@@ -301,7 +320,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   onClick={() => {
                     setToolsOpen(false);
-                    onOpenSyncModal();
+                    onOpenSyncModal('library');
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] group"
                 >
@@ -311,6 +330,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div>
                     <div className="font-semibold text-white group-hover:text-sky-400">Trung tâm Đồng bộ</div>
                     <div className="text-[10px] text-[#8e95a5]">Đồng bộ Thư viện Cloud, Drive Media &amp; F6</div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setToolsOpen(false);
+                    onOpenSyncModal('local_f6');
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] group"
+                >
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-black transition-colors">
+                    <FolderSync className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-white group-hover:text-amber-400">Gom ảnh (C: ➔ E: &amp; G:)</div>
+                    <div className="text-[10px] text-[#8e95a5]">Cut ảnh sang HDD E &amp; đẩy lên Google Drive</div>
                   </div>
                 </button>
 
@@ -379,6 +414,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Thêm game</span>
           </button>
 
+          {/* Admin Covers Button */}
+          {onOpenAdminModal && (
+            <button
+              onClick={onOpenAdminModal}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:border-amber-400 hover:bg-amber-500/20 transition-all shrink-0"
+              title="Quản trị Bìa Game (Cloud Master Catalog)"
+            >
+              <ShieldCheck className="h-4 w-4" />
+            </button>
+          )}
+
           {/* Settings Icon Button */}
           {onOpenSettingsModal && (
             <button
@@ -392,7 +438,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Google login / avatar */}
           <div className="shrink-0">
-            <AuthBadge />
+            <AuthBadge onOpenAdminModal={onOpenAdminModal} />
           </div>
         </div>
       </div>

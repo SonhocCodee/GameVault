@@ -4,6 +4,7 @@ import { getSaveBackupById } from './db.ts';
 import { getValidGoogleAccessToken, type FetchLike } from './auth.ts';
 import { loadAppSettings } from './settings.ts';
 import { sanitizeTitleForFolder } from './media.ts';
+import { getGoogleDriveDesktopMediaDir } from './google-drive-desktop.ts';
 import type {
   DriveMediaSyncResult,
   DriveMediaRestoreResult,
@@ -48,47 +49,57 @@ async function authedHeaders(extra: Record<string, string> = {}): Promise<Record
 // Folder hierarchy helpers
 // ==========================================
 
-async function findChild(folderId: string | null, name: string): Promise<string | null> {
+async function findChild(folderId: string | null, name: string, useAppData = false): Promise<string | null> {
   const doFetch = await driveFetch();
   const headers = await authedHeaders();
-  const parentClause = folderId ? `'${folderId}' in parents` : `'appDataFolder' in parents`;
+  const defaultParent = useAppData ? 'appDataFolder' : 'root';
+  const parentClause = folderId ? `'${folderId}' in parents` : `'${defaultParent}' in parents`;
+  const spacesClause = useAppData ? '&spaces=appDataFolder' : '';
   const q = `name = '${name.replace(/'/g, "\\'")}' and trashed = false and ${parentClause}`;
-  const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=appDataFolder&pageSize=5`;
+  const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name)${spacesClause}&pageSize=5`;
   const resp = await doFetch(url, { headers });
   if (!resp.ok) {
+    if (resp.status === 403) {
+      throw new Error(`Google Drive từ chối truy cập (403): Tài khoản Google cần cấp quyền Drive (drive.file). Vui lòng Đăng xuất rồi Đăng nhập lại, hoặc sử dụng Google Drive for Desktop.`);
+    }
     throw new Error(`Drive lookup failed: ${resp.status}`);
   }
   const data = await resp.json();
   return data.files?.[0]?.id ?? null;
 }
 
-async function createFolder(name: string, parentId: string | null): Promise<string> {
+async function createFolder(name: string, parentId: string | null, useAppData = false): Promise<string> {
   const doFetch = await driveFetch();
   const headers = await authedHeaders({ 'Content-Type': 'application/json' });
-  const body: Record<string, any> = { name, mimeType: FOLDER_MIME, parents: [parentId ?? 'appDataFolder'] };
+  const defaultParent = useAppData ? 'appDataFolder' : 'root';
+  const body: Record<string, any> = { name, mimeType: FOLDER_MIME, parents: [parentId ?? defaultParent] };
   const resp = await doFetch(DRIVE_API, { method: 'POST', headers, body: JSON.stringify(body) });
   if (!resp.ok) {
+    if (resp.status === 403) {
+      throw new Error(`Google Drive từ chối tạo thư mục (403): Tài khoản Google cần cấp quyền Drive (drive.file). Vui lòng Đăng xuất rồi Đăng nhập lại, hoặc sử dụng Google Drive for Desktop.`);
+    }
     throw new Error(`Drive folder create failed: ${resp.status}`);
   }
   const data = await resp.json();
   return data.id;
 }
 
-/** Ensures `<root>/<a>/<b>/...` exists under appDataFolder, returns the leaf id. */
-async function ensureFolderPath(segments: string[]): Promise<string> {
+/** Ensures `<root>/<a>/<b>/...` exists under visible Drive (or appDataFolder), returns the leaf id. */
+async function ensureFolderPath(segments: string[], useAppData = false): Promise<string> {
   let parent: string | null = null;
   for (const segment of segments) {
-    const existing = await findChild(parent, segment);
-    parent = existing ?? (await createFolder(segment, parent));
+    const existing = await findChild(parent, segment, useAppData);
+    parent = existing ?? (await createFolder(segment, parent, useAppData));
   }
   return parent as string;
 }
 
-async function listFolder(folderId: string): Promise<Array<{ id: string; name: string; mimeType: string; size?: string }>> {
+async function listFolder(folderId: string, useAppData = false): Promise<Array<{ id: string; name: string; mimeType: string; size?: string }>> {
   const doFetch = await driveFetch();
   const headers = await authedHeaders();
   const q = `'${folderId}' in parents and trashed = false`;
-  const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,size)&spaces=appDataFolder&pageSize=200`;
+  const spacesClause = useAppData ? '&spaces=appDataFolder' : '';
+  const url = `${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,size)${spacesClause}&pageSize=200`;
   const resp = await doFetch(url, { headers });
   if (!resp.ok) {
     throw new Error(`Drive list failed: ${resp.status}`);
@@ -205,11 +216,23 @@ export interface DriveRestoreResult {
  */
 export async function downloadBackupFromDrive(drivePath: string, vaultRoot: string): Promise<DriveRestoreResult> {
   const segments = drivePath.split('/').filter(Boolean);
-  let folderId = 'appDataFolder';
-  for (const segment of segments) {
-    const child = await findChild(folderId === 'appDataFolder' ? null : folderId, segment);
+  let folderId: string | null = null;
+  let isAppData = false;
+
+  let rootChild = await findChild(null, segments[0], false);
+  if (!rootChild) {
+    rootChild = await findChild(null, segments[0], true);
+    if (rootChild) isAppData = true;
+  }
+  if (!rootChild) {
+    throw new Error(`Không tìm thấy '${segments[0]}' trên Drive`);
+  }
+  folderId = rootChild;
+
+  for (let i = 1; i < segments.length; i++) {
+    const child = await findChild(folderId, segments[i], isAppData);
     if (!child) {
-      throw new Error(`Không tìm thấy '${segment}' trên Drive`);
+      throw new Error(`Không tìm thấy '${segments[i]}' trên Drive`);
     }
     folderId = child;
   }
@@ -219,7 +242,7 @@ export async function downloadBackupFromDrive(drivePath: string, vaultRoot: stri
 
   let filesDownloaded = 0;
   const walk = async (driveFolderId: string, localFolder: string) => {
-    const entries = await listFolder(driveFolderId);
+    const entries = await listFolder(driveFolderId, isAppData);
     for (const entry of entries) {
       if (entry.mimeType === FOLDER_MIME) {
         const sub = path.join(localFolder, entry.name);
@@ -463,6 +486,366 @@ export function getActiveMediaSyncStatus(): ActiveMediaSyncStatus {
   return { isRunning: false };
 }
 
+/**
+ * Fast local mirror to Google Drive for Desktop (e.g. G:\My Drive\GameVault).
+ * Avoids network latency, API rate limits, and 403 token scope restrictions.
+ */
+async function syncMediaToLocalGoogleDrive(
+  desktopMediaDir: string,
+  baseDir: string,
+  options: {
+    gameTitle?: string;
+    onProgress?: (progress: DriveMediaProgress) => void;
+  }
+): Promise<DriveMediaSyncResult> {
+  options.onProgress?.({
+    type: 'upload',
+    current: 0,
+    total: 0,
+    percent: 0,
+    currentFile: 'Đang kiểm tra file media mới...',
+    currentGame: 'Đang quét Google Drive ảo (G:)...',
+    bytesTransferred: 0,
+    totalBytes: 0,
+    speedBytesPerSec: 0,
+    formattedSpeed: '0 KB/s',
+    formattedTransferred: '0 MB',
+    formattedTotal: '0 MB',
+  });
+
+  let foldersToProcess: string[] = [];
+  if (options.gameTitle) {
+    foldersToProcess = [options.gameTitle];
+  } else {
+    try {
+      foldersToProcess = fs.readdirSync(baseDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      foldersToProcess = [];
+    }
+  }
+
+  interface LocalTask {
+    gameName: string;
+    fileName: string;
+    srcPath: string;
+    destPath: string;
+    size: number;
+  }
+  const tasks: LocalTask[] = [];
+
+  for (const gameName of foldersToProcess) {
+    const srcDir = path.join(baseDir, gameName);
+    if (!fs.existsSync(srcDir)) continue;
+    const destDir = path.join(desktopMediaDir, gameName);
+
+    let files: fs.Dirent[] = [];
+    try {
+      files = fs.readdirSync(srcDir, { withFileTypes: true })
+        .filter((f) => f.isFile() && MEDIA_EXTS.has(path.extname(f.name).toLowerCase()));
+    } catch {
+      continue;
+    }
+
+    for (const f of files) {
+      const srcPath = path.join(srcDir, f.name);
+      const destPath = path.join(destDir, f.name);
+      let size = 0;
+      let needCopy = true;
+      try {
+        const srcStat = fs.statSync(srcPath);
+        size = srcStat.size;
+        if (fs.existsSync(destPath)) {
+          const destStat = fs.statSync(destPath);
+          if (destStat.size === srcStat.size) {
+            needCopy = false;
+          }
+        }
+      } catch {}
+
+      if (needCopy) {
+        tasks.push({
+          gameName,
+          fileName: f.name,
+          srcPath,
+          destPath,
+          size,
+        });
+      }
+    }
+  }
+
+  const totalFiles = tasks.length;
+  const totalBytes = tasks.reduce((sum, t) => sum + t.size, 0);
+
+  if (totalFiles === 0) {
+    options.onProgress?.({
+      type: 'upload',
+      current: 0,
+      total: 0,
+      percent: 100,
+      currentFile: 'Đã đồng bộ đầy đủ',
+      currentGame: 'Toàn bộ file đã có trên Google Drive',
+      bytesTransferred: 0,
+      totalBytes: 0,
+      speedBytesPerSec: 0,
+      formattedSpeed: '0 KB/s',
+      formattedTransferred: '0 MB',
+      formattedTotal: '0 MB',
+    });
+    return {
+      gamesProcessed: foldersToProcess.length,
+      filesUploaded: 0,
+      bytesUploaded: 0,
+    };
+  }
+
+  let filesUploaded = 0;
+  let bytesUploaded = 0;
+  const errors: string[] = [];
+  const processedGames = new Set<string>();
+
+  const syncStartTime = Date.now();
+  let lastSpeedSampleTime = syncStartTime;
+  let lastBytesSample = 0;
+  let currentSpeed = 0;
+
+  const emitProgress = (fileName: string, gameName: string, processedCount: number) => {
+    const now = Date.now();
+    const elapsed = (now - lastSpeedSampleTime) / 1000;
+    if (elapsed >= 0.2) {
+      currentSpeed = Math.max(0, (bytesUploaded - lastBytesSample) / elapsed);
+      lastSpeedSampleTime = now;
+      lastBytesSample = bytesUploaded;
+    }
+    const { formattedTransferred, formattedTotal } = formatDualSize(bytesUploaded, totalBytes);
+    const percent = totalBytes > 0
+      ? Math.min(100, Math.round((bytesUploaded / totalBytes) * 100))
+      : Math.min(100, Math.round((processedCount / totalFiles) * 100));
+
+    const prog: DriveMediaProgress = {
+      type: 'upload',
+      current: processedCount,
+      total: totalFiles,
+      percent,
+      currentFile: fileName,
+      currentGame: gameName,
+      bytesTransferred: bytesUploaded,
+      totalBytes,
+      speedBytesPerSec: Math.round(currentSpeed),
+      formattedSpeed: formatTransferSpeed(currentSpeed),
+      formattedTransferred,
+      formattedTotal,
+    };
+    if (activeMediaSync) {
+      activeMediaSync.progress = prog;
+    }
+    options.onProgress?.(prog);
+  };
+
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    emitProgress(task.fileName, task.gameName, i);
+    try {
+      fs.mkdirSync(path.dirname(task.destPath), { recursive: true });
+      fs.copyFileSync(task.srcPath, task.destPath);
+      bytesUploaded += task.size;
+      filesUploaded++;
+      processedGames.add(task.gameName);
+    } catch (err: any) {
+      errors.push(`Lỗi sao lưu ${task.fileName}: ${err.message}`);
+    }
+    emitProgress(task.fileName, task.gameName, i + 1);
+  }
+
+  options.onProgress?.({
+    type: 'upload',
+    current: totalFiles,
+    total: totalFiles,
+    percent: 100,
+    currentFile: 'Hoàn tất',
+    currentGame: 'Đồng bộ Google Drive thành công',
+    bytesTransferred: bytesUploaded,
+    totalBytes,
+    speedBytesPerSec: 0,
+    formattedSpeed: '0 KB/s',
+    formattedTransferred: formatDualSize(bytesUploaded, totalBytes).formattedTransferred,
+    formattedTotal: formatDualSize(bytesUploaded, totalBytes).formattedTotal,
+  });
+
+  return {
+    gamesProcessed: Math.max(foldersToProcess.length, processedGames.size),
+    filesUploaded,
+    bytesUploaded,
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
+/**
+ * Fast local restore from Google Drive for Desktop (e.g. G:\My Drive\GameVault) to local directory.
+ */
+async function syncMediaFromLocalGoogleDrive(
+  desktopMediaDir: string,
+  baseDir: string,
+  options: {
+    gameTitle?: string;
+    onProgress?: (progress: DriveMediaProgress) => void;
+  }
+): Promise<DriveMediaRestoreResult> {
+  options.onProgress?.({
+    type: 'download',
+    current: 0,
+    total: 0,
+    percent: 0,
+    currentFile: 'Đang kiểm tra ảnh từ Google Drive...',
+    currentGame: 'Đang quét Google Drive ảo (G:)...',
+    bytesTransferred: 0,
+    totalBytes: 0,
+    speedBytesPerSec: 0,
+    formattedSpeed: '0 KB/s',
+    formattedTransferred: '0 MB',
+    formattedTotal: '0 MB',
+  });
+
+  let foldersToProcess: string[] = [];
+  if (options.gameTitle) {
+    foldersToProcess = [options.gameTitle];
+  } else {
+    try {
+      foldersToProcess = fs.readdirSync(desktopMediaDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      foldersToProcess = [];
+    }
+  }
+
+  interface LocalDownloadTask {
+    gameName: string;
+    fileName: string;
+    srcPath: string;
+    destPath: string;
+    size: number;
+  }
+  const tasks: LocalDownloadTask[] = [];
+
+  for (const gameName of foldersToProcess) {
+    const srcDir = path.join(desktopMediaDir, gameName);
+    if (!fs.existsSync(srcDir)) continue;
+    const destDir = path.join(baseDir, gameName);
+
+    let files: fs.Dirent[] = [];
+    try {
+      files = fs.readdirSync(srcDir, { withFileTypes: true })
+        .filter((f) => f.isFile() && MEDIA_EXTS.has(path.extname(f.name).toLowerCase()));
+    } catch {
+      continue;
+    }
+
+    for (const f of files) {
+      const srcPath = path.join(srcDir, f.name);
+      const destPath = path.join(destDir, f.name);
+      let size = 0;
+      let needCopy = true;
+      try {
+        const srcStat = fs.statSync(srcPath);
+        size = srcStat.size;
+        if (fs.existsSync(destPath)) {
+          const destStat = fs.statSync(destPath);
+          if (destStat.size === srcStat.size) {
+            needCopy = false;
+          }
+        }
+      } catch {}
+
+      if (needCopy) {
+        tasks.push({
+          gameName,
+          fileName: f.name,
+          srcPath,
+          destPath,
+          size,
+        });
+      }
+    }
+  }
+
+  const totalFiles = tasks.length;
+  const totalBytes = tasks.reduce((sum, t) => sum + t.size, 0);
+
+  if (totalFiles === 0) {
+    return {
+      gamesRestored: foldersToProcess.length,
+      filesDownloaded: 0,
+      localBaseDir: baseDir,
+    };
+  }
+
+  let filesDownloaded = 0;
+  let bytesDownloaded = 0;
+  const restoredGames = new Set<string>();
+
+  const syncStartTime = Date.now();
+  let lastSpeedSampleTime = syncStartTime;
+  let lastBytesSample = 0;
+  let currentSpeed = 0;
+
+  const emitProgress = (fileName: string, gameName: string, processedCount: number) => {
+    const now = Date.now();
+    const elapsed = (now - lastSpeedSampleTime) / 1000;
+    if (elapsed >= 0.2) {
+      currentSpeed = Math.max(0, (bytesDownloaded - lastBytesSample) / elapsed);
+      lastSpeedSampleTime = now;
+      lastBytesSample = bytesDownloaded;
+    }
+    const { formattedTransferred, formattedTotal } = formatDualSize(bytesDownloaded, totalBytes);
+    const percent = totalBytes > 0
+      ? Math.min(100, Math.round((bytesDownloaded / totalBytes) * 100))
+      : Math.min(100, Math.round((processedCount / totalFiles) * 100));
+
+    const prog: DriveMediaProgress = {
+      type: 'download',
+      current: processedCount,
+      total: totalFiles,
+      percent,
+      currentFile: fileName,
+      currentGame: gameName,
+      bytesTransferred: bytesDownloaded,
+      totalBytes,
+      speedBytesPerSec: Math.round(currentSpeed),
+      formattedSpeed: formatTransferSpeed(currentSpeed),
+      formattedTransferred,
+      formattedTotal,
+    };
+    if (activeMediaSync) {
+      activeMediaSync.progress = prog;
+    }
+    options.onProgress?.(prog);
+  };
+
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    emitProgress(task.fileName, task.gameName, i);
+    try {
+      fs.mkdirSync(path.dirname(task.destPath), { recursive: true });
+      fs.copyFileSync(task.srcPath, task.destPath);
+      bytesDownloaded += task.size;
+      filesDownloaded++;
+      restoredGames.add(task.gameName);
+    } catch (err: any) {
+      console.error(`Lỗi copy về ${task.fileName}:`, err);
+    }
+    emitProgress(task.fileName, task.gameName, i + 1);
+  }
+
+  return {
+    gamesRestored: Math.max(foldersToProcess.length, restoredGames.size),
+    filesDownloaded,
+    localBaseDir: baseDir,
+  };
+}
+
 export async function uploadMediaToDrive(options: {
   gameTitle?: string;
   localMediaBaseDir?: string;
@@ -476,6 +859,12 @@ export async function uploadMediaToDrive(options: {
     const baseDir = options.localMediaBaseDir || loadAppSettings().mediaBaseDir || 'E:\\Game';
     if (!fs.existsSync(baseDir)) {
       return { gamesProcessed: 0, filesUploaded: 0, bytesUploaded: 0, errors: [`Thư mục media ${baseDir} không tồn tại`] };
+    }
+
+    // When Google Drive for Desktop is installed and running, use the fast local virtual drive mirror
+    const desktopMediaDir = !driveFetchOverride ? getGoogleDriveDesktopMediaDir() : null;
+    if (desktopMediaDir && fs.existsSync(desktopMediaDir)) {
+      return syncMediaToLocalGoogleDrive(desktopMediaDir, baseDir, options);
     }
 
     // Ensure root folder GameVault/Media in appDataFolder
@@ -575,6 +964,20 @@ export async function uploadMediaToDrive(options: {
 
     // If all files are already uploaded, finish immediately!
     if (totalFiles === 0) {
+      options.onProgress?.({
+        type: 'upload',
+        current: 0,
+        total: 0,
+        percent: 100,
+        currentFile: 'Đã đồng bộ đầy đủ',
+        currentGame: 'Toàn bộ file đã có trên Google Drive',
+        bytesTransferred: 0,
+        totalBytes: 0,
+        speedBytesPerSec: 0,
+        formattedSpeed: '0 KB/s',
+        formattedTransferred: '0 MB',
+        formattedTotal: '0 MB',
+      });
       return {
         gamesProcessed: foldersToProcess.length,
         filesUploaded: 0,
@@ -694,6 +1097,21 @@ export async function uploadMediaToDrive(options: {
     const uploadWorkers = Array.from({ length: Math.min(CONCURRENCY, uploadTasks.length) }, () => runUploadWorker());
     await Promise.all(uploadWorkers);
 
+    options.onProgress?.({
+      type: 'upload',
+      current: totalFiles,
+      total: totalFiles,
+      percent: 100,
+      currentFile: 'Hoàn tất',
+      currentGame: 'Đồng bộ Google Drive thành công',
+      bytesTransferred: bytesUploaded,
+      totalBytes,
+      speedBytesPerSec: 0,
+      formattedSpeed: '0 KB/s',
+      formattedTransferred: formatDualSize(bytesUploaded, totalBytes).formattedTransferred,
+      formattedTotal: formatDualSize(bytesUploaded, totalBytes).formattedTotal,
+    });
+
     return {
       gamesProcessed: Math.max(foldersToProcess.length, processedGamesSet.size),
       filesUploaded,
@@ -729,17 +1147,28 @@ export async function downloadMediaFromDrive(options: {
     const baseDir = options.localMediaBaseDir || loadAppSettings().mediaBaseDir || 'E:\\Game';
     fs.mkdirSync(baseDir, { recursive: true });
 
-    const gameVaultId = await findChild(null, 'GameVault');
+    // When Google Drive for Desktop is installed, restore directly from the local virtual drive
+    const desktopMediaDir = !driveFetchOverride ? getGoogleDriveDesktopMediaDir() : null;
+    if (desktopMediaDir && fs.existsSync(desktopMediaDir)) {
+      return syncMediaFromLocalGoogleDrive(desktopMediaDir, baseDir, options);
+    }
+
+    let gameVaultId = await findChild(null, 'GameVault', false);
+    let isAppData = false;
+    if (!gameVaultId) {
+      gameVaultId = await findChild(null, 'GameVault', true);
+      if (gameVaultId) isAppData = true;
+    }
     if (!gameVaultId) {
       return { gamesRestored: 0, filesDownloaded: 0, localBaseDir: baseDir };
     }
 
-    const mediaRootId = await findChild(gameVaultId, 'Media');
+    const mediaRootId = await findChild(gameVaultId, 'Media', isAppData);
     if (!mediaRootId) {
       return { gamesRestored: 0, filesDownloaded: 0, localBaseDir: baseDir };
     }
 
-    const driveGameFolders = await listFolder(mediaRootId);
+    const driveGameFolders = await listFolder(mediaRootId, isAppData);
     const targetFolders = options.gameTitle
       ? driveGameFolders.filter((f) => f.mimeType === FOLDER_MIME && f.name.toLowerCase() === options.gameTitle!.toLowerCase())
       : driveGameFolders.filter((f) => f.mimeType === FOLDER_MIME);
@@ -757,7 +1186,7 @@ export async function downloadMediaFromDrive(options: {
 
     for (const gameFolder of targetFolders) {
       const localGameDir = path.join(baseDir, gameFolder.name);
-      const driveFiles = (await listFolder(gameFolder.id)).filter((f) => f.mimeType !== FOLDER_MIME);
+      const driveFiles = (await listFolder(gameFolder.id, isAppData)).filter((f) => f.mimeType !== FOLDER_MIME);
 
       for (const file of driveFiles) {
         const targetFilePath = path.join(localGameDir, file.name);
@@ -781,6 +1210,20 @@ export async function downloadMediaFromDrive(options: {
     }
 
     if (totalFiles === 0) {
+      options.onProgress?.({
+        type: 'download',
+        current: 0,
+        total: 0,
+        percent: 100,
+        currentFile: 'Đã đồng bộ đầy đủ',
+        currentGame: 'Toàn bộ file đã có trên máy',
+        bytesTransferred: 0,
+        totalBytes: 0,
+        speedBytesPerSec: 0,
+        formattedSpeed: '0 KB/s',
+        formattedTransferred: '0 MB',
+        formattedTotal: '0 MB',
+      });
       return {
         gamesRestored: targetFolders.length,
         filesDownloaded: 0,
@@ -867,6 +1310,21 @@ export async function downloadMediaFromDrive(options: {
     const downloadWorkers = Array.from({ length: Math.min(CONCURRENCY, downloadTasks.length) }, () => runDownloadWorker());
     await Promise.all(downloadWorkers);
 
+    options.onProgress?.({
+      type: 'download',
+      current: totalFiles,
+      total: totalFiles,
+      percent: 100,
+      currentFile: 'Hoàn tất',
+      currentGame: 'Tải media từ Google Drive thành công',
+      bytesTransferred: bytesDownloaded,
+      totalBytes,
+      speedBytesPerSec: 0,
+      formattedSpeed: '0 KB/s',
+      formattedTransferred: formatDualSize(bytesDownloaded, totalBytes).formattedTransferred,
+      formattedTotal: formatDualSize(bytesDownloaded, totalBytes).formattedTotal,
+    });
+
     return {
       gamesRestored: Math.max(targetFolders.length, restoredGamesSet.size),
       filesDownloaded,
@@ -889,15 +1347,40 @@ export async function downloadMediaFromDrive(options: {
 }
 
 export async function getDriveMediaStats(): Promise<DriveMediaStats> {
-  const gameVaultId = await findChild(null, 'GameVault');
+  const desktopMediaDir = !driveFetchOverride ? getGoogleDriveDesktopMediaDir() : null;
+  if (desktopMediaDir && fs.existsSync(desktopMediaDir)) {
+    try {
+      const folders = fs.readdirSync(desktopMediaDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+      let filesCount = 0;
+      for (const f of folders) {
+        const gameDir = path.join(desktopMediaDir, f.name);
+        try {
+          const files = fs.readdirSync(gameDir, { withFileTypes: true })
+            .filter((file) => file.isFile() && MEDIA_EXTS.has(path.extname(file.name).toLowerCase()));
+          filesCount += files.length;
+        } catch {}
+      }
+      return {
+        gamesCount: folders.length,
+        filesCount,
+      };
+    } catch {}
+  }
+
+  let gameVaultId = await findChild(null, 'GameVault', false);
+  let isAppData = false;
+  if (!gameVaultId) {
+    gameVaultId = await findChild(null, 'GameVault', true);
+    if (gameVaultId) isAppData = true;
+  }
   if (!gameVaultId) return { gamesCount: 0, filesCount: 0 };
-  const mediaRootId = await findChild(gameVaultId, 'Media');
+  const mediaRootId = await findChild(gameVaultId, 'Media', isAppData);
   if (!mediaRootId) return { gamesCount: 0, filesCount: 0 };
 
-  const gameFolders = (await listFolder(mediaRootId)).filter((f) => f.mimeType === FOLDER_MIME);
+  const gameFolders = (await listFolder(mediaRootId, isAppData)).filter((f) => f.mimeType === FOLDER_MIME);
   let filesCount = 0;
   for (const gf of gameFolders) {
-    const files = await listFolder(gf.id);
+    const files = await listFolder(gf.id, isAppData);
     filesCount += files.filter((f) => f.mimeType !== FOLDER_MIME).length;
   }
 
@@ -935,10 +1418,15 @@ export async function getDriveStorageQuota(): Promise<DriveStorageQuota> {
 }
 
 export async function listDriveGameBackups(gameTitle: string): Promise<DriveGameBackup[]> {
-  const gameVaultId = await findChild(null, 'GameVault');
+  let gameVaultId = await findChild(null, 'GameVault', false);
+  let isAppData = false;
+  if (!gameVaultId) {
+    gameVaultId = await findChild(null, 'GameVault', true);
+    if (gameVaultId) isAppData = true;
+  }
   if (!gameVaultId) return [];
 
-  const gameEntries = await listFolder(gameVaultId);
+  const gameEntries = await listFolder(gameVaultId, isAppData);
   const targetFolderBase = sanitizeTitleForFolder(gameTitle).toLowerCase();
   const gameFolder = gameEntries.find((e) => {
     if (e.mimeType !== FOLDER_MIME) return false;
@@ -947,7 +1435,7 @@ export async function listDriveGameBackups(gameTitle: string): Promise<DriveGame
   });
   if (!gameFolder) return [];
 
-  const slots = await listFolder(gameFolder.id);
+  const slots = await listFolder(gameFolder.id, isAppData);
   const results: DriveGameBackup[] = [];
   for (const slot of slots) {
     if (slot.mimeType === FOLDER_MIME) {

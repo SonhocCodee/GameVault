@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { SteamCoversResult } from '../shared/types.ts';
-import { updateGame } from './db.ts';
+import { updateGame, getDb } from './db.ts';
 import { normalizeForMatch, resolveFolderAlias, levenshteinDistance } from './media.ts';
 import { optimizeAndSaveCover } from './thumbnails.ts';
+import { getCloudGameCover, cacheCloudGameCover, uploadCloudGameCover } from './cloud-db.ts';
 
 // In Electron runtime, electronModule has app, dialog. In test mode, fallback safely.
 const electron = (typeof electronModule === 'object' && electronModule !== null ? electronModule : {}) as any;
@@ -78,6 +79,15 @@ export const CURATED_STEAM_APP_IDS: Record<string, number> = {
   'baldurs gate 3': 1086940,
   'bg3': 1086940,
   // PlayStation PC
+  'the last of us part i': 1888930,
+  'the last of us part 1': 1888930,
+  'the last of us': 1888930,
+  'tlou': 1888930,
+  'tlou-i': 1888930,
+  'tloui': 1888930,
+  'tlou 1': 1888930,
+  'tlou part 1': 1888930,
+  'tlou part i': 1888930,
   'ghost of tsushima': 2215430,
   'ghost of tsushima director\'s cut': 2215430,
   'marvel\'s spider-man remastered': 1817070,
@@ -122,12 +132,32 @@ export const CURATED_STEAM_APP_IDS: Record<string, number> = {
   'how to fish': 4001890,
   'mimesis': 2827200,
   'wwz': 699130,
+  // Remedy / Alan Wake (Alan Wake 1 on Steam; Alan Wake 2 is Epic exclusive)
+  'alan wake': 108710,
+  'alan wake american nightmare': 202750,
+  'alan wake\'s american nightmare': 202750,
   'resident evil requiem': 3764200,
   're9': 3764200,
   'resident evil 9': 3764200,
 };
 
 export const NON_STEAM_COVERS: Record<string, { poster: string; banner: string }> = {
+  'alan wake 2': {
+    poster: 'https://images.igdb.com/igdb/image/upload/t_1080p/co6jar.jpg',
+    banner: 'https://cdn2.unrealengine.com/egs-alanwake2-remedyentertainment-s1-2560x1440-309c7412b7bc.jpg'
+  },
+  'alan wake ii': {
+    poster: 'https://images.igdb.com/igdb/image/upload/t_1080p/co6jar.jpg',
+    banner: 'https://cdn2.unrealengine.com/egs-alanwake2-remedyentertainment-s1-2560x1440-309c7412b7bc.jpg'
+  },
+  'alanwake2': {
+    poster: 'https://images.igdb.com/igdb/image/upload/t_1080p/co6jar.jpg',
+    banner: 'https://cdn2.unrealengine.com/egs-alanwake2-remedyentertainment-s1-2560x1440-309c7412b7bc.jpg'
+  },
+  'alanwakeii': {
+    poster: 'https://images.igdb.com/igdb/image/upload/t_1080p/co6jar.jpg',
+    banner: 'https://cdn2.unrealengine.com/egs-alanwake2-remedyentertainment-s1-2560x1440-309c7412b7bc.jpg'
+  },
   'resident evil requiem': {
     poster: 'https://upload.wikimedia.org/wikipedia/en/1/15/Resident_Evil_Requiem_Cover_Art.jpg',
     banner: 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3764200/library_hero.jpg'
@@ -310,14 +340,52 @@ process.once('exit', () => {
   } catch {}
 });
 
+function extractNumbersWithRoman(norm: string): string {
+  const normalized = norm
+    .replace(/viii$/, '8')
+    .replace(/vii$/, '7')
+    .replace(/vi$/, '6')
+    .replace(/iv$/, '4')
+    .replace(/v$/, '5')
+    .replace(/iii$/, '3')
+    .replace(/ii$/, '2')
+    .replace(/ix$/, '9')
+    .replace(/x$/, '10');
+  return normalized.match(/\d+/g)?.join('') || '';
+}
+
 /**
  * Scores a single Steam search candidate against the requested title.
  * exact=3 > result contains title=2 > title contains result=1 > typo tolerance=1.
  * Contains-based scoring requires the shorter side to be substantial so
  * 1-2 char names (e.g. the game "Z") never match everything.
  */
-function scoreCandidate(titleNorm: string, nameNorm: string): number {
+function scoreCandidate(titleNorm: string, nameNorm: string, rawTitle?: string, rawName?: string): number {
   if (nameNorm === titleNorm) return 3;
+
+  // Numbers (sequels, year editions) are distinguishing:
+  // If the query specifies a number ("Alan Wake 2", "Dark Souls 2"),
+  // reject candidates that lack that number or have a different number.
+  const titleDigits = extractNumbersWithRoman(titleNorm);
+  const nameDigits = extractNumbersWithRoman(nameNorm);
+  if (titleDigits) {
+    if (!nameDigits || titleDigits !== nameDigits) {
+      return 0;
+    }
+  }
+
+  // Guard against accidental cross-word substring matches when space is stripped
+  // e.g. query "tloui" inside "Project Louisiana" (projecTLOUIsiana)
+  if (rawTitle && rawName && titleNorm.length < 6) {
+    const rawT = rawTitle.toLowerCase().trim();
+    const rawN = rawName.toLowerCase().trim();
+    const words = rawN.split(/[^a-z0-9]+/);
+    const hasWordMatch = words.some(w => w === titleNorm || w.startsWith(titleNorm) || (w.length >= 4 && w.includes(titleNorm)));
+    if (!nameNorm.startsWith(titleNorm) && !rawN.includes(rawT) && !hasWordMatch) {
+      return 0;
+    }
+  }
+
   // Name contains the full query — legit even with long subtitles/editions;
   // allow 2+ char prefixes ("ho" → Horizon) but reject 1-char noise.
   if (titleNorm.length >= 2 && nameNorm.includes(titleNorm)) return 2;
@@ -345,7 +413,7 @@ export function pickBestAppMatch(
     if (!r || typeof r.appid !== 'number' || !r.appid || !r.name) continue;
     const nameNorm = normalizeForMatch(r.name);
     if (!nameNorm) continue;
-    const score = scoreCandidate(titleNorm, nameNorm);
+    const score = scoreCandidate(titleNorm, nameNorm, title, r.name);
     if (score === 0) continue;
     if (!best || score > bestScore) {
       best = r;
@@ -1519,32 +1587,78 @@ export async function searchSteamCovers(
   opts: LiveResolveOptions = {}
 ): Promise<SteamCoversResult> {
   const normTitle = (gameTitle || '').trim().toLowerCase();
-
-  // 1. Check curated non-steam covers first (e.g. Requiem, Bloodborne, LoL, etc.)
-  if (NON_STEAM_COVERS[normTitle]) {
-    const item = NON_STEAM_COVERS[normTitle];
-    return {
-      posterUrl: item.poster,
-      bannerUrl: item.banner,
-      poster: item.poster,
-      banner: item.banner,
-    };
-  }
-
-  // 2. Check normalized match in NON_STEAM_COVERS
   const normMatch = normalizeForMatch(gameTitle);
-  for (const [key, val] of Object.entries(NON_STEAM_COVERS)) {
-    if (normalizeForMatch(key) === normMatch) {
-      return {
-        posterUrl: val.poster,
-        bannerUrl: val.banner,
-        poster: val.poster,
-        banner: val.banner,
-      };
+
+  // 1. Check curated non-steam covers first (e.g. Alan Wake 2, Requiem, Bloodborne, LoL, etc.)
+  let nonSteamItem = NON_STEAM_COVERS[normTitle];
+  if (!nonSteamItem) {
+    for (const [key, val] of Object.entries(NON_STEAM_COVERS)) {
+      if (normalizeForMatch(key) === normMatch) {
+        nonSteamItem = val;
+        break;
+      }
     }
   }
 
-  const art = await resolveSteamArtForTitle(gameTitle, sanitizeSteamId(steamId), opts);
+  if (nonSteamItem) {
+    const nonSteamGameKey = `t_${normMatch}`;
+    // Ingest to cloud in background
+    cacheCloudGameCover({
+      gameKey: nonSteamGameKey,
+      title: gameTitle,
+      steamId: null,
+      sourcePosterUrl: nonSteamItem.poster,
+      sourceBannerUrl: nonSteamItem.banner,
+    }).catch(() => {});
+    return {
+      posterUrl: nonSteamItem.poster,
+      bannerUrl: nonSteamItem.banner,
+      poster: nonSteamItem.poster,
+      banner: nonSteamItem.banner,
+    };
+  }
+
+  const validSteamId = sanitizeSteamId(steamId);
+  const gameKey = validSteamId && validSteamId > 0 ? String(validSteamId) : `t_${normMatch}`;
+
+  // 2. Check centralized cloud catalog (Single Source of Truth)
+  try {
+    const cloudCover = await getCloudGameCover(gameKey);
+    if (cloudCover && cloudCover.found && (cloudCover.coverUrl || cloudCover.bannerUrl)) {
+      return {
+        posterUrl: cloudCover.coverUrl || undefined,
+        bannerUrl: cloudCover.bannerUrl || undefined,
+        poster: cloudCover.coverUrl || undefined,
+        banner: cloudCover.bannerUrl || undefined,
+        appId: cloudCover.steamId ?? (validSteamId || undefined),
+      };
+    }
+  } catch {}
+
+  const art = await resolveSteamArtForTitle(gameTitle, validSteamId, opts);
+
+  // 3. Ingest resolved art to cloud so every other user in the world gets this permanent image
+  if (art.posterUrl || art.bannerUrl) {
+    try {
+      const cached = await cacheCloudGameCover({
+        gameKey,
+        title: gameTitle,
+        steamId: art.appId || validSteamId,
+        sourcePosterUrl: art.posterUrl,
+        sourceBannerUrl: art.bannerUrl,
+      });
+      if (cached && (cached.coverUrl || cached.bannerUrl)) {
+        return {
+          posterUrl: cached.coverUrl || art.posterUrl,
+          bannerUrl: cached.bannerUrl || art.bannerUrl,
+          poster: cached.coverUrl || art.posterUrl,
+          banner: cached.bannerUrl || art.bannerUrl,
+          appId: art.appId ?? undefined,
+        };
+      }
+    } catch {}
+  }
+
   return {
     posterUrl: art.posterUrl,
     bannerUrl: art.bannerUrl,
@@ -1594,6 +1708,26 @@ export async function uploadCustomCover(
     } else {
       updateGame(gameId, { banner_url: targetPath });
     }
+
+    // Asynchronously upload custom cover to central cloud
+    try {
+      const { getGameById } = require('./db.ts');
+      const game = getGameById(gameId);
+      if (game) {
+        const gameKey = game.steam_id && Number(game.steam_id) > 0 ? String(Number(game.steam_id)) : `t_${normalizeForMatch(game.title)}`;
+        const buf = fs.readFileSync(targetPath);
+        const mime = ext.toLowerCase().includes('png') ? 'image/png' : 'image/jpeg';
+        uploadCloudGameCover(gameKey, type, buf, mime, { title: game.title, steamId: game.steam_id }).then((cloudUrl) => {
+          if (cloudUrl) {
+            if (type === 'poster') {
+              updateGame(gameId, { cover_url: cloudUrl });
+            } else {
+              updateGame(gameId, { banner_url: cloudUrl });
+            }
+          }
+        }).catch(() => {});
+      }
+    } catch {}
   }
 
   return targetPath;
@@ -1623,6 +1757,25 @@ export function setCoverFromScreenshot(
       updateGame(gameId, { banner_url: optimizedPath });
     }
 
+    // Asynchronously upload optimized screenshot cover to central cloud
+    try {
+      const { getGameById } = require('./db.ts');
+      const game = getGameById(gameId);
+      if (game) {
+        const gameKey = game.steam_id && Number(game.steam_id) > 0 ? String(Number(game.steam_id)) : `t_${normalizeForMatch(game.title)}`;
+        const buf = fs.readFileSync(optimizedPath);
+        uploadCloudGameCover(gameKey, type, buf, 'image/jpeg', { title: game.title, steamId: game.steam_id }).then((cloudUrl) => {
+          if (cloudUrl) {
+            if (type === 'poster') {
+              updateGame(gameId, { cover_url: cloudUrl });
+            } else {
+              updateGame(gameId, { banner_url: cloudUrl });
+            }
+          }
+        }).catch(() => {});
+      }
+    } catch {}
+
     return optimizedPath;
   }
 
@@ -1631,17 +1784,53 @@ export function setCoverFromScreenshot(
 
 /**
  * Per-game web cover resolution shared by the enrich loop and the repair
- * pass: folder AppID detection → curated non-Steam map → Steam dictionary
- * → live search → franchise fallback.
+ * pass: cloud catalog lookup (single source of truth) → folder AppID detection
+ * → curated non-Steam map → Steam dictionary → live search → cloud ingestion & caching.
  */
-async function resolveWebCoversForGame(
+export async function resolveWebCoversForGame(
   db: any,
   g: any,
-  opts: LiveResolveOptions
+  opts: LiveResolveOptions = {}
 ): Promise<{ poster?: string; banner?: string; verified: boolean }> {
   const cleanTitle = (g.title || '').toLowerCase().trim();
+  const normTitle = normalizeForMatch(g.title);
 
-  // 1. Detect AppID: existing steam_id or steam_appid.txt in game folder
+  // 1. Curated non-Steam map (e.g. Alan Wake 2, Bloodborne, LoL) — trusted hand-picked URLs
+  let nonSteamItem = NON_STEAM_COVERS[cleanTitle];
+  if (!nonSteamItem) {
+    for (const [key, val] of Object.entries(NON_STEAM_COVERS)) {
+      if (normalizeForMatch(key) === normTitle) {
+        nonSteamItem = val;
+        break;
+      }
+    }
+  }
+
+  if (nonSteamItem) {
+    // If the non-Steam game was mistakenly saved with a steam_id, reset it
+    if (g.steam_id && g.steam_id > 0) {
+      try {
+        db.prepare('UPDATE games SET steam_id = -1 WHERE id = ?').run(g.id);
+        g.steam_id = -1;
+      } catch {}
+    }
+    const gameKey = `t_${normTitle}`;
+    // Ingest to cloud in background
+    cacheCloudGameCover({
+      gameKey,
+      title: g.title,
+      steamId: null,
+      sourcePosterUrl: nonSteamItem.poster,
+      sourceBannerUrl: nonSteamItem.banner,
+    }).catch(() => {});
+    return {
+      poster: nonSteamItem.poster,
+      banner: nonSteamItem.banner,
+      verified: true,
+    };
+  }
+
+  // 2. Detect AppID: existing steam_id or steam_appid.txt in game folder
   let detectedAppId = typeof g.steam_id === 'number' && g.steam_id > 0 ? g.steam_id : null;
   if (!detectedAppId && g.exe_path) {
     // Cached probe: repeated enrichment cycles must not re-stat game folders
@@ -1654,35 +1843,64 @@ async function resolveWebCoversForGame(
     }
   }
 
-  // 2. Curated non-Steam map (e.g. Resident Evil Requiem, Bloodborne, LoL) — trusted hand-picked URLs
-  if (NON_STEAM_COVERS[cleanTitle]) {
-    return {
-      poster: NON_STEAM_COVERS[cleanTitle].poster,
-      banner: NON_STEAM_COVERS[cleanTitle].banner,
-      verified: true,
-    };
-  }
-  const normTitle = normalizeForMatch(g.title);
-  for (const [key, val] of Object.entries(NON_STEAM_COVERS)) {
-    if (normalizeForMatch(key) === normTitle) {
-      return { poster: val.poster, banner: val.banner, verified: true };
+  const gameKey = detectedAppId && detectedAppId > 0 ? String(detectedAppId) : `t_${normTitle}`;
+
+  // 2b. Check if the centralized cloud already has this game's covers!
+  try {
+    const cloudCover = await getCloudGameCover(gameKey);
+    if (cloudCover && cloudCover.found && (cloudCover.coverUrl || cloudCover.bannerUrl)) {
+      return {
+        poster: cloudCover.coverUrl || cloudCover.bannerUrl || undefined,
+        banner: cloudCover.bannerUrl || cloudCover.coverUrl || undefined,
+        verified: true,
+      };
     }
-  }
+  } catch {}
+
+  let resolvedPoster: string | undefined;
+  let resolvedBanner: string | undefined;
+  let verified = true;
 
   // 3. Steam art via the shared chain (explicit id → dict → live, with
   // garbage-sid fall-through and asset-less-app handling)
-  const art = await resolveSteamArtForTitle(g.title, detectedAppId, opts);
+  if (!resolvedPoster && !resolvedBanner) {
+    const art = await resolveSteamArtForTitle(g.title, detectedAppId, opts);
 
-  // 4. Write the resolved id back when the stored one was unset or garbage
-  if (art.appId && art.appId !== detectedAppId) {
+    // 4. Write the resolved id back when the stored one was unset or garbage
+    if (art.appId && art.appId !== detectedAppId) {
+      try {
+        db.prepare('UPDATE games SET steam_id = ? WHERE id = ?').run(art.appId, g.id);
+      } catch {}
+    }
+
+    resolvedPoster = art.posterUrl || art.bannerUrl;
+    resolvedBanner = art.bannerUrl || art.posterUrl;
+    verified = art.verified;
+  }
+
+  // 5. Ingest and save to Cloud! (One person plays/discovers -> saved permanently to cloud for all users)
+  if (resolvedPoster || resolvedBanner) {
     try {
-      db.prepare('UPDATE games SET steam_id = ? WHERE id = ?').run(art.appId, g.id);
+      const cached = await cacheCloudGameCover({
+        gameKey,
+        title: g.title,
+        steamId: detectedAppId,
+        sourcePosterUrl: resolvedPoster,
+        sourceBannerUrl: resolvedBanner,
+      });
+      if (cached && (cached.coverUrl || cached.bannerUrl)) {
+        return {
+          poster: cached.coverUrl || resolvedPoster,
+          banner: cached.bannerUrl || resolvedBanner,
+          verified: true,
+        };
+      }
     } catch {}
   }
 
-  const poster = art.posterUrl || art.bannerUrl;
-  const banner = art.bannerUrl || art.posterUrl;
-  return { poster, banner, verified: art.verified };
+  const poster = resolvedPoster || resolvedBanner;
+  const banner = resolvedBanner || resolvedPoster;
+  return { poster, banner, verified };
 }
 
 /** HEAD-checks any URL, treating network errors as unhealthy. */
@@ -1756,6 +1974,43 @@ async function repairDeadWebCovers(db: any, opts: LiveResolveOptions): Promise<n
 }
 
 /**
+ * Migrates games with fragile external URLs (e.g. Steam CDN, IGDB, Wikipedia)
+ * by permanently downloading and caching them to our central cloud,
+ * replacing the external URLs with durable cloud URLs (/api/images/...).
+ */
+export async function migrateExternalCoversToCloud(targetDb?: any): Promise<number> {
+  const db = targetDb || getDb();
+  let migrated = 0;
+  try {
+    const games = db.prepare(
+      "SELECT id, title, steam_id, cover_url, banner_url FROM games WHERE (cover_url LIKE 'http%' AND cover_url NOT LIKE '%/api/images/%') OR (banner_url LIKE 'http%' AND banner_url NOT LIKE '%/api/images/%')"
+    ).all() as any[];
+
+    for (const g of games) {
+      const gameKey = g.steam_id && g.steam_id > 0 ? String(g.steam_id) : `t_${normalizeForMatch(g.title)}`;
+      try {
+        const cached = await cacheCloudGameCover({
+          gameKey,
+          title: g.title,
+          steamId: g.steam_id,
+          sourcePosterUrl: g.cover_url,
+          sourceBannerUrl: g.banner_url,
+        });
+        if (cached && (cached.coverUrl || cached.bannerUrl)) {
+          db.prepare(
+            "UPDATE games SET cover_url = COALESCE(?, cover_url), banner_url = COALESCE(?, banner_url), updated_at = datetime('now', 'localtime') WHERE id = ?"
+          ).run(cached.coverUrl || null, cached.bannerUrl || null, g.id);
+          migrated++;
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('[covers] Error migrating external covers to cloud:', err);
+  }
+  return migrated;
+}
+
+/**
  * Automatically enriches all games in the database that lack cover art or have dead local/web paths,
  * then repairs saved CDN URLs that no longer resolve.
  * Resolution: Curated dictionary / non-Steam map → Steam AppID (param, folder detection) →
@@ -1768,7 +2023,6 @@ export async function autoEnrichAllGameCovers(
   let db = targetDb;
   if (!db) {
     try {
-      const { getDb } = require('./db.ts');
       db = getDb();
     } catch (err) {
       console.error('autoEnrichAllGameCovers: database unavailable:', err);

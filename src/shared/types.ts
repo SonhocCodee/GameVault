@@ -540,6 +540,39 @@ export interface GameFilter {
   sort?: 'playtime_desc' | 'playtime_asc' | 'rating_desc' | 'title_asc' | 'recent_played' | 'created_desc' | string;
 }
 
+export interface AdminCoverItem {
+  game_key: string;
+  title: string;
+  steam_id?: number | null;
+  cover_url?: string | null;
+  banner_url?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AdminCoversResponse {
+  covers: AdminCoverItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminUpdateCoverPayload {
+  title?: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+  bannerUrl?: string | null;
+  sourcePosterUrl?: string | null;
+  sourceBannerUrl?: string | null;
+}
+
+export const ADMIN_EMAILS = ['son6232000@gmail.com'];
+
+export function isAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
+
 export interface ElectronAPI {
   // Database Operations
   getGames(filter?: GameFilter): Promise<Game[]>;
@@ -656,6 +689,12 @@ export interface ElectronAPI {
   detectGoogleDriveDesktop?(): Promise<GoogleDriveDesktopStatus>;
   applyGoogleDriveDesktop?(customPath?: string): Promise<{ ok: boolean; settings: AppSettings; error?: string }>;
   openExternalUrl?(url: string): Promise<boolean>;
+
+  // Admin Covers Management
+  adminGetCovers?(params?: { query?: string; limit?: number; offset?: number }): Promise<AdminCoversResponse>;
+  adminUpdateCover?(gameKey: string, payload: AdminUpdateCoverPayload): Promise<{ success: boolean; gameKey: string; cover?: AdminCoverItem }>;
+  adminDeleteCover?(gameKey: string): Promise<{ success: boolean; gameKey: string }>;
+  adminUploadCover?(gameKey: string, type: 'poster' | 'banner', filePath: string, meta?: { title?: string; steamId?: number }): Promise<string | null>;
 
   // Real-time Event Subscriptions
   onGameAdded?(callback: (game: Game) => void): () => void;
