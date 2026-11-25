@@ -367,6 +367,9 @@ const electronAPI: ElectronAPI = {
   ): Promise<string | null> => {
     return ipcRenderer.invoke('admin:uploadCover', gameKey, type, filePath, meta);
   },
+  openAdminWebPortal: (): Promise<boolean> => {
+    return ipcRenderer.invoke('admin:openWebPortal');
+  },
 
   // Real-time Event Subscriptions
   onGameAdded: (callback: (game: Game) => void) => {

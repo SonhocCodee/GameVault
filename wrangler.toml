@@ -5,8 +5,16 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 GOOGLE_CLIENT_ID = "772752742447-aup07ndihefv5vpi9o4nus9aj1vqso1q.apps.googleusercontent.com"
+# Optional: Add a separate Web Application OAuth Client ID if you want direct Google Sign-In on /admin
+# WEB_GOOGLE_CLIENT_ID = "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
 ENVIRONMENT = "production"
 SESSION_SECRET = "gamevault-session-secret-key-production-32chars-min"
+
+# Serve Web Admin Dashboard (/admin) from built static assets
+[assets]
+directory = "worker/admin-assets"
+binding = "ASSETS"
+run_worker_first = true
 
 # D1 SQLite Database Binding
 [[d1_databases]]

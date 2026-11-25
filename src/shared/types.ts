@@ -695,6 +695,7 @@ export interface ElectronAPI {
   adminUpdateCover?(gameKey: string, payload: AdminUpdateCoverPayload): Promise<{ success: boolean; gameKey: string; cover?: AdminCoverItem }>;
   adminDeleteCover?(gameKey: string): Promise<{ success: boolean; gameKey: string }>;
   adminUploadCover?(gameKey: string, type: 'poster' | 'banner', filePath: string, meta?: { title?: string; steamId?: number }): Promise<string | null>;
+  openAdminWebPortal?(): Promise<boolean>;
 
   // Real-time Event Subscriptions
   onGameAdded?(callback: (game: Game) => void): () => void;

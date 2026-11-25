@@ -15,8 +15,16 @@ import {
   handleGetCover,
   handleCacheCover,
   handleUploadCover,
+  handleAdminConfig,
+  handleAdminMe,
   handleAdminGetCovers,
   handleAdminUpdateCover,
+  handleAdminUploadCover,
+  handleAdminDiscoverGames,
+  handleAdminIgdbSearch,
+  handleAdminHealthCheck,
+  handleAdminBatchIngest,
+  handleAdminSyncAll,
   handleAdminDeleteCover,
 } from './routes/covers.ts';
 
@@ -59,10 +67,45 @@ router.get('/api/covers/:gameKey', handleGetCover);
 router.post('/api/covers/cache', handleCacheCover);
 router.post('/api/covers/upload', handleUploadCover);
 
-// Admin Game Covers Management
+// Admin Portal & Game Covers Management
+router.get('/api/admin/config', handleAdminConfig);
+router.get('/api/admin/me', handleAdminMe);
 router.get('/api/admin/covers', handleAdminGetCovers);
+router.post('/api/admin/covers/discover', handleAdminDiscoverGames);
+router.post('/api/admin/covers/igdb-search', handleAdminIgdbSearch);
+router.post('/api/admin/covers/health-check', handleAdminHealthCheck);
+router.post('/api/admin/covers/batch-ingest', handleAdminBatchIngest);
+router.post('/api/admin/covers/sync-all', handleAdminSyncAll);
+router.post('/api/admin/covers/:gameKey/upload', handleAdminUploadCover);
 router.put('/api/admin/covers/:gameKey', handleAdminUpdateCover);
 router.delete('/api/admin/covers/:gameKey', handleAdminDeleteCover);
+
+async function serveAdminAsset(request: Request, env: Env, url: URL): Promise<Response | null> {
+  if (!env.ASSETS || (request.method !== 'GET' && request.method !== 'HEAD')) {
+    return null;
+  }
+
+  // Redirect /admin -> /admin/ so relative or base paths stay consistent
+  if (url.pathname === '/admin') {
+    return Response.redirect(`${url.origin}/admin/${url.search}`, 302);
+  }
+
+  if (url.pathname.startsWith('/admin/')) {
+    const subPath = url.pathname.slice('/admin'.length) || '/';
+    const hasFileExt = /\.[a-zA-Z0-9]+$/.test(subPath);
+    const assetPath = hasFileExt ? subPath : '/index.html';
+    const assetUrl = new URL(assetPath + url.search, url.origin);
+    const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), {
+      method: request.method,
+      headers: request.headers,
+    }));
+    if (assetRes.status !== 404 || !hasFileExt) {
+      return assetRes;
+    }
+  }
+
+  return null;
+}
 
 export default {
   async fetch(request: Request, env: Env, executionCtx?: any): Promise<Response> {
@@ -73,6 +116,13 @@ export default {
 
     try {
       const url = new URL(request.url);
+
+      // Serve standalone Admin Web Dashboard under /admin
+      const adminAssetResponse = await serveAdminAsset(request, env, url);
+      if (adminAssetResponse) {
+        return adminAssetResponse;
+      }
+
       const match = router.match(request.method, url.pathname);
 
       if (!match) {

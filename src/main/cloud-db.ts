@@ -256,6 +256,45 @@ export async function adminDeleteCloudCover(gameKey: string): Promise<{ success:
   return resp.json();
 }
 
+export async function adminUploadCloudCover(
+  gameKey: string,
+  type: 'poster' | 'banner',
+  imageBuffer: Buffer | Uint8Array,
+  mimeType: string,
+  meta?: { title?: string; steamId?: number }
+): Promise<{ success: boolean; url: string | null; cover?: AdminCoverItem }> {
+  const q = new URLSearchParams({ type });
+  if (meta?.title) q.set('title', meta.title);
+  if (meta?.steamId) q.set('steamId', String(meta.steamId));
+
+  const resp = await apiFetch(
+    `/api/admin/covers/${encodeURIComponent(gameKey)}/upload?${q.toString()}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': mimeType,
+        'X-Cover-Type': type,
+      },
+      body: imageBuffer as any,
+    },
+    true
+  );
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `Lỗi tải ảnh bìa lên Cloud: ${resp.status}`);
+  }
+  const data = await resp.json();
+  if (data.cover) {
+    data.cover.cover_url = qualifyCloudUrl(data.cover.cover_url);
+    data.cover.banner_url = qualifyCloudUrl(data.cover.banner_url);
+  }
+  return {
+    success: Boolean(data.success),
+    url: qualifyCloudUrl(data.url),
+    cover: data.cover,
+  };
+}
+
 export function computeGuMatch(
   myScores: Map<string, number>,
   theirScores: Map<string, number>,
@@ -433,7 +472,13 @@ export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
   if (!resp.ok) {
     throw new Error(`Lấy danh sách thư viện từ cloud thất bại: HTTP ${resp.status}`);
   }
-  return resp.json();
+  const data: LibrarySyncResponse = await resp.json();
+  data.games = (data.games || []).map((g) => ({
+    ...g,
+    coverUrl: qualifyCloudUrl(g.coverUrl),
+    bannerUrl: qualifyCloudUrl(g.bannerUrl),
+  }));
+  return data;
 }
 
 export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
@@ -584,18 +629,20 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
       continue;
     }
 
-    // Validate remote cover/banner: must be canonical HTTP/HTTPS URLs
-    const isRemoteCoverValid = remote.coverUrl && (
-      remote.coverUrl.startsWith('http://') ||
-      remote.coverUrl.startsWith('https://')
+    // Validate remote cover/banner: qualify relative /api/images/... paths first
+    const qualifiedRemoteCover = qualifyCloudUrl(remote.coverUrl);
+    const isRemoteCoverValid = qualifiedRemoteCover && (
+      qualifiedRemoteCover.startsWith('http://') ||
+      qualifiedRemoteCover.startsWith('https://')
     );
-    const validRemoteCover = isRemoteCoverValid ? remote.coverUrl : null;
+    const validRemoteCover = isRemoteCoverValid ? qualifiedRemoteCover : null;
 
-    const isRemoteBannerValid = remote.bannerUrl && (
-      remote.bannerUrl.startsWith('http://') ||
-      remote.bannerUrl.startsWith('https://')
+    const qualifiedRemoteBanner = qualifyCloudUrl(remote.bannerUrl);
+    const isRemoteBannerValid = qualifiedRemoteBanner && (
+      qualifiedRemoteBanner.startsWith('http://') ||
+      qualifiedRemoteBanner.startsWith('https://')
     );
-    const validRemoteBanner = isRemoteBannerValid ? remote.bannerUrl : null;
+    const validRemoteBanner = isRemoteBannerValid ? qualifiedRemoteBanner : null;
 
     // Check if game exists locally by steam_id or title
     let existing: Game | null = null;
@@ -644,12 +691,24 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         needsUpdate = true;
       }
 
-      // Covers & metadata enrichment from cloud if missing locally
-      if (!existing.cover_url && validRemoteCover) {
+      // Covers & metadata enrichment from cloud:
+      // Master catalog (game_covers) or permanent /api/images/ URLs override stale/broken local covers
+      const hasMasterCover = Boolean((remote as any).masterCoverUpdatedAt);
+      const isCloudHostedCover = Boolean(validRemoteCover && validRemoteCover.includes('/api/images/'));
+      if (
+        validRemoteCover &&
+        validRemoteCover !== existing.cover_url &&
+        (!existing.cover_url || hasMasterCover || isCloudHostedCover)
+      ) {
         patch.cover_url = validRemoteCover;
         needsUpdate = true;
       }
-      if (!existing.banner_url && validRemoteBanner) {
+      const isCloudHostedBanner = Boolean(validRemoteBanner && validRemoteBanner.includes('/api/images/'));
+      if (
+        validRemoteBanner &&
+        validRemoteBanner !== existing.banner_url &&
+        (!existing.banner_url || hasMasterCover || isCloudHostedBanner)
+      ) {
         patch.banner_url = validRemoteBanner;
         needsUpdate = true;
       }

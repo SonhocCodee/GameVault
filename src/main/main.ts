@@ -54,7 +54,7 @@ import {
 } from './wishlist.js';
 import { getF6CaptureManager } from './f6-capture.js';
 import { getAMDWatcher } from './amd-watcher.js';
-import { getAuthStatus, login, logout } from './auth.js';
+import { getAuthStatus, login, logout, getValidSessionToken, getCloudConfig, getWorkerBaseUrl } from './auth.js';
 import {
   detectGoogleDriveDesktop,
   applyGoogleDriveDesktopStorage,
@@ -83,7 +83,7 @@ import {
   adminGetCloudCovers,
   adminUpdateCloudCover,
   adminDeleteCloudCover,
-  uploadCloudGameCover,
+  adminUploadCloudCover,
 } from './cloud-db.js';
 import {
   getSavesList,
@@ -753,21 +753,23 @@ function registerIpcHandlers(): void {
   });
 
   // Admin Covers Management
-  ipcMain.handle('admin:getCovers', async (_event, params?: { query?: string; limit?: number; offset?: number }) => {
-    return adminGetCloudCovers(params);
-  });
-
-  ipcMain.handle('admin:updateCover', async (_event, gameKey: string, payload: any) => {
-    const result = await adminUpdateCloudCover(gameKey, payload);
+  const syncAdminCoverToLocalGames = (
+    gameKey: string,
+    title?: string | null,
+    coverUrl?: string | null,
+    bannerUrl?: string | null
+  ) => {
     try {
       const localGames = getGames();
+      const normKey = gameKey.toLowerCase().trim();
+      const normTitle = (title || '').toLowerCase().trim();
       for (const g of localGames) {
         const key1 = g.steam_id ? String(g.steam_id) : '';
         const key2 = `t_${normalizeForMatch(g.title)}`;
-        if (key1 === gameKey || key2 === gameKey || g.title.toLowerCase().trim() === (payload.title || '').toLowerCase().trim()) {
+        if (key1 === normKey || key2 === normKey || (normTitle && g.title.toLowerCase().trim() === normTitle)) {
           const patch: any = {};
-          if (result.cover?.cover_url) patch.cover_url = result.cover.cover_url;
-          if (result.cover?.banner_url) patch.banner_url = result.cover.banner_url;
+          if (coverUrl) patch.cover_url = coverUrl;
+          if (bannerUrl) patch.banner_url = bannerUrl;
           if (Object.keys(patch).length > 0) {
             const updated = updateGame(g.id, patch);
             mainWindow?.webContents?.send('game:updated', updated);
@@ -777,6 +779,20 @@ function registerIpcHandlers(): void {
     } catch (err) {
       console.warn('[main] Failed to sync admin cover update to local game:', err);
     }
+  };
+
+  ipcMain.handle('admin:getCovers', async (_event, params?: { query?: string; limit?: number; offset?: number }) => {
+    return adminGetCloudCovers(params);
+  });
+
+  ipcMain.handle('admin:updateCover', async (_event, gameKey: string, payload: any) => {
+    const result = await adminUpdateCloudCover(gameKey, payload);
+    syncAdminCoverToLocalGames(
+      gameKey,
+      result.cover?.title || payload?.title,
+      result.cover?.cover_url,
+      result.cover?.banner_url
+    );
     return result;
   });
 
@@ -790,7 +806,7 @@ function registerIpcHandlers(): void {
       const res = await dialog.showOpenDialog(mainWindow!, {
         title: `Chọn ảnh ${type === 'poster' ? 'Poster (2:3)' : 'Banner (16:9)'}`,
         properties: ['openFile'],
-        filters: [{ name: 'Hình ảnh', extensions: ['jpg', 'jpeg', 'png', 'webp', 'avif'] }],
+        filters: [{ name: 'Hình ảnh', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }],
       });
       if (res.canceled || res.filePaths.length === 0) return null;
       targetPath = res.filePaths[0];
@@ -799,14 +815,31 @@ function registerIpcHandlers(): void {
     const mimeMap: Record<string, string> = {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
-      '.png': 'image/jpeg',
+      '.png': 'image/png',
       '.webp': 'image/webp',
-      '.avif': 'image/avif',
+      '.gif': 'image/gif',
     };
     const mimeType = mimeMap[ext] || 'image/jpeg';
     const buf = fs.readFileSync(targetPath);
-    const cloudUrl = await uploadCloudGameCover(gameKey, type, buf, mimeType, meta);
-    return cloudUrl;
+    const uploadRes = await adminUploadCloudCover(gameKey, type, buf, mimeType, meta);
+    syncAdminCoverToLocalGames(
+      gameKey,
+      uploadRes.cover?.title || meta?.title,
+      uploadRes.cover?.cover_url || (type === 'poster' ? uploadRes.url : undefined),
+      uploadRes.cover?.banner_url || (type === 'banner' ? uploadRes.url : undefined)
+    );
+    return uploadRes.url;
+  });
+
+  ipcMain.handle('admin:openWebPortal', async () => {
+    const baseUrl = getWorkerBaseUrl(getCloudConfig());
+    let token = '';
+    try {
+      token = await getValidSessionToken();
+    } catch {}
+    const portalUrl = token ? `${baseUrl}/admin/#token=${encodeURIComponent(token)}` : `${baseUrl}/admin/`;
+    await shell.openExternal(portalUrl);
+    return true;
   });
 
   // Media (Screenshot) sync via Google Drive

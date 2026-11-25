@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LogIn, LogOut, Cpu, ChevronDown, Loader2, User, ShieldCheck } from 'lucide-react';
+import { LogIn, LogOut, Cpu, ChevronDown, Loader2, User, ShieldCheck, Globe } from 'lucide-react';
 import { type AuthStatus, type HardwareProfile, isAdminEmail } from '../../shared/types.js';
 
 interface AuthBadgeProps {
@@ -149,16 +149,28 @@ export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged, onOpenAdminModa
                 <div className="truncate">{profile.email}</div>
               </div>
               {isAdminEmail(profile.email) && onOpenAdminModal && (
-                <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onOpenAdminModal();
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-amber-400 font-semibold transition hover:bg-amber-500/10 hover:text-amber-300"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  Quản trị Bìa Game
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenAdminModal();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-amber-400 font-semibold transition hover:bg-amber-500/10 hover:text-amber-300"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Quản trị Bìa Game
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      window.electronAPI.openAdminWebPortal?.();
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-sky-400 font-semibold transition hover:bg-sky-500/10 hover:text-sky-300"
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    Mở Web Admin (/admin)
+                  </button>
+                </>
               )}
               <button
                 onClick={openHwModal}

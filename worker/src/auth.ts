@@ -173,7 +173,12 @@ export async function verifyGoogleIdToken(
     const data = (await resp.json()) as Record<string, any>;
     if (!data || !data.sub) return null;
 
-    if (env.GOOGLE_CLIENT_ID && data.aud !== env.GOOGLE_CLIENT_ID) {
+    const allowedClientIds = [env.GOOGLE_CLIENT_ID, env.WEB_GOOGLE_CLIENT_ID]
+      .filter((v): v is string => Boolean(v && v.trim()))
+      .flatMap((v) => v.split(',').map((s) => s.trim()))
+      .filter(Boolean);
+
+    if (allowedClientIds.length > 0 && !allowedClientIds.includes(String(data.aud || ''))) {
       return null;
     }
 

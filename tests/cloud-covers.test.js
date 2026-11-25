@@ -15,6 +15,8 @@ import {
   adminGetCloudCovers,
   adminUpdateCloudCover,
   adminDeleteCloudCover,
+  adminUploadCloudCover,
+  syncLibraryWithCloud,
 } from '../src/main/cloud-db.ts';
 import { configureAuth, persistSession, clearSession } from '../src/main/auth.ts';
 import fs from 'node:fs';
@@ -498,6 +500,198 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
 
       const checkDel = await getCloudGameCover('2358720');
       assert.equal(checkDel.found, false);
+    });
+
+    test('3.8: Admin cover update & binary upload propagate across user_library, ratings, community_picks, community_votes and overwrite stale client covers on sync', async () => {
+      const brokenUrl = 'https://broken.cdn.test/dead_cover.jpg';
+      // Seed stale broken covers across all server tables
+      await d1.prepare(`
+        INSERT INTO user_library (uid, game_key, title, steam_id, cover_url, banner_url, status, playtime_minutes)
+        VALUES (?, '1245620', 'Elden Ring', 1245620, ?, ?, 'playing', 120)
+      `).bind(aliceUid, brokenUrl, brokenUrl).run();
+
+      await d1.prepare(`
+        INSERT INTO ratings (id, uid, game_key, game_title, cover_url, score, review)
+        VALUES ('r1', ?, '1245620', 'Elden Ring', ?, 9.5, 'Masterpiece')
+      `).bind(aliceUid, brokenUrl).run();
+
+      await d1.prepare(`
+        INSERT INTO community_picks (month, state, game_key, game_title, cover_url)
+        VALUES ('2026-11', 'voting', '1245620', 'Elden Ring', ?)
+      `).bind(brokenUrl).run();
+
+      await d1.prepare(`
+        INSERT INTO community_votes (id, month, uid, game_key, game_title, cover_url)
+        VALUES ('v1', '2026-11', ?, '1245620', 'Elden Ring', ?)
+      `).bind(aliceUid, brokenUrl).run();
+
+      // Admin uploads a new poster binary directly via admin upload endpoint
+      const uploadRes = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/1245620/upload?type=poster&title=Elden%20Ring&steamId=1245620', {
+          method: 'POST',
+          headers: {
+            ...authHeader(adminToken),
+            'Content-Type': 'image/png',
+          },
+          body: samplePngBuffer,
+        }),
+        env
+      );
+      assert.equal(uploadRes.status, 201);
+      const uploadData = await uploadRes.json();
+      assert.equal(uploadData.success, true);
+      assert.ok(uploadData.url.startsWith('/api/images/cover_1245620_poster'));
+      assert.equal(uploadData.syncStats.userLibraryUpdated, 1);
+      assert.equal(uploadData.syncStats.ratingsUpdated, 1);
+      assert.equal(uploadData.syncStats.picksUpdated, 1);
+      assert.equal(uploadData.syncStats.votesUpdated, 1);
+
+      // Verify all tables in D1 now have the new cloud URL
+      const libRow = await d1.prepare('SELECT cover_url FROM user_library WHERE uid = ? AND game_key = ?').bind(aliceUid, '1245620').first();
+      const ratingRow = await d1.prepare('SELECT cover_url FROM ratings WHERE id = ?').bind('r1').first();
+      const pickRow = await d1.prepare('SELECT cover_url FROM community_picks WHERE month = ?').bind('2026-11').first();
+      const voteRow = await d1.prepare('SELECT cover_url FROM community_votes WHERE id = ?').bind('v1').first();
+      assert.equal(libRow.cover_url, uploadData.url);
+      assert.equal(ratingRow.cover_url, uploadData.url);
+      assert.equal(pickRow.cover_url, uploadData.url);
+      assert.equal(voteRow.cover_url, uploadData.url);
+
+      // Simulate Alice's local SQLite having the old broken cover URL, then running syncLibraryWithCloud()
+      configureAuth({
+        config: { workerApiUrl: 'http://localhost' },
+        userDataDir: tmpUserDataDir,
+      });
+      configureCloudDb({
+        workerApiUrl: 'http://localhost',
+        userDataDir: tmpUserDataDir,
+        fetchImpl: async (url, init = {}) => worker.fetch(new Request(url, init), env),
+      });
+      persistSession(
+        {
+          sessionToken: aliceToken,
+          expiresAt: Date.now() + 3600 * 1000,
+          user: { uid: aliceUid, email: 'alice@gamevault.test', displayName: 'Alice' },
+        },
+        { userDataDir: tmpUserDataDir }
+      );
+
+      const localGame = createGame({
+        title: 'Elden Ring',
+        steam_id: 1245620,
+        status: 'playing',
+        playtime_minutes: 120,
+        cover_url: brokenUrl,
+        banner_url: brokenUrl,
+      });
+
+      await syncLibraryWithCloud();
+      const updatedLocal = getGameById(localGame.id);
+      assert.equal(updatedLocal.cover_url, `http://localhost${uploadData.url}`);
+    });
+
+    test('3.9: Admin discover, health-check, batch-ingest, sync-all, /api/admin/me, /api/admin/config & /admin assets serving', async () => {
+      // Seed a game only in user_library (not yet in game_covers) with an external art URL
+      await d1.prepare(`
+        INSERT INTO user_library (uid, game_key, title, steam_id, cover_url, banner_url, status, playtime_minutes)
+        VALUES (?, 't_bloodborne', 'Bloodborne', NULL, 'https://external-art.test/bb.png', 'https://broken.test/404.png', 'completed', 500)
+      `).bind(aliceUid).run();
+
+      // Mock 404 for broken.test
+      const prevFetch = globalThis.fetch;
+      globalThis.fetch = async (url, init) => {
+        if (String(url).includes('broken.test')) {
+          return new Response('Not Found', { status: 404 });
+        }
+        return prevFetch(url, init);
+      };
+
+      // 1. Admin /me and /config
+      const cfgRes = await worker.fetch(new Request('http://localhost/api/admin/config'), env);
+      assert.equal(cfgRes.status, 200);
+      const meRes = await worker.fetch(new Request('http://localhost/api/admin/me', { headers: authHeader(adminToken) }), env);
+      assert.equal(meRes.status, 200);
+      const meData = await meRes.json();
+      assert.equal(meData.isAdmin, true);
+
+      // 2. Discover games from DB
+      const discRes = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/discover', {
+          method: 'POST',
+          headers: authHeader(adminToken),
+        }),
+        env
+      );
+      assert.equal(discRes.status, 200);
+      const discData = await discRes.json();
+      assert.equal(discData.discovered, 1);
+
+      // 3. Health check detects external poster & broken banner
+      const hcRes = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/health-check', {
+          method: 'POST',
+          headers: { ...authHeader(adminToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameKeys: ['t_bloodborne'] }),
+        }),
+        env
+      );
+      assert.equal(hcRes.status, 200);
+      const hcData = await hcRes.json();
+      assert.equal(hcData.results[0].overall, 'broken');
+      assert.equal(hcData.results[0].poster.status, 'external_ok');
+      assert.equal(hcData.results[0].banner.status, 'broken');
+
+      // 4. Batch ingest downloads healthy external poster to cloud storage
+      const biRes = await worker.fetch(
+        new Request('http://localhost/api/admin/covers/batch-ingest', {
+          method: 'POST',
+          headers: { ...authHeader(adminToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameKeys: ['t_bloodborne'] }),
+        }),
+        env
+      );
+      assert.equal(biRes.status, 200);
+      const biData = await biRes.json();
+      assert.equal(biData.fixed, 1);
+
+      const libAfter = await d1.prepare('SELECT cover_url FROM user_library WHERE game_key = ?').bind('t_bloodborne').first();
+      assert.ok(libAfter.cover_url.startsWith('/api/images/cover_t_bloodborne_poster'));
+
+      // 5. Serving /admin via ASSETS binding
+      const envWithAssets = {
+        ...env,
+        ASSETS: {
+          async fetch(req) {
+            const u = new URL(req.url);
+            if (u.pathname === '/index.html') {
+              return new Response('<html>Admin App</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+            }
+            return new Response('Not found', { status: 404 });
+          },
+        },
+      };
+      const redirectRes = await worker.fetch(new Request('http://localhost/admin'), envWithAssets);
+      assert.equal(redirectRes.status, 302);
+      const htmlRes = await worker.fetch(new Request('http://localhost/admin/'), envWithAssets);
+      assert.equal(htmlRes.status, 200);
+      assert.ok((await htmlRes.text()).includes('Admin App'));
+
+      // 6. Test adminUploadCloudCover client helper
+      configureAuth({
+        config: { workerApiUrl: 'http://localhost' },
+        userDataDir: tmpUserDataDir,
+      });
+      persistSession(
+        {
+          sessionToken: adminToken,
+          expiresAt: Date.now() + 3600 * 1000,
+          user: { uid: 'admin_pawpaw', email: 'son6232000@gmail.com', displayName: 'PawPaw' },
+        },
+        { userDataDir: tmpUserDataDir }
+      );
+      const clientUpload = await adminUploadCloudCover('t_bloodborne', 'banner', samplePngBuffer, 'image/png', { title: 'Bloodborne' });
+      assert.equal(clientUpload.success, true);
+      assert.ok(clientUpload.url.includes('/api/images/cover_t_bloodborne_banner'));
+      globalThis.fetch = prevFetch;
     });
   });
 });

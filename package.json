@@ -8,6 +8,9 @@
     "build": "node scripts/build.js && vite build",
     "build:electron": "node scripts/build.js",
     "build:renderer": "vite build",
+    "build:admin": "vite build --config admin-web/vite.config.ts",
+    "dev:admin": "vite --config admin-web/vite.config.ts",
+    "deploy:worker": "npm run build:admin && npx wrangler deploy",
     "postinstall": "node scripts/ensure-config.js",
     "test": "cross-env ELECTRON_RUN_AS_NODE=1 electron --test tests/**/*.test.js"
   },

@@ -1,5 +1,6 @@
 import type {
   RouteHandler,
+  Env,
   UserLibraryItem,
   GameLibraryStatus,
   LibrarySyncStats,
@@ -31,6 +32,7 @@ function mapRowToItem(row: any): UserLibraryItem {
     isDeleted: Boolean(row.is_deleted),
     clientUpdatedAt: row.client_updated_at,
     serverUpdatedAt: row.server_updated_at,
+    masterCoverUpdatedAt: row.master_cover_updated_at || null,
   };
 }
 
@@ -75,32 +77,44 @@ function computeStats(items: UserLibraryItem[]): LibrarySyncStats {
   };
 }
 
+function isValidStoredCoverUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/api/images/');
+}
+
+async function fetchUserLibraryResponse(env: Env, uid: string): Promise<LibrarySyncResponse> {
+  const query = `
+    SELECT ul.game_key, ul.title, ul.steam_id,
+           COALESCE(gc.cover_url, ul.cover_url) AS cover_url,
+           COALESCE(gc.banner_url, ul.banner_url) AS banner_url,
+           gc.updated_at AS master_cover_updated_at,
+           ul.status, ul.playtime_minutes, ul.last_played, ul.user_score, ul.user_notes,
+           ul.is_deleted, ul.client_updated_at, ul.server_updated_at
+    FROM user_library ul
+    LEFT JOIN game_covers gc ON gc.game_key = LOWER(ul.game_key)
+    WHERE ul.uid = ? AND ul.is_deleted = 0
+    ORDER BY ul.server_updated_at DESC
+  `;
+
+  const { results } = await env.DB.prepare(query).bind(uid).all<any>();
+  const games = (results || []).map(mapRowToItem);
+  const stats = computeStats(games);
+
+  return {
+    games,
+    syncedAt: new Date().toISOString(),
+    stats,
+  };
+}
+
 export const handleGetLibrary: RouteHandler = async (request, env) => {
   const user = await authenticate(request, env);
   if (!user) {
     return errorResponse('Unauthorized', 401);
   }
 
-  const query = `
-    SELECT game_key, title, steam_id, cover_url, banner_url, status,
-           playtime_minutes, last_played, user_score, user_notes,
-           is_deleted, client_updated_at, server_updated_at
-    FROM user_library
-    WHERE uid = ? AND is_deleted = 0
-    ORDER BY server_updated_at DESC
-  `;
-
-  const { results } = await env.DB.prepare(query).bind(user.uid).all<any>();
-  const games = (results || []).map(mapRowToItem);
-  const stats = computeStats(games);
-
-  const response: LibrarySyncResponse = {
-    games,
-    syncedAt: new Date().toISOString(),
-    stats,
-  };
-
-  return jsonResponse(response);
+  return jsonResponse(await fetchUserLibraryResponse(env, user.uid));
 };
 
 export const handleSyncLibrary: RouteHandler = async (request, env) => {
@@ -131,12 +145,14 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
       title = excluded.title,
       steam_id = COALESCE(excluded.steam_id, user_library.steam_id),
       cover_url = CASE
-        WHEN excluded.cover_url IS NOT NULL AND (excluded.cover_url LIKE 'http://%' OR excluded.cover_url LIKE 'https://%') THEN excluded.cover_url
+        WHEN user_library.cover_url LIKE '/api/images/%' THEN user_library.cover_url
+        WHEN excluded.cover_url IS NOT NULL AND (excluded.cover_url LIKE 'http://%' OR excluded.cover_url LIKE 'https://%' OR excluded.cover_url LIKE '/api/images/%') THEN excluded.cover_url
         WHEN user_library.cover_url LIKE 'http://%' OR user_library.cover_url LIKE 'https://%' THEN user_library.cover_url
         ELSE NULL
       END,
       banner_url = CASE
-        WHEN excluded.banner_url IS NOT NULL AND (excluded.banner_url LIKE 'http://%' OR excluded.banner_url LIKE 'https://%') THEN excluded.banner_url
+        WHEN user_library.banner_url LIKE '/api/images/%' THEN user_library.banner_url
+        WHEN excluded.banner_url IS NOT NULL AND (excluded.banner_url LIKE 'http://%' OR excluded.banner_url LIKE 'https://%' OR excluded.banner_url LIKE '/api/images/%') THEN excluded.banner_url
         WHEN user_library.banner_url LIKE 'http://%' OR user_library.banner_url LIKE 'https://%' THEN user_library.banner_url
         ELSE NULL
       END,
@@ -172,8 +188,8 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
     const gameKey = item.gameKey.trim();
     const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : 'Unknown Game';
     const steamId = item.steamId != null && !isNaN(Number(item.steamId)) ? Number(item.steamId) : null;
-    const coverUrl = typeof item.coverUrl === 'string' && item.coverUrl.trim() && (item.coverUrl.startsWith('http://') || item.coverUrl.startsWith('https://')) ? item.coverUrl.trim() : null;
-    const bannerUrl = typeof item.bannerUrl === 'string' && item.bannerUrl.trim() && (item.bannerUrl.startsWith('http://') || item.bannerUrl.startsWith('https://')) ? item.bannerUrl.trim() : null;
+    const coverUrl = isValidStoredCoverUrl(item.coverUrl) ? item.coverUrl.trim() : null;
+    const bannerUrl = isValidStoredCoverUrl(item.bannerUrl) ? item.bannerUrl.trim() : null;
     const status: GameLibraryStatus = VALID_STATUSES.has(item.status) ? item.status : 'backlog';
     const playtimeMinutes = Math.max(0, Math.floor(Number(item.playtimeMinutes) || 0));
     const lastPlayed = typeof item.lastPlayed === 'string' && item.lastPlayed.trim() ? item.lastPlayed.trim() : null;
@@ -203,25 +219,5 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
       .run();
   }
 
-  // Retrieve active library for response
-  const query = `
-    SELECT game_key, title, steam_id, cover_url, banner_url, status,
-           playtime_minutes, last_played, user_score, user_notes,
-           is_deleted, client_updated_at, server_updated_at
-    FROM user_library
-    WHERE uid = ? AND is_deleted = 0
-    ORDER BY server_updated_at DESC
-  `;
-
-  const { results } = await env.DB.prepare(query).bind(user.uid).all<any>();
-  const games = (results || []).map(mapRowToItem);
-  const stats = computeStats(games);
-
-  const response: LibrarySyncResponse = {
-    games,
-    syncedAt: new Date().toISOString(),
-    stats,
-  };
-
-  return jsonResponse(response);
+  return jsonResponse(await fetchUserLibraryResponse(env, user.uid));
 };

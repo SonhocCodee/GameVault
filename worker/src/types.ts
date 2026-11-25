@@ -73,12 +73,16 @@ export interface R2Bucket {
 export interface Env {
   DB: D1Database;
   IMAGES_BUCKET?: R2Bucket;
+  ASSETS?: { fetch: (request: Request | string) => Promise<Response> };
   GOOGLE_CLIENT_ID?: string;
+  WEB_GOOGLE_CLIENT_ID?: string;
   SESSION_SECRET: string;
   ENVIRONMENT?: string;
   ALLOW_MOCK_AUTH?: string;
   GOOGLE_TOKENINFO_URL?: string;
   ADMIN_EMAILS?: string;
+  TWITCH_CLIENT_ID?: string;
+  TWITCH_CLIENT_SECRET?: string;
 }
 
 export interface AuthUser {
@@ -168,6 +172,7 @@ export interface UserLibraryItem {
   isDeleted?: boolean;
   clientUpdatedAt?: string;
   serverUpdatedAt?: string;
+  masterCoverUpdatedAt?: string | null;
 }
 
 export interface LibrarySyncStats {
