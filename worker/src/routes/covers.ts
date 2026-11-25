@@ -205,6 +205,66 @@ export async function propagateCoverAcrossTables(
 }
 
 /**
+ * Reads image width/height from PNG, JPEG, or WebP headers without external deps.
+ * Returns null if format cannot be parsed.
+ */
+function getImageDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  try {
+    // PNG: 89 50 4E 47 ... IHDR width(16..19), height(20..23)
+    if (bytes.length >= 24 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return { width: view.getUint32(16, false), height: view.getUint32(20, false) };
+    }
+    // WebP: RIFF....WEBP
+    if (
+      bytes.length >= 30 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+    ) {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      if (bytes[12] === 0x56 && bytes[13] === 0x50 && bytes[14] === 0x38 && bytes[15] === 0x58 && bytes.length >= 30) {
+        const w = 1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16));
+        const h = 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16));
+        return { width: w, height: h };
+      }
+      if (bytes[12] === 0x56 && bytes[13] === 0x50 && bytes[14] === 0x38 && bytes[15] === 0x20 && bytes.length >= 30) {
+        return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff };
+      }
+    }
+    // JPEG: FF D8 ... SOF0..SOF3 (C0..C3)
+    if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+      let i = 2;
+      while (i + 8 < bytes.length) {
+        if (bytes[i] !== 0xff) {
+          i++;
+          continue;
+        }
+        const marker = bytes[i + 1];
+        if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
+          i += 2;
+          continue;
+        }
+        if (i + 3 >= bytes.length) break;
+        const segLen = (bytes[i + 2] << 8) | bytes[i + 3];
+        if (marker >= 0xc0 && marker <= 0xc3 && i + 8 < bytes.length) {
+          const height = (bytes[i + 5] << 8) | bytes[i + 6];
+          const width = (bytes[i + 7] << 8) | bytes[i + 8];
+          return { width, height };
+        }
+        if (segLen < 2) break;
+        i += 2 + segLen;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function isLandscapeBytes(bytes: Uint8Array): boolean {
+  const dims = getImageDimensions(bytes);
+  return Boolean(dims && dims.width > dims.height);
+}
+
+/**
  * Downloads an external image from an HTTP/HTTPS URL and stores it in the cloud.
  * Returns the permanent cloud path (/api/images/...) or null if download failed.
  */
@@ -212,7 +272,8 @@ async function ingestExternalImage(
   url: string,
   keyPrefix: string,
   env: Env,
-  kind: string
+  kind: string,
+  options?: { rejectLandscape?: boolean }
 ): Promise<string | null> {
   if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
     return null;
@@ -222,6 +283,10 @@ async function ingestExternalImage(
   if (url.startsWith('/api/images/') || url.includes('/api/images/')) {
     const parts = url.split('/api/images/');
     return `/api/images/${parts[parts.length - 1]}`;
+  }
+
+  if (options?.rejectLandscape && /\/(?:library_hero|header|capsule_616x353)\b/i.test(url)) {
+    return null;
   }
 
   try {
@@ -246,6 +311,10 @@ async function ingestExternalImage(
 
     const buf = await res.arrayBuffer();
     if (!buf || buf.byteLength === 0) return null;
+
+    if (options?.rejectLandscape && isLandscapeBytes(new Uint8Array(buf))) {
+      return null;
+    }
 
     const key = `${keyPrefix}_${Date.now()}.${ext}`;
     const cloudUrl = await saveImageToCloud(key, buf, validMime, env, { kind });
@@ -334,7 +403,7 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
   let finalCoverUrl = isCoverCached ? existing.cover_url : null;
   let finalBannerUrl = isBannerCached ? existing.banner_url : null;
 
-  // 2. Ingest Poster if not yet cached
+  // 2. Ingest Poster if not yet cached (strictly portrait/square — never landscape banners)
   if (!finalCoverUrl) {
     let sourcePoster = body.sourcePosterUrl;
     if (!sourcePoster && steamId) {
@@ -345,7 +414,8 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         sourcePoster,
         `cover_${gameKey}_poster`,
         env,
-        'cover_poster'
+        'cover_poster',
+        { rejectLandscape: true }
       );
     }
     // Fallback: smaller 600x900 if 2x failed
@@ -354,21 +424,21 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         `${STEAM_STATIC_CDN_BASE}/${steamId}/library_600x900.jpg`,
         `cover_${gameKey}_poster`,
         env,
-        'cover_poster'
+        'cover_poster',
+        { rejectLandscape: true }
       );
     }
     // Fallback: IGDB (Twitch) canonical 2:3 poster if server Twitch credentials are configured
     if (!finalCoverUrl && title) {
       const igdb = await searchIgdbCandidates(env, title, steamId);
-      const igdbPoster = igdb.find((c) => c.posterUrl)?.posterUrl;
-      if (igdbPoster) {
-        finalCoverUrl = await ingestExternalImage(igdbPoster, `cover_${gameKey}_poster`, env, 'cover_poster');
-      }
-      if (!finalBannerUrl) {
-        const igdbBanner = igdb.find((c) => c.bannerUrl)?.bannerUrl;
-        if (igdbBanner) {
-          finalBannerUrl = await ingestExternalImage(igdbBanner, `cover_${gameKey}_banner`, env, 'cover_banner');
+      for (const cand of igdb) {
+        if (!finalCoverUrl && cand.posterUrl) {
+          finalCoverUrl = await ingestExternalImage(cand.posterUrl, `cover_${gameKey}_poster`, env, 'cover_poster', { rejectLandscape: true });
         }
+        if (!finalBannerUrl && cand.bannerUrl) {
+          finalBannerUrl = await ingestExternalImage(cand.bannerUrl, `cover_${gameKey}_banner`, env, 'cover_banner');
+        }
+        if (finalCoverUrl) break;
       }
     }
   }
@@ -396,10 +466,17 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         'cover_banner'
       );
     }
+    // Fallback: IGDB banner if Steam had none
+    if (!finalBannerUrl && title) {
+      const igdb = await searchIgdbCandidates(env, title, steamId);
+      const igdbBanner = igdb.find((c) => c.bannerUrl)?.bannerUrl;
+      if (igdbBanner) {
+        finalBannerUrl = await ingestExternalImage(igdbBanner, `cover_${gameKey}_banner`, env, 'cover_banner');
+      }
+    }
   }
 
-  // If still missing banner, reuse cover if available or vice-versa
-  if (!finalCoverUrl && finalBannerUrl) finalCoverUrl = finalBannerUrl;
+  // Only reuse poster as banner fallback; NEVER put a horizontal banner into the vertical poster slot
   if (!finalBannerUrl && finalCoverUrl) finalBannerUrl = finalCoverUrl;
 
   // 4. Save into game_covers master catalog
@@ -1075,27 +1152,62 @@ export const handleAdminBatchIngest: RouteHandler = async (request, env) => {
     let changed = false;
 
     const posterCheck = await checkSingleImageUrl(nextCover, env);
-    if (posterCheck.status !== 'ok') {
-      const candidatePoster =
-        posterCheck.status === 'external_ok' && nextCover
-          ? nextCover
-          : steamId
-            ? `${STEAM_STATIC_CDN_BASE}/${steamId}/library_600x900_2x.jpg`
-            : null;
-      if (candidatePoster) {
-        let ingested = await ingestExternalImage(candidatePoster, `cover_${cleanKey}_poster`, env, 'cover_poster');
-        if (!ingested && steamId) {
+    let needsPosterFix = posterCheck.status !== 'ok';
+    if (!needsPosterFix && nextCover && nextCover.startsWith('/api/images/')) {
+      const imgKey = normalizeImageKey(nextCover);
+      if (imgKey) {
+        if (env.IMAGES_BUCKET) {
+          const obj = await env.IMAGES_BUCKET.get(imgKey);
+          if (obj && isLandscapeBytes(new Uint8Array(await obj.arrayBuffer()))) {
+            needsPosterFix = true;
+          }
+        } else {
+          const rowImg = await env.DB.prepare('SELECT data FROM image_store WHERE key = ?').bind(imgKey).first<any>();
+          if (rowImg?.data) {
+            const bytes = rowImg.data instanceof Uint8Array ? rowImg.data : new Uint8Array(rowImg.data);
+            if (isLandscapeBytes(bytes)) {
+              needsPosterFix = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (needsPosterFix) {
+      let ingested: string | null = null;
+      if (posterCheck.status === 'external_ok' && nextCover) {
+        ingested = await ingestExternalImage(nextCover, `cover_${cleanKey}_poster`, env, 'cover_poster', { rejectLandscape: true });
+      }
+      if (!ingested && steamId) {
+        ingested = await ingestExternalImage(
+          `${STEAM_STATIC_CDN_BASE}/${steamId}/library_600x900_2x.jpg`,
+          `cover_${cleanKey}_poster`,
+          env,
+          'cover_poster',
+          { rejectLandscape: true }
+        );
+        if (!ingested) {
           ingested = await ingestExternalImage(
             `${STEAM_STATIC_CDN_BASE}/${steamId}/library_600x900.jpg`,
             `cover_${cleanKey}_poster`,
             env,
-            'cover_poster'
+            'cover_poster',
+            { rejectLandscape: true }
           );
         }
-        if (ingested) {
-          nextCover = ingested;
-          changed = true;
+      }
+      if (!ingested && row.title) {
+        const igdb = await searchIgdbCandidates(env, row.title, steamId);
+        for (const cand of igdb) {
+          if (cand.posterUrl) {
+            ingested = await ingestExternalImage(cand.posterUrl, `cover_${cleanKey}_poster`, env, 'cover_poster', { rejectLandscape: true });
+            if (ingested) break;
+          }
         }
+      }
+      if (ingested) {
+        nextCover = ingested;
+        changed = true;
       }
     }
 

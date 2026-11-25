@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # GameVault Playtime Watchdog
 # Standalone background playtime counter: polls the Windows
 # foreground window every few seconds and logs play sessions to
@@ -75,7 +75,7 @@ $IgnoreExes = @(
     'steam.exe','steamwebhelper.exe','epicgameslauncher.exe','galaxyclient.exe','ea.exe','eadesktop.exe','upc.exe',
     'ubisoftconnect.exe','battle.net.exe','riotclientservices.exe','radeonsoftware.exe','amdrsserv.exe',
     'nvcontainer.exe','nvidia share.exe','obs64.exe','obs32.exe','vlc.exe','gamevault.exe',
-    'antigravity.exe','unikeynt.exe','deskin.exe','teamviewer.exe','tv_w32.exe','tv_x64.exe','parsecd.exe',
+    'antigravity.exe','antigravity-x64.exe','cursor.exe','windsurf.exe','mremoteng.exe','putty.exe','puttyng.exe','unikeynt.exe','deskin.exe','teamviewer.exe','tv_w32.exe','tv_x64.exe','parsecd.exe',
     'presentmon-x64.exe','flydigi space station.exe','atiesrxx.exe','atieclxx.exe','cncmd.exe','amdow.exe',
     'amdfendrsr.exe','crashpad_handler.exe','widgetboard.exe','widgetservice.exe','microsoftstartfeedprovider.exe',
     'phoneexperiencehost.exe','appactions.exe','language_server.exe','tailscale-ipn.exe','onedrive.sync.service.exe'

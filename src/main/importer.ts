@@ -3,6 +3,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { getDb, recalculatePlaytime } from './db.ts';
 import type { AMDImportSummary } from '../shared/types.js';
+import {
+  KNOWN_LAUNCHER_OR_CLIENT_REGEX,
+  INSTALLER_OR_TOOL_EXE_REGEX,
+  NON_GAME_TITLE_REGEX,
+  isIgnoredDesktopPath,
+  hasElectronOrDesktopAppFingerprint,
+} from './tracker.ts';
 
 export const DEFAULT_AMD_DB_PATH: string = process.env.LOCALAPPDATA
   ? path.join(process.env.LOCALAPPDATA, 'AMD', 'CN', 'RGStats.db')
@@ -258,6 +265,7 @@ export function importAMDDatabase(
 
     const lowerTitle = rawTitle.toLowerCase();
     const lowerExe = exePath.toLowerCase();
+    const exeBase = exePath ? path.basename(exePath) : '';
 
     const isUtility =
       lowerTitle.includes('codex_retention_probe') ||
@@ -279,7 +287,15 @@ export function importAMDDatabase(
       lowerTitle.includes('discord system helper') ||
       lowerTitle.includes('amdrssrc') ||
       lowerTitle.includes('crash handler') ||
+      lowerTitle.includes('antigravity') ||
+      lowerTitle.includes('mremoteng') ||
+      lowerTitle.includes('putty') ||
+      lowerTitle.includes('ultraviewer') ||
       /^(word|excel|powerpoint)$/i.test(lowerTitle) ||
+      NON_GAME_TITLE_REGEX.test(rawTitle) ||
+      (exeBase && (KNOWN_LAUNCHER_OR_CLIENT_REGEX.test(exeBase) || INSTALLER_OR_TOOL_EXE_REGEX.test(exeBase))) ||
+      isIgnoredDesktopPath(exePath) ||
+      (exePath ? hasElectronOrDesktopAppFingerprint(exePath) : false) ||
       lowerExe.includes('excel') ||
       lowerExe.includes('winword') ||
       lowerExe.includes('powerpnt') ||
@@ -293,7 +309,11 @@ export function importAMDDatabase(
       lowerExe.includes('riotclient') ||
       lowerExe.includes('discordsystemhelper') ||
       lowerExe.includes('amdrssrc') ||
-      lowerExe.includes('crashhandler');
+      lowerExe.includes('crashhandler') ||
+      lowerExe.includes('antigravity') ||
+      lowerExe.includes('mremoteng') ||
+      lowerExe.includes('putty') ||
+      lowerExe.includes('ultraviewer');
 
     if (options?.excludeUtilities && isUtility) {
       skippedGames++;

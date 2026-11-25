@@ -26,6 +26,19 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-25 10:43] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Chặn triệt để ảnh ngang (landscape) vào slot Poster 2:3 từ gốc ở cả Worker & Desktop, tự động fallback IGDB (Twitch), và nâng cấp bộ lọc nhận diện game chống nhận nhầm IDE / Electron app (`Antigravity-x64`, `Cursor`, `Windsurf`, v.v.).
+- **Thay đổi chính:**
+  - `worker/src/routes/covers.ts`: Thêm `getImageDimensions` / `isLandscapeBytes` đọc header PNG/JPEG/WebP; `ingestExternalImage(..., { rejectLandscape: true })`, `handleCacheCover`, và `handleAdminBatchIngest` tự động từ chối ảnh ngang (`library_hero.jpg`, `header.jpg`, hoặc `width > height`) cho slot Poster và tự fallback sang IGDB (Twitch).
+  - `src/main/covers.ts`: Gỡ fallback `art.bannerUrl` vào `posterUrl` trong `resolveWebCoversForGame` để không nhét ảnh ngang vào poster.
+  - `src/main/tracker.ts`, `src/main/importer.ts`, `src/main/cloud-db.ts`, `resources/playtime-watch.ps1`: Thêm `isNonGameAppDirectory`, `hasElectronOrDesktopAppFingerprint` (chặn app có `resources/app.asar` hoặc `chrome_elf.dll` + `v8_context_snapshot.bin` không có SDK game), `NON_GAME_TITLE_REGEX`, chặn `antigravity*`, `cursor*`, `windsurf*`, `mremoteng*`, `putty*` ở cả tracker, AMD importer, ptwatch và cloud sync.
+  - `tests/tracker.test.js`, `tests/cloud-covers.test.js`: Bổ sung test chặn IDE/Electron app và test từ chối ảnh ngang 16:9 vào slot Poster.
+- **Kiểm tra:**
+  - `npm run build` & `npm run deploy:worker`: Pass (Worker Version `c9bacad3-23d1-404f-8086-9aa6a22d8d76`).
+  - `npm test`: **403/403 tests pass** (`93 suites`, `0 fail`).
+  - Production D1: Đã xóa `t_antigravityx64` khỏi `user_library`, tự động sửa 3 poster ngang cuối (`2584270`, `3280350`, `4115450` → `528x704` portrait) qua `batch-ingest` & `sync-all` (`60/60` poster đều chuẩn dọc).
+- **Bàn giao / Tiếp theo:** Trên máy đang chạy app, cần thoát hẳn tiến trình app cũ đang chạy ngầm ở System Tray rồi mở lại app mới build để `syncLibraryWithCloud()` dùng code mới kéo ảnh Cloud về.
+
 ## [2026-11-25 10:29] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Xây dựng Web Quản trị (`/admin`) phục vụ qua Cloudflare Workers Static Assets, nâng cấp đồng bộ cover toàn server D1, tích hợp IGDB (Twitch) trên Worker và đồng bộ toàn bộ 60/60 game lên Cloud.
 - **Thay đổi chính:**

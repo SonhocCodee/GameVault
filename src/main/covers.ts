@@ -1873,13 +1873,13 @@ export async function resolveWebCoversForGame(
       } catch {}
     }
 
-    resolvedPoster = art.posterUrl || art.bannerUrl;
+    resolvedPoster = art.posterUrl;
     resolvedBanner = art.bannerUrl || art.posterUrl;
     verified = art.verified;
   }
 
   // 5. Ingest and save to Cloud! (One person plays/discovers -> saved permanently to cloud for all users)
-  if (resolvedPoster || resolvedBanner) {
+  if (resolvedPoster || resolvedBanner || detectedAppId || g.title) {
     try {
       const cached = await cacheCloudGameCover({
         gameKey,
@@ -1898,7 +1898,7 @@ export async function resolveWebCoversForGame(
     } catch {}
   }
 
-  const poster = resolvedPoster || resolvedBanner;
+  const poster = resolvedPoster;
   const banner = resolvedBanner || resolvedPoster;
   return { poster, banner, verified };
 }

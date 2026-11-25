@@ -693,5 +693,44 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
       assert.ok(clientUpload.url.includes('/api/images/cover_t_bloodborne_banner'));
       globalThis.fetch = prevFetch;
     });
+
+    test('3.10: POST /api/covers/cache rejects landscape images as posters and never reuses library_hero for poster slot', async () => {
+      // Create a 16x9 PNG (width=16, height=9 -> strictly landscape)
+      const landscapePng = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x10, // width = 16
+        0x00, 0x00, 0x00, 0x09, // height = 9
+        0x08, 0x06, 0x00, 0x00, 0x00,
+      ]);
+
+      const prevFetch = globalThis.fetch;
+      globalThis.fetch = async (url, init) => {
+        if (String(url).includes('landscape-art.test')) {
+          return new Response(landscapePng, { status: 200, headers: { 'Content-Type': 'image/png' } });
+        }
+        return prevFetch(url, init);
+      };
+
+      const res = await worker.fetch(
+        new Request('http://localhost/api/covers/cache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gameKey: '9999991',
+            title: 'Landscape Test Game',
+            sourcePosterUrl: 'https://landscape-art.test/wide_poster.png',
+            sourceBannerUrl: 'https://landscape-art.test/library_hero.jpg',
+          }),
+        }),
+        env
+      );
+
+      globalThis.fetch = prevFetch;
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.coverUrl, null, 'Landscape image must NOT be stored as vertical poster');
+      assert.ok(data.bannerUrl && data.bannerUrl.startsWith('/api/images/cover_9999991_banner'), 'Landscape image is still valid for banner');
+    });
   });
 });

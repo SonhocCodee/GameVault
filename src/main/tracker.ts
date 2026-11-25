@@ -128,8 +128,11 @@ export const USER_GAME_DIR_REGEX = /(?:^[a-zA-Z]:\\(?:games?|gaming|tro choi|my 
 /** Common installer / updater / tool executables to skip even within game folders */
 export const INSTALLER_OR_TOOL_EXE_REGEX = /(?:^|[._-])(?:unins\d*|setup|installer?|updater?|crashpad_handler|crashreporter|unitycrashhandler.*|vc_redist.*|dxsetup|easyanticheat.*|battleye.*)(?:[._-]|\.exe$)/i;
 
-/** Known game launchers, client frontends, cloud tools and store managers that are NOT games */
-export const KNOWN_LAUNCHER_OR_CLIENT_REGEX = /^(?:leagueclient.*|riot\s*client.*|riotclient.*|googledrive.*|steam|steamwebhelper|steamservice|epicgameslauncher|epicwebhelper|galaxyclient.*|ea|eadesktop|ealauncher|eabackgroundservice|link2ea|battle\.net.*|agent|upc|ubisoftconnect.*|ubisoftgamelauncher.*|garena.*|onedrive.*|dropbox.*|ultraviewer.*)\.exe$/i;
+/** Known game launchers, client frontends, IDEs, remote tools, browsers and utilities that are NOT games */
+export const KNOWN_LAUNCHER_OR_CLIENT_REGEX = /^(?:leagueclient.*|riot\s*client.*|riotclient.*|googledrive.*|steam|steamwebhelper|steamservice|epicgameslauncher|epicwebhelper|galaxyclient.*|ea|eadesktop|ealauncher|eabackgroundservice|link2ea|battle\.net.*|agent|upc|ubisoftconnect.*|ubisoftgamelauncher.*|garena.*|onedrive.*|dropbox.*|ultraviewer.*|antigravity.*|cursor.*|windsurf.*|code(?:-insiders)?|claude.*|mremoteng.*|putty.*|winscp.*|filezilla.*|postman.*|insomnia.*|figma.*|notion.*|obsidian.*|docker.*|ollama.*|tailscale.*|gamevault.*)\.exe$/i;
+
+/** Known non-game title patterns (catches synced/imported utility entries even without exe path) */
+export const NON_GAME_TITLE_REGEX = /^(?:antigravity(?:\s*-?\s*x\s*64)?|m\s*remote\s*ng|putty(?:\s*ng)?|ultra\s*viewer(?:[_\s]*desktop)?|visual\s*studio\s*code|cursor|windsurf|google\s*drive.*|riot\s*client.*|league\s*client.*|discord.*|spotify|vlc|ollama|crosshair(?:\s*v\d+)?)$/i;
 
 /** Core game SDK / runtime files to look for in the executable's directory */
 export const GAME_SDK_FINGERPRINTS = [
@@ -146,6 +149,68 @@ export const GAME_SDK_FINGERPRINTS = [
   'binkw64.dll',
 ];
 
+export function hasElectronOrDesktopAppFingerprint(exePath: string): boolean {
+  try {
+    const dir = path.dirname(exePath);
+    const hasAsar =
+      fs.existsSync(path.join(dir, 'resources', 'app.asar')) ||
+      fs.existsSync(path.join(dir, 'resources', 'app'));
+    const hasChromiumRuntime =
+      fs.existsSync(path.join(dir, 'chrome_elf.dll')) &&
+      fs.existsSync(path.join(dir, 'v8_context_snapshot.bin'));
+    if (!hasAsar && !hasChromiumRuntime) return false;
+
+    // Allow legitimate games built on Electron/NW.js if they sit in a game library dir or ship a game SDK
+    const normalizedPath = path.normalize(exePath);
+    if (GAME_PLATFORM_DIR_REGEX.test(normalizedPath) || USER_GAME_DIR_REGEX.test(normalizedPath)) {
+      return false;
+    }
+    for (const sdkFile of GAME_SDK_FINGERPRINTS) {
+      if (fs.existsSync(path.join(dir, sdkFile))) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isNonGameAppDirectory(exePath?: string | null): boolean {
+  if (!exePath) return false;
+  const lower = exePath.toLowerCase();
+  const windir = (process.env.WINDIR || 'C:\\Windows').toLowerCase();
+  if (lower.startsWith(windir)) return true;
+
+  return (
+    lower.includes('\\windows\\') ||
+    lower.includes('\\system32') ||
+    lower.includes('\\syswow64') ||
+    lower.includes('\\program files\\common files') ||
+    lower.includes('\\program files (x86)\\common files') ||
+    lower.includes('\\microsoft\\') ||
+    lower.includes('\\windowsapps\\') ||
+    lower.includes('\\appdata\\local\\programs\\') ||
+    lower.includes('\\antigravity\\') ||
+    lower.includes('\\cursor\\') ||
+    lower.includes('\\windsurf\\') ||
+    lower.includes('\\microsoft vs code\\') ||
+    lower.includes('\\jetbrains\\') ||
+    lower.includes('\\google\\drive') ||
+    lower.includes('\\google\\drive file stream\\') ||
+    lower.includes('\\riot client\\') ||
+    lower.includes('\\epic games\\launcher\\') ||
+    lower.includes('\\steam\\bin\\') ||
+    lower.includes('\\discord\\') ||
+    lower.includes('\\obs-studio\\') ||
+    lower.includes('\\telegram desktop\\')
+  );
+}
+
+export function isIgnoredDesktopPath(exePath?: string | null): boolean {
+  if (!exePath) return false;
+  const lower = exePath.toLowerCase();
+  return isNonGameAppDirectory(exePath) || lower.includes('\\appdata\\local\\temp');
+}
+
 /**
  * Intelligent game verification heuristic (dynamic, non-hardcoded).
  * Determines if an unknown executable is genuinely a game without relying on an infinite blacklist of desktop apps.
@@ -159,12 +224,19 @@ export function isLikelyGame(
     return false;
   }
 
-  // 1. Skip obvious installers, updaters, crash reporters, anticheat launchers, store clients
+  // 1. Skip obvious installers, updaters, crash reporters, anticheat launchers, store clients, IDEs
   if (INSTALLER_OR_TOOL_EXE_REGEX.test(foregroundExe) || KNOWN_LAUNCHER_OR_CLIENT_REGEX.test(foregroundExe)) {
     return false;
   }
 
   const cleanTitle = extractTitleFromExe(exePath || foregroundExe);
+  if (NON_GAME_TITLE_REGEX.test(cleanTitle.trim())) {
+    return false;
+  }
+
+  if (exePath && (isNonGameAppDirectory(exePath) || hasElectronOrDesktopAppFingerprint(exePath))) {
+    return false;
+  }
 
   // 2. Check if user explicitly deleted or dismissed this game before
   if (db) {
@@ -503,33 +575,7 @@ export class PlaytimeTracker {
   }
 
   public isPathIgnored(exePath?: string | null): boolean {
-    if (!exePath) return false;
-    const lower = exePath.toLowerCase();
-
-    // Ignore Windows directory and subfolders
-    const windir = (process.env.WINDIR || 'C:\\Windows').toLowerCase();
-    if (lower.startsWith(windir)) return true;
-
-    // Common system/temp/app directories
-    if (
-      lower.includes('\\windows\\') ||
-      lower.includes('\\system32') ||
-      lower.includes('\\syswow64') ||
-      lower.includes('\\program files\\common files') ||
-      lower.includes('\\program files (x86)\\common files') ||
-      lower.includes('\\microsoft\\') ||
-      lower.includes('\\windowsapps\\') ||
-      lower.includes('\\appdata\\local\\temp') ||
-      lower.includes('\\google\\drive') ||
-      lower.includes('\\google\\drive file stream\\') ||
-      lower.includes('\\riot client\\') ||
-      lower.includes('\\epic games\\launcher\\') ||
-      lower.includes('\\steam\\bin\\')
-    ) {
-      return true;
-    }
-
-    return false;
+    return isIgnoredDesktopPath(exePath);
   }
 
   public findGameByProcess(exeName?: string | null): Game | null {

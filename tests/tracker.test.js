@@ -491,5 +491,18 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
       const registered = db.prepare("SELECT * FROM games WHERE exe_name = 'PuTTYNG.exe'").get();
       assert.equal(registered, undefined);
     });
+
+    it('rejects IDEs and Electron desktop apps such as Antigravity-x64, Cursor, and Windsurf', () => {
+      assert.equal(isLikelyGame('Antigravity-x64.exe', 'C:\\Users\\MacPro\\AppData\\Local\\Programs\\Antigravity\\Antigravity-x64.exe', db), false);
+      assert.equal(isLikelyGame('Cursor.exe', 'C:\\Users\\MacPro\\AppData\\Local\\Programs\\cursor\\Cursor.exe', db), false);
+
+      // Even in a generic folder, an Electron app with resources/app.asar and no game SDK must be rejected
+      const electronAppDir = path.join(tempDir, 'SomeDesktopTool');
+      fs.mkdirSync(path.join(electronAppDir, 'resources'), { recursive: true });
+      fs.writeFileSync(path.join(electronAppDir, 'resources', 'app.asar'), '');
+      const toolExe = path.join(electronAppDir, 'SomeDesktopTool.exe');
+      fs.writeFileSync(toolExe, '');
+      assert.equal(isLikelyGame('SomeDesktopTool.exe', toolExe, db), false);
+    });
   });
 });

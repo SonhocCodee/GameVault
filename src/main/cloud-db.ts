@@ -10,6 +10,7 @@ import {
 } from './db.ts';
 import { normalizeForMatch } from './media.ts';
 import { autoEnrichAllGameCovers } from './covers.ts';
+import { NON_GAME_TITLE_REGEX } from './tracker.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
 import type {
   CloudReview,
@@ -520,6 +521,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
   const items: UserLibraryItem[] = [];
 
   for (const g of localGames) {
+    if (NON_GAME_TITLE_REGEX.test((g.title || '').trim())) continue;
     // Only upload valid HTTP/HTTPS URLs to the cloud. Never upload local machine file paths!
     const isCoverHttp = g.cover_url && (g.cover_url.startsWith('http://') || g.cover_url.startsWith('https://'));
     const isBannerHttp = g.banner_url && (g.banner_url.startsWith('http://') || g.banner_url.startsWith('https://'));
@@ -610,6 +612,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
 
   for (const remote of result.games) {
     if (remote.isDeleted) continue;
+    if (NON_GAME_TITLE_REGEX.test((remote.title || '').trim())) continue;
 
     const rTitleNorm = (remote.title || '').toLowerCase().trim();
     const rKey = remote.gameKey || (remote.steamId ? `s_${remote.steamId}` : `t_${normalizeForMatch(remote.title)}`);
