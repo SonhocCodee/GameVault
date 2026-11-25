@@ -279,6 +279,13 @@ function createTables(db: DatabaseSync): void {
       deleted_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
     );
   `);
+
+  try {
+    dbInstance.exec('ALTER TABLE deleted_games ADD COLUMN steam_id INTEGER DEFAULT NULL');
+  } catch {}
+  try {
+    dbInstance.exec('ALTER TABLE deleted_games ADD COLUMN game_key TEXT DEFAULT NULL');
+  } catch {}
 }
 
 // ==========================================
@@ -468,9 +475,20 @@ export function updateGame(id: number, data: Partial<Game>): Game {
 export function deleteGame(id: number): boolean {
   const db = getDb();
   try {
-    const game = db.prepare('SELECT title, exe_name FROM games WHERE id = ?').get(id) as any;
+    const game = db.prepare('SELECT title, exe_name, steam_id FROM games WHERE id = ?').get(id) as any;
     if (game && game.title) {
-      db.prepare('INSERT OR IGNORE INTO deleted_games (title, exe_name) VALUES (?, ?)').run(game.title, game.exe_name || null);
+      const steamId = typeof game.steam_id === 'number' && game.steam_id > 0 ? game.steam_id : null;
+      const slug = String(game.title).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const gameKey = steamId ? `s_${steamId}` : `t_${slug}`;
+      db.prepare(`
+        INSERT INTO deleted_games (title, exe_name, steam_id, game_key)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(title) DO UPDATE SET
+          exe_name = COALESCE(excluded.exe_name, deleted_games.exe_name),
+          steam_id = COALESCE(excluded.steam_id, deleted_games.steam_id),
+          game_key = COALESCE(excluded.game_key, deleted_games.game_key),
+          deleted_at = datetime('now', 'localtime')
+      `).run(game.title, game.exe_name || null, steamId, gameKey);
     }
   } catch {}
   const stmt = db.prepare('DELETE FROM games WHERE id = ?');
@@ -478,10 +496,10 @@ export function deleteGame(id: number): boolean {
   return result.changes > 0;
 }
 
-export function getDeletedGames(): Array<{ title: string; exe_name: string | null; deleted_at: string }> {
+export function getDeletedGames(): Array<{ title: string; exe_name: string | null; steam_id?: number | null; game_key?: string | null; deleted_at: string }> {
   const db = getDb();
   try {
-    return (db.prepare('SELECT title, exe_name, deleted_at FROM deleted_games').all() as any[]) || [];
+    return (db.prepare('SELECT title, exe_name, steam_id, game_key, deleted_at FROM deleted_games').all() as any[]) || [];
   } catch {
     return [];
   }

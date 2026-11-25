@@ -495,15 +495,54 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
     });
   }
 
+  const deletedTitles = new Set<string>();
+  const deletedKeys = new Set<string>();
+  const deletedSteamIds = new Set<number>();
+
   for (const d of deleted) {
-    items.push({
-      gameKey: `t_${normalizeForMatch(d.title)}`,
-      title: d.title,
-      status: 'backlog',
-      playtimeMinutes: 0,
-      isDeleted: true,
-      clientUpdatedAt: d.deleted_at || new Date().toISOString(),
-    });
+    if (d.title) {
+      const normT = d.title.toLowerCase().trim();
+      deletedTitles.add(normT);
+      const titleKey = `t_${normalizeForMatch(d.title)}`;
+      deletedKeys.add(titleKey);
+
+      items.push({
+        gameKey: titleKey,
+        title: d.title,
+        status: 'backlog',
+        playtimeMinutes: 0,
+        isDeleted: true,
+        clientUpdatedAt: d.deleted_at || new Date().toISOString(),
+      });
+    }
+
+    if (d.steam_id && d.steam_id > 0) {
+      const steamKey = String(d.steam_id);
+      deletedSteamIds.add(d.steam_id);
+      deletedKeys.add(steamKey);
+      deletedKeys.add(`s_${d.steam_id}`);
+      items.push({
+        gameKey: steamKey,
+        title: d.title,
+        steamId: d.steam_id,
+        status: 'backlog',
+        playtimeMinutes: 0,
+        isDeleted: true,
+        clientUpdatedAt: d.deleted_at || new Date().toISOString(),
+      });
+    }
+
+    if (d.game_key && !deletedKeys.has(d.game_key)) {
+      deletedKeys.add(d.game_key);
+      items.push({
+        gameKey: d.game_key,
+        title: d.title,
+        status: 'backlog',
+        playtimeMinutes: 0,
+        isDeleted: true,
+        clientUpdatedAt: d.deleted_at || new Date().toISOString(),
+      });
+    }
   }
 
   const resp = await apiFetch(
@@ -526,6 +565,24 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
 
   for (const remote of result.games) {
     if (remote.isDeleted) continue;
+
+    const rTitleNorm = (remote.title || '').toLowerCase().trim();
+    const rKey = remote.gameKey || (remote.steamId ? `s_${remote.steamId}` : `t_${normalizeForMatch(remote.title)}`);
+    const isLocallyDeleted =
+      deletedTitles.has(rTitleNorm) ||
+      deletedKeys.has(rKey) ||
+      (remote.steamId != null && remote.steamId > 0 && deletedSteamIds.has(remote.steamId));
+
+    if (isLocallyDeleted) {
+      // User explicitly deleted this game locally! NEVER pull or recreate it!
+      const row = remote.steamId && remote.steamId > 0
+        ? (db.prepare('SELECT id FROM games WHERE steam_id = ?').get(remote.steamId) as any)
+        : (getGameByTitle(remote.title));
+      if (row) {
+        db.prepare('DELETE FROM games WHERE id = ?').run(row.id);
+      }
+      continue;
+    }
 
     // Validate remote cover/banner: must be canonical HTTP/HTTPS URLs
     const isRemoteCoverValid = remote.coverUrl && (
