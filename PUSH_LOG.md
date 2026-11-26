@@ -26,6 +26,21 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 13:49] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- Đã chạy migration `worker/migrations/0004_library_sync_epoch.sql` lên D1 production (`game-vault-d1`) và deploy Worker mới (`7b123049-3441-4bf2-a1b6-fe66a157afbc`).
+
+### Kiểm tra (Verify)
+- `npx wrangler d1 execute game-vault-d1 --remote --file=worker/migrations/0004_library_sync_epoch.sql`: Thành công (`success: true`).
+- `npm run deploy:worker`: Build `admin-web`, `community-web` và deploy `game-vault-worker` thành công (Version ID `7b123049-3441-4bf2-a1b6-fe66a157afbc`).
+
+### Bàn giao / Tiếp theo cho máy kia
+- Khi máy kia `git pull` về:
+  1. Chạy `npm run build` rồi **thoát hẳn app GameVault đang chạy ngầm ở System Tray** (nếu có) và mở lại bản mới.
+  2. Trên máy chuẩn (`DESKTOP-BU4IIOC`), mở **Đồng bộ** → bấm **Đặt máy này làm chuẩn (Ghi đè Cloud)** (1 lần).
+  3. Trên máy kia, chỉ cần mở app hoặc bấm **Đồng bộ** bình thường: app sẽ tự nhận `sync_epoch` mới (`authoritativePull: true`), tự kéo lại toàn bộ thư viện & `sessions` chuẩn từ Cloud (tự sửa/giảm giờ chơi bị lệch và xóa game/session rác).
+
 ## [2026-11-26 13:46] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc
