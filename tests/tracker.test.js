@@ -504,5 +504,31 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
       fs.writeFileSync(toolExe, '');
       assert.equal(isLikelyGame('SomeDesktopTool.exe', toolExe, db), false);
     });
+
+    it('closes active session at lastPollTime + grace when pollOnce wakes from sleep/hibernate', () => {
+      const tracker = new PlaytimeTracker(db, { autoDetectNewGames: false });
+      const created = db
+        .prepare("INSERT INTO games (title, exe_name, playtime_minutes) VALUES ('Sleep Test Game', 'sleeptest.exe', 0)")
+        .run();
+      const gameId = Number(created.lastInsertRowid);
+
+      const t0 = new Date('2026-11-26T10:00:00.000Z');
+      const startRes = tracker.handleProcessPoll('sleeptest.exe', 9999, t0);
+      assert.equal(startRes.action, 'started');
+
+      // Simulate last poll at +5 minutes
+      const t5 = new Date('2026-11-26T10:05:00.000Z');
+      tracker.activeSession.lastPollTime = t5;
+
+      // Simulate PC waking up 4 hours later: pollOnce must cap session at t5 + 30s (not 4 hours!)
+      const tWake = new Date('2026-11-26T14:05:00.000Z');
+      tracker.pollOnce(tWake);
+
+      const row = db
+        .prepare("SELECT duration_minutes, is_running FROM sessions WHERE game_id = ? AND source = 'tracker'")
+        .get(gameId);
+      assert.equal(row.is_running, 0);
+      assert.equal(row.duration_minutes, 6); // ~5.5 min rounded -> 6 min, NOT 245 min!
+    });
   });
 });

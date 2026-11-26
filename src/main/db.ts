@@ -330,7 +330,7 @@ export function getGames(filter?: GameFilter): Game[] {
         break;
       case 'recent_played':
         orderClause = `ORDER BY (
-          SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id
+          SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual'
         ) DESC NULLS LAST, games.updated_at DESC`;
         break;
       case 'created_desc':
@@ -342,7 +342,7 @@ export function getGames(filter?: GameFilter): Game[] {
   const query = `
     SELECT 
       games.*,
-      (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id) AS last_played_at
+      (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual') AS last_played_at
     FROM games
     ${whereClause}
     ${orderClause}

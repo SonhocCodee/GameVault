@@ -26,6 +26,18 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 10:53] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Sửa tab "Theo dõi thời gian chơi" không còn dính các game chỉ chỉnh giờ thủ công (`manual` audit rows như Dark Souls III, Armored Core VI, Baldur's Gate 3, Forza Horizon 5, The Witcher 3, Ghost of Tsushima, Dead Space -1500m) vào Tháng 11, tính gộp khoảng thời gian (interval union) theo tháng để chống đếm trùng giữa `tracker` / `amd_import` / `ptwatch`, và bổ sung chống cộng giờ khi máy sleep/hibernate trong `PlaytimeTracker`.
+- **Thay đổi chính:**
+  - `src/renderer/components/TimelineView.tsx`: Bỏ qua các bản ghi `source === 'manual'` trong tab "Theo dõi thời gian chơi" và dùng `computeUnionMinutes` (interval union) thay vì cộng dồn thô `duration_minutes`.
+  - `src/main/db.ts`: Loại trừ `source = 'manual'` khỏi truy vấn `last_played_at` trong `getGames()` để việc chỉnh giờ thủ công không làm sai ngày chơi gần nhất.
+  - `src/main/tracker.ts`: Theo dõi `lastPollTime` trên `activeSession` và thêm `SLEEP_GAP_MS` (120s) trong `pollOnce()` để tự đóng session tại `lastPollTime + 30s` khi máy sleep/hibernate thay vì cộng cả thời gian ngủ vào giờ chơi.
+  - `tests/tracker.test.js`, `tests/db.test.js`: Bổ sung test `pollOnce` sleep/hibernate gap và `getGames` `last_played_at` bỏ qua `manual`.
+- **Kiểm tra:**
+  - `npm test`: **405/405 tests pass** (`93 suites`, `0 fail`).
+  - `npm run build`: Build Electron main/preload và Vite thành công.
+- **Bàn giao / Tiếp theo:** Nếu app GameVault đang mở/chạy ngầm ở System Tray trên máy `DESKTOP-BU4IIOC`, cần thoát hẳn rồi mở lại để dùng bản build mới. Máy kia khi `git pull` vẫn cần ghép với bản sửa đồng bộ `completed_at` nếu chưa push.
+
 ## [2026-11-26 10:41] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Sửa fallback ngày trong `TimelineView.tsx` để game phá đảo hoặc thiếu session không bị nhảy nhầm sang tháng tạo DB (`created_at`), đồng thời phát sự kiện `game:updated` khi kết thúc phiên chơi trong `main.ts`.
 - **Thay đổi chính:**

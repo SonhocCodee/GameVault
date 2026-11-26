@@ -400,18 +400,33 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     // Gom nhóm theo các phiên chơi thực tế qua từng tháng.
     // (Một game có thể trải dài qua nhiều tháng để theo dõi số giờ chơi từng tháng)
     // =========================================================================
-    // Map: 'YYYY-MM' -> Map<gameId, { playtime: number, count: number, lastDate: string }>
+    // Map: 'YYYY-MM' -> Map<gameId, { intervals: Array<[number, number]>, fallbackMinutes: number, count: number, lastDate?: string }>
     const monthStats = new Map<
       string,
-      Map<number, { playtime: number; count: number; lastDate?: string }>
+      Map<
+        number,
+        {
+          intervals: Array<[number, number]>;
+          fallbackMinutes: number;
+          count: number;
+          lastDate?: string;
+        }
+      >
     >();
 
-    // Set of gameIds that have at least one session recorded
+    // Set of gameIds that have at least one real (non-manual) play session recorded
     const gamesWithSessions = new Set<number>();
 
-    // 1. Process all sessions
+    const parseTs = (raw?: string | null): number | null => {
+      if (!raw) return null;
+      const ms = new Date(raw.trim().replace(' ', 'T')).getTime();
+      return Number.isFinite(ms) ? ms : null;
+    };
+
+    // 1. Process all real play sessions (exclude 'manual' audit/delta rows)
     for (const session of sessions) {
       if (!session.start_time) continue;
+      if (session.source === 'manual') continue;
       const game = filteredGamesMap.get(session.game_id);
       if (!game) continue; // Not matching current filter
 
@@ -425,8 +440,16 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         monthStats.set(datePart, new Map());
       }
       const gMap = monthStats.get(datePart)!;
-      const current = gMap.get(game.id) || { playtime: 0, count: 0 };
-      current.playtime += session.duration_minutes || 0;
+      const current = gMap.get(game.id) || { intervals: [], fallbackMinutes: 0, count: 0 };
+
+      const startMs = parseTs(session.start_time);
+      const endMs = parseTs(session.end_time) ?? parseTs((session as any).last_poll);
+      if (startMs !== null && endMs !== null && endMs > startMs) {
+        current.intervals.push([startMs, endMs]);
+      } else {
+        current.fallbackMinutes += Math.max(0, session.duration_minutes || 0);
+      }
+
       current.count += 1;
       if (!current.lastDate || session.start_time > current.lastDate) {
         current.lastDate = session.start_time;
@@ -449,13 +472,31 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         const gMap = monthStats.get(datePart)!;
         if (!gMap.has(game.id)) {
           gMap.set(game.id, {
-            playtime: game.playtime_minutes || 0,
+            intervals: [],
+            fallbackMinutes: game.playtime_minutes || 0,
             count: 1,
             lastDate: refDate,
           });
         }
       }
     }
+
+    const computeUnionMinutes = (intervals: Array<[number, number]>, fallbackMinutes: number): number => {
+      if (intervals.length === 0) return fallbackMinutes;
+      const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
+      let unionMs = 0;
+      let cursorEnd = -1;
+      for (const [start, end] of sorted) {
+        if (start > cursorEnd) {
+          unionMs += end - start;
+          cursorEnd = end;
+        } else if (end > cursorEnd) {
+          unionMs += end - cursorEnd;
+          cursorEnd = end;
+        }
+      }
+      return Math.round(unionMs / 60000) + fallbackMinutes;
+    };
 
     // 3. Assemble Month Groups
     const monthsArray: TimelineMonthGroup[] = [];
@@ -474,7 +515,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         const game = filteredGamesMap.get(gameId);
         if (!game) return;
 
-        monthTotalMinutes += stats.playtime;
+        const playtime = computeUnionMinutes(stats.intervals, stats.fallbackMinutes);
+        monthTotalMinutes += playtime;
 
         // Check if completed in this month
         let isCompletedInMonth = false;
@@ -488,7 +530,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
         gameItems.push({
           game,
-          monthPlaytimeMinutes: stats.playtime,
+          monthPlaytimeMinutes: playtime,
           sessionCount: stats.count,
           lastSessionDate: stats.lastDate,
           isCompletedInMonth,

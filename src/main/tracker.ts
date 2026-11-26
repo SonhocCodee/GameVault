@@ -103,6 +103,7 @@ export interface ActiveSessionInfo {
   gameTitle: string;
   pid: number;
   startTime: Date;
+  lastPollTime?: Date;
   processName?: string;
 }
 
@@ -865,6 +866,7 @@ export class PlaytimeTracker {
           gameTitle: activeGame.title,
           pid,
           startTime: originalStart,
+          lastPollTime: timestamp,
           processName: foregroundExe,
         };
 
@@ -890,6 +892,7 @@ export class PlaytimeTracker {
         gameTitle: activeGame.title,
         pid,
         startTime: timestamp,
+        lastPollTime: timestamp,
         processName: foregroundExe,
       };
 
@@ -1004,14 +1007,28 @@ export class PlaytimeTracker {
   }
 
   private pollCount: number = 0;
+  private static readonly SLEEP_GAP_MS = 120_000;
 
   /**
    * Performs a single live polling cycle.
    */
-  public pollOnce(): void {
+  public pollOnce(nowOverride?: Date): void {
     const { exeName, pid, exePath } = getForegroundProcessInfo();
-    const now = new Date();
+    const now = nowOverride ?? new Date();
     this.pollCount++;
+
+    // Guard against PC sleep/hibernate: if the gap since the last confirmed poll
+    // exceeds SLEEP_GAP_MS, close the session at its last confirmed poll + grace
+    // so sleep hours are never counted as playtime.
+    if (this.activeSession?.lastPollTime) {
+      const gapMs = now.getTime() - this.activeSession.lastPollTime.getTime();
+      if (gapMs > PlaytimeTracker.SLEEP_GAP_MS) {
+        const cappedEnd = new Date(
+          Math.min(this.activeSession.lastPollTime.getTime() + 30_000, now.getTime())
+        );
+        this.closeActiveSession(cappedEnd);
+      }
+    }
 
     if (exeName && pid > 0) {
       const result = this.handleProcessPoll(exeName, pid, now, exePath);
@@ -1032,6 +1049,7 @@ export class PlaytimeTracker {
     // Stamp last_poll while the session is live, so an abnormal exit
     // (crash / kill / power loss) can be recovered without losing minutes
     if (this.activeSession) {
+      this.activeSession.lastPollTime = now;
       try {
         this.db
           .prepare('UPDATE sessions SET last_poll = ? WHERE id = ?')

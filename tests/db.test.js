@@ -409,5 +409,27 @@ describe('GameVault Database Engine (node:sqlite)', () => {
         }
       }
     });
+
+    test('getGames last_played_at excludes manual audit sessions', () => {
+      const game = createGame({ title: 'Manual Edit Test' });
+      createSession({
+        game_id: game.id,
+        start_time: '2026-07-16T20:00:00',
+        end_time: '2026-07-16T21:00:00',
+        duration_minutes: 60,
+        source: 'amd_import',
+      });
+      createSession({
+        game_id: game.id,
+        start_time: '2026-11-24T18:55:49',
+        end_time: '2026-11-24T18:55:49',
+        duration_minutes: -1500,
+        source: 'manual',
+      });
+
+      const list = getGames();
+      const found = list.find((g) => g.id === game.id);
+      assert.equal(found.last_played_at, '2026-07-16T20:00:00');
+    });
   });
 });
