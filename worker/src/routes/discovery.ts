@@ -314,17 +314,23 @@ export function registerDiscoveryRoutes(router: Router) {
         WHERE f.game_key=? AND f.hidden=0 AND p.suspended=0
         AND NOT EXISTS(SELECT 1 FROM community_library l WHERE l.uid=f.uid AND l.game_key=f.game_key AND p.share_library=1 AND (l.playtime_minutes>0 OR l.status IN ('completed','playing')))
       )
-      SELECT x.uid,p.nickname,x.status,x.playtime_minutes,f.data_json,f.id AS report_id
+      SELECT x.uid,p.nickname,u.photo_url AS avatar_url,x.status,x.playtime_minutes,f.data_json,f.id AS report_id
       FROM participants x JOIN community_profiles p ON p.uid=x.uid
+      LEFT JOIN users u ON u.uid=x.uid
       LEFT JOIN community_performance f ON f.uid=x.uid AND f.game_key=? AND f.hidden=0
       WHERE ${visibleTo("x")} ${status ? "AND x.status='completed'" : ""}
       ORDER BY x.playtime_minutes DESC,x.uid ASC LIMIT ? OFFSET ?
     `).bind(gameKey, gameKey, gameKey, uid, uid, limit + 1, offset).all<any>()).results || [];
-    return jsonResponse(page(rows.map(r => ({
-      uid: r.uid, nickname: safeName(r.nickname), status: r.status,
-      playtimeMinutes: r.playtime_minutes == null ? null : Number(r.playtime_minutes),
-      performance: r.data_json ? { ...JSON.parse(r.data_json), id: r.report_id, uid: r.uid, nickname: safeName(r.nickname) } : null,
-    })), limit, offset));
+    return jsonResponse(page(rows.map(r => {
+      const avatar = publicUrl(r.avatar_url);
+      return {
+        uid: r.uid, nickname: safeName(r.nickname),
+        ...(avatar ? { avatarUrl: avatar } : {}),
+        status: r.status,
+        playtimeMinutes: r.playtime_minutes == null ? null : Number(r.playtime_minutes),
+        performance: r.data_json ? { ...JSON.parse(r.data_json), id: r.report_id, uid: r.uid, nickname: safeName(r.nickname) } : null,
+      };
+    }), limit, offset));
   });
   add("GET", "/games/:gameKey/performance", async (request, env, ctx) => {
     const gameKey = key(ctx.params?.gameKey),

@@ -1404,8 +1404,18 @@ export async function getDriveStorageQuota(): Promise<DriveStorageQuota> {
   const usageInDriveBytes = Number(quota.usageInDrive) || 0;
 
   const percentUsed = limitBytes > 0 ? Math.round((usageBytes / limitBytes) * 100) : 0;
-  const formattedLimit = limitBytes > 0 ? `${(limitBytes / (1024 * 1024 * 1024)).toFixed(1)} GB` : 'Không giới hạn';
-  const formattedUsage = `${(usageBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  const TB = 1024 * 1024 * 1024 * 1024;
+  const GB = 1024 * 1024 * 1024;
+  const formatQuotaSize = (bytes: number, tbDecimals: number, gbDecimals: number): string => {
+    if (bytes >= TB) {
+      return `${(bytes / TB).toFixed(tbDecimals).replace(/\.0+$/, '')} TB`;
+    }
+    return `${(bytes / GB).toFixed(gbDecimals).replace(/\.0+$/, '')} GB`;
+  };
+  const formattedLimit = limitBytes > 0 ? formatQuotaSize(limitBytes, 1, 1) : 'Không giới hạn';
+  const formattedUsage = usageBytes >= TB
+    ? `${(usageBytes / TB).toFixed(2)} TB`
+    : `${(usageBytes / GB).toFixed(2)} GB`;
 
   return {
     limitBytes,

@@ -7,6 +7,7 @@ import {
   updateGame,
   getDeletedGames,
   getDb,
+  recalculatePlaytime,
 } from './db.ts';
 import { normalizeForMatch } from './media.ts';
 import { autoEnrichAllGameCovers } from './covers.ts';
@@ -14,6 +15,7 @@ import { NON_GAME_TITLE_REGEX } from './tracker.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
 import type {
   CloudReview,
+  CloudSessionItem,
   CommunityPick,
   Game,
   HardwareProfile,
@@ -26,6 +28,23 @@ import type {
   AdminUpdateCoverPayload,
   ReviewSyncResult,
 } from '../shared/types.js';
+
+function toUtcIso(raw?: string | null): string {
+  if (!raw || typeof raw !== 'string') return new Date().toISOString();
+  const trimmed = raw.trim();
+  if (!trimmed) return new Date().toISOString();
+  const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+  const ms = new Date(normalized).getTime();
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : new Date().toISOString();
+}
+
+function parseTimestampMs(raw?: string | null): number {
+  if (!raw || typeof raw !== 'string') return NaN;
+  const trimmed = raw.trim();
+  if (!trimmed) return NaN;
+  const normalized = trimmed.includes('T') ? trimmed : trimmed.replace(' ', 'T');
+  return new Date(normalized).getTime();
+}
 
 let cloudOverrides: { fetchImpl?: FetchLike; workerApiUrl?: string; projectId?: string; userDataDir?: string } = {};
 
@@ -517,7 +536,7 @@ function libraryItem(g: Game): UserLibraryItem {
     status: g.status, playtimeMinutes: g.playtime_minutes || 0,
     lastPlayed: g.last_played_at || null, completedAt: g.completed_at || null,
     userScore: g.user_rating ?? null, userNotes: g.notes || null,
-    isDeleted: false, clientUpdatedAt: g.updated_at || new Date().toISOString(),
+    isDeleted: false, clientUpdatedAt: toUtcIso(g.updated_at),
   };
 }
 
@@ -665,8 +684,43 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
       userScore: g.user_rating != null ? g.user_rating : null,
       userNotes: g.notes || null,
       isDeleted: false,
-      clientUpdatedAt: g.updated_at || new Date().toISOString(),
+      clientUpdatedAt: toUtcIso(g.updated_at),
     });
+  }
+
+  // Collect real play sessions (exclude 'manual' audit rows and active/zero-duration rows)
+  const sessionsPayload: CloudSessionItem[] = [];
+  const gameKeyById = new Map<number, string>();
+  for (const g of localGames) {
+    if (NON_GAME_TITLE_REGEX.test((g.title || '').trim())) continue;
+    gameKeyById.set(g.id, computeGameKey(g));
+  }
+  try {
+    const localSessions = db
+      .prepare(`
+        SELECT game_id, source, start_time, end_time, duration_minutes
+        FROM sessions
+        WHERE is_running = 0
+          AND duration_minutes > 0
+          AND COALESCE(source, '') != 'manual'
+          AND start_time IS NOT NULL
+        ORDER BY start_time DESC
+        LIMIT 5000
+      `)
+      .all() as any[];
+    for (const s of localSessions) {
+      const gKey = gameKeyById.get(Number(s.game_id));
+      if (!gKey) continue;
+      sessionsPayload.push({
+        gameKey: gKey,
+        source: String(s.source || 'tracker'),
+        startTime: String(s.start_time),
+        endTime: s.end_time ? String(s.end_time) : null,
+        durationMinutes: Math.max(0, Number(s.duration_minutes) || 0),
+      });
+    }
+  } catch (err) {
+    console.warn('Session export warning:', err);
   }
 
   const deletedTitles = new Set<string>();
@@ -723,7 +777,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
     '/api/library/sync',
     {
       method: 'POST',
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, sessions: sessionsPayload }),
     },
     true
   );
@@ -795,7 +849,6 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         steam_id: remote.steamId || -1,
         user_rating: remote.userScore,
         notes: remote.userNotes,
-        last_played_at: remote.lastPlayed,
         completed_at: remote.completedAt || null,
         media_folder: remote.title.replace(/[<>:"/\\|?*]/g, '').trim() || 'Unknown_Game',
       });
@@ -804,16 +857,17 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
       // Game exists locally: reconcile status, playtime, covers
       const patch: Partial<Game> = {};
       let needsUpdate = false;
+      const remoteMs = parseTimestampMs(remote.clientUpdatedAt);
+      const localMs = parseTimestampMs(existing.updated_at);
+      const remoteIsNewer = Number.isFinite(remoteMs) && Number.isFinite(localMs) && remoteMs > localMs;
 
       // Completed status rule: if remote or local is completed, it stays completed!
       if (remote.status === 'completed' && existing.status !== 'completed') {
         patch.status = 'completed';
         needsUpdate = true;
-      } else if (remote.status !== existing.status && remote.clientUpdatedAt && existing.updated_at) {
-        if (new Date(remote.clientUpdatedAt) > new Date(existing.updated_at)) {
-          patch.status = remote.status;
-          needsUpdate = true;
-        }
+      } else if (remote.status !== existing.status && remoteIsNewer) {
+        patch.status = remote.status;
+        needsUpdate = true;
       }
 
       // Playtime rule: highest playtime wins
@@ -856,10 +910,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         needsUpdate = true;
       }
       if (remote.completedAt && remote.completedAt !== existing.completed_at) {
-        if (
-          !existing.completed_at ||
-          (remote.clientUpdatedAt && existing.updated_at && new Date(remote.clientUpdatedAt) > new Date(existing.updated_at))
-        ) {
+        if (!existing.completed_at || remoteIsNewer) {
           patch.completed_at = remote.completedAt;
           needsUpdate = true;
         }
@@ -869,6 +920,55 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         updateGame(existing.id, patch);
         updated++;
       }
+    }
+  }
+
+  // 2.5 Pull & merge remote play sessions (so monthly Timeline & playtime stay 100% synced across machines)
+  if (Array.isArray(result.sessions) && result.sessions.length > 0) {
+    try {
+      const refreshedGames = getGames();
+      const idByKey = new Map<string, number>();
+      for (const g of refreshedGames) {
+        idByKey.set(computeGameKey(g), g.id);
+        if (g.steam_id && g.steam_id > 0) {
+          idByKey.set(String(g.steam_id), g.id);
+          idByKey.set(`s_${g.steam_id}`, g.id);
+        }
+        idByKey.set(`t_${normalizeForMatch(g.title)}`, g.id);
+      }
+
+      const existsStmt = db.prepare(
+        'SELECT 1 FROM sessions WHERE game_id = ? AND source = ? AND start_time = ?'
+      );
+      const insertSessionStmt = db.prepare(`
+        INSERT INTO sessions (game_id, start_time, end_time, duration_minutes, is_running, source)
+        VALUES (?, ?, ?, ?, 0, ?)
+      `);
+      const touchedIds = new Set<number>();
+
+      for (const rs of result.sessions) {
+        if (!rs || rs.source === 'manual' || !rs.startTime || (rs.durationMinutes || 0) <= 0) continue;
+        const localGameId = idByKey.get(rs.gameKey);
+        if (!localGameId) continue;
+        const source = rs.source || 'tracker';
+        const found = existsStmt.get(localGameId, source, rs.startTime);
+        if (!found) {
+          insertSessionStmt.run(
+            localGameId,
+            rs.startTime,
+            rs.endTime || rs.startTime,
+            Math.max(1, Math.floor(rs.durationMinutes)),
+            source
+          );
+          touchedIds.add(localGameId);
+        }
+      }
+
+      if (touchedIds.size > 0) {
+        recalculatePlaytime(db, [...touchedIds]);
+      }
+    } catch (err) {
+      console.warn('Remote session merge warning:', err);
     }
   }
 

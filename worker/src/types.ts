@@ -186,8 +186,17 @@ export interface LibrarySyncStats {
   totalPlaytimeMinutes: number;
 }
 
+export interface CloudSessionItem {
+  gameKey: string;
+  source: string;
+  startTime: string;
+  endTime?: string | null;
+  durationMinutes: number;
+}
+
 export interface LibrarySyncResponse {
   games: UserLibraryItem[];
+  sessions?: CloudSessionItem[];
   syncedAt: string;
   stats: LibrarySyncStats;
 }

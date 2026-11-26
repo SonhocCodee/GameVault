@@ -8,6 +8,7 @@ export interface PublicProfile {
   uid: string;
   nickname: string;
   bio: string;
+  avatarUrl?: string | null;
   shareLibrary: boolean;
   suspended?: boolean;
   isAdmin?: boolean;
@@ -22,6 +23,7 @@ export interface SharedLibraryGame extends PublicGame {
 export interface PlayerRanking {
   uid: string;
   nickname: string;
+  avatarUrl?: string | null;
   totalMinutes: number;
   completedGames: number;
   totalGames: number;
@@ -29,6 +31,7 @@ export interface PlayerRanking {
 export interface GamePlayer {
   uid: string;
   nickname: string;
+  avatarUrl?: string | null;
   status: string;
   playtimeMinutes: number | null;
   performance: PerformanceReport | null;
@@ -39,6 +42,7 @@ export interface CommunityPost extends PublicGame {
   id: string;
   uid: string;
   nickname: string;
+  avatarUrl?: string | null;
   kind: PostKind;
   body: string;
   spoiler: boolean;
@@ -49,12 +53,16 @@ export interface CommunityPost extends PublicGame {
   comments: number;
   liked: boolean;
   saved: boolean;
+  reviewScore?: number | null;
+  reviewDropped?: boolean;
+  playtimeMinutes?: number | null;
 }
 export interface CommunityComment {
   id: string;
   postId: string;
   uid: string;
   nickname: string;
+  avatarUrl?: string | null;
   body: string;
   createdAt: string;
 }
@@ -70,6 +78,7 @@ export interface CommunityReview {
   id: string;
   uid: string;
   nickname: string;
+  avatarUrl?: string | null;
   gameKey: string;
   score: number;
   review: string;

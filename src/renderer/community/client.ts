@@ -1,5 +1,7 @@
 import type { CommunityAdapter } from "../../shared/community.ts";
+
 export function qualifyCommunityUrl(base: string, url: string): string {
+  if (!url) return "";
   if (url.startsWith("/")) return `${base.replace(/\/$/, "")}${url}`;
   try {
     const parsed = new URL(url);
@@ -8,6 +10,7 @@ export function qualifyCommunityUrl(base: string, url: string): string {
     return "";
   }
 }
+
 export function shareUrl(
   base: string,
   kind: "game" | "post" | "profile",
@@ -20,6 +23,7 @@ export function shareUrl(
   if (title) params.set("title", title);
   return `${base.replace(/\/$/, "")}/community/?${params}`;
 }
+
 export function communityError(error: unknown): string {
   const message = String((error as Error)?.message || error);
   console.error("[community]", error);
@@ -46,6 +50,7 @@ export function communityError(error: unknown): string {
     return "Chưa nhận diện được file cấu hình phù hợp. Bạn có thể chọn file thủ công.";
   return "Không thực hiện được yêu cầu. Hãy kiểm tra kết nối rồi thử lại.";
 }
+
 export async function compressCommunityImage(file: File): Promise<File> {
   if (
     !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
@@ -78,6 +83,7 @@ export async function compressCommunityImage(file: File): Promise<File> {
     bitmap.close();
   }
 }
+
 export async function uploadPostImages(
   api: CommunityAdapter,
   files: File[],
@@ -97,7 +103,98 @@ export async function uploadPostImages(
     throw error;
   }
 }
-export function minutesLabel(minutes: number) {
-  const hours = Math.floor(minutes / 60);
-  return hours ? `${hours.toLocaleString("vi-VN")} giờ` : `${minutes} phút`;
+
+export function minutesLabel(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes || 0));
+  const hours = Math.floor(m / 60);
+  if (hours >= 1) return `${hours.toLocaleString("vi-VN")} giờ`;
+  return `${m} phút`;
+}
+
+export function parseCommunityDate(raw?: string | null): Date | null {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const iso = trimmed.includes("T")
+    ? trimmed
+    : `${trimmed.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+export function formatCommunityDate(raw?: string | null): string {
+  const d = parseCommunityDate(raw);
+  if (!d) return "";
+  return d.toLocaleString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatRelativeTime(raw?: string | null): string {
+  const d = parseCommunityDate(raw);
+  if (!d) return "";
+  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diffSec < 60) return "Vừa xong";
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} phút trước`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} ngày trước`;
+  return d.toLocaleDateString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+export interface SpecRow {
+  label: string;
+  value: string;
+}
+
+const SPEC_LABELS: Array<[RegExp, string]> = [
+  [/^(OS|Hệ điều hành)$/i, "Hệ điều hành"],
+  [/^(Processor|CPU|Vi xử lý)$/i, "CPU"],
+  [/^(Memory|RAM|Bộ nhớ)$/i, "RAM"],
+  [/^(Graphics|Video Card|GPU|Đồ họa)$/i, "GPU"],
+  [/^DirectX$/i, "DirectX"],
+  [/^(Storage|Hard Drive|Disk Space|Dung lượng)$/i, "Dung lượng"],
+  [/^(Network|Internet)$/i, "Mạng"],
+  [/^(Sound Card|Audio)$/i, "Âm thanh"],
+  [/^(Additional Notes|Notes)$/i, "Ghi chú"],
+];
+
+export function parseSteamRequirements(raw?: string | null): SpecRow[] {
+  if (!raw || !raw.trim()) return [];
+  const cleaned = raw
+    .replace(/^(Minimum|Recommended)\s*:?\s*/i, "")
+    .replace(
+      /\s+(OS|Processor|Memory|Graphics|Video Card|DirectX|Storage|Hard Drive|Network|Sound Card|Additional Notes)\s*:/gi,
+      "\n$1:",
+    );
+  const lines = cleaned
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^(Minimum|Recommended):?$/i.test(l));
+
+  const rows: SpecRow[] = [];
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-zÀ-ỹ0-9 ]{2,28}):\s*(.+)$/);
+    if (match) {
+      const rawKey = match[1].trim();
+      const mapped =
+        SPEC_LABELS.find(([re]) => re.test(rawKey))?.[1] || rawKey;
+      rows.push({ label: mapped, value: match[2].trim() });
+    } else if (rows.length > 0) {
+      rows[rows.length - 1].value += ` ${line}`;
+    } else {
+      rows.push({ label: "Thông tin", value: line });
+    }
+  }
+  return rows;
 }

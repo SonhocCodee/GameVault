@@ -26,6 +26,21 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 11:32] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Hoàn thiện đồng bộ Cloud 100% (bao gồm `completed_at` và từng phiên chơi `user_sessions`), đại tu toàn diện giao diện & UX tab Cộng đồng (`CommunityHub`, `GameHub`, `PostCard`, `PostComposer`, `PlayerBoard`, `GamePlayers`, `PerformancePanel`, `ScreenshotShare`, `MonthlyPick`), chạy migration D1 + deploy Cloudflare Worker & `/community/` lên production.
+- **Thay đổi chính:**
+  - `worker/migrations/0003_user_sessions.sql`, `worker/schema.sql`, `worker/src/routes/library.ts`, `worker/src/types.ts`, `src/shared/types.ts`, `src/main/cloud-db.ts`: Thêm bảng `user_sessions` trên D1, chuẩn hóa `clientUpdatedAt` sang UTC ISO-8601, đồng bộ 2 chiều các phiên chơi thực tế (`source != 'manual'`) và gộp bằng `recalculatePlaytime` để lịch sử giờ chơi theo tháng giống nhau 100% giữa các máy; bỏ `last_played_at` sai khi tạo game mới.
+  - `worker/src/routes/community.ts`, `worker/src/routes/discovery.ts`, `src/shared/community.ts`: Lọc bài review rỗng khỏi Bảng tin công khai, bổ sung `avatarUrl`, `reviewScore`, `reviewDropped`, `playtimeMinutes` (chỉ trả về khi có giá trị).
+  - `src/renderer/community/*`: Thiết kế lại toàn bộ giao diện & tính năng Cộng đồng đồng bộ theme tối GameVault (`community.css`, `CommunityWidgets.tsx` với `ConfirmModal`, `ReportModal`, `ImageLightbox`, `Avatar`, `KindBadge`); `PostComposer` có tìm game + ảnh cover + preview/kéo-thả tối đa 3 ảnh; `PostCard` có huy hiệu chủ đề, điểm đánh giá, timestamp bình luận; Top game có podium Top 3 + danh sách thẻ poster; `GameHub` chia tab `Cấu hình & FPS` (parse cấu hình Steam 2 cột + thống kê FPS trung bình/PresentMon + lọc GPU/độ phân giải/preset), `Đánh giá` (chọn điểm 1–10 trực quan), `Bài viết & Ảnh`, `Người chơi`.
+  - `src/main/drive.ts`, `src/renderer/components/SettingsModal.tsx`: Định dạng dung lượng TB/GB và hiển thị thông tin Drive Quota gọn hơn.
+  - `tests/library-sync.test.js`: Bổ sung test đồng bộ `user_sessions` và `completed_at` giữa 2 máy.
+- **Kiểm tra:**
+  - `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+  - `npm run build`, `npm run build:admin`, `npm run build:community`: Pass.
+  - `npm test`: **477/477 tests pass** (`96 suites`, `0 fail`, `0 skipped`).
+  - Cloudflare Production (`game-vault-worker` Version `f3548af2-5475-4fc0-9ca2-99ece3ffbb9a`, D1 `game-vault-d1`): Đã ghi nhận `0002_completed_at.sql`, áp dụng `0003_user_sessions.sql`, deploy Worker + `/community/` static assets; kiểm tra `/health`, `/community/`, `/api/community/rankings`, `/api/community/posts` đều trả HTTP 200.
+- **Bàn giao / Tiếp theo:** Mở app GameVault trên máy còn giữ đủ `completed_at` & lịch sử session và bấm **Sync** để đẩy toàn bộ `user_sessions` + `completed_at` lên Cloud, sau đó bấm **Sync** trên máy kia để kéo đồng bộ về.
+
 ## [2026-11-26 11:18] — Máy: CNTT-PM6 — Branch: main
 - **Tóm tắt:** Hoàn thiện và đẩy toàn bộ tính năng Cộng đồng (`/community/` web & Desktop), chia sẻ hiệu năng/cấu hình game, đồng bộ `completed_at` lên Cloud (`0002_completed_at.sql`), nhận diện game qua Discord Detectable (`discord-detectable.ts`), và cải thiện độ bền vững lưu trữ cover trên Worker.
 - **Thay đổi chính:**

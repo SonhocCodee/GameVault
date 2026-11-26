@@ -29,7 +29,14 @@ import {
   ExternalLink,
   Image as ImageIcon,
 } from 'lucide-react';
-import type { AppSettings, F6ProcessStatus, FpsStatus, HardwareInfo, GoogleDriveDesktopStatus } from '../../shared/types.js';
+import type {
+  AppSettings,
+  F6ProcessStatus,
+  FpsStatus,
+  HardwareInfo,
+  GoogleDriveDesktopStatus,
+  DriveStorageQuota,
+} from '../../shared/types.js';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -66,18 +73,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfo | null>(null);
   const [settingUpFps, setSettingUpFps] = useState<boolean>(false);
 
-  // Dual Image Storage State
-  const [imageStorageProvider, setImageStorageProvider] = useState<'cloudflare_r2' | 'google_drive' | 'google_photos'>('google_drive');
-  const [customS3Enabled, setCustomS3Enabled] = useState<boolean>(false);
-  const [customS3Endpoint, setCustomS3Endpoint] = useState<string>('');
-  const [customS3Bucket, setCustomS3Bucket] = useState<string>('');
-  const [customS3AccessKeyId, setCustomS3AccessKeyId] = useState<string>('');
-  const [customS3SecretAccessKey, setCustomS3SecretAccessKey] = useState<string>('');
-  const [customS3Region, setCustomS3Region] = useState<string>('auto');
-  const [customS3PublicUrlBase, setCustomS3PublicUrlBase] = useState<string>('');
-  const [googlePhotosAlbumId, setGooglePhotosAlbumId] = useState<string>('');
+  // Google Drive Storage & Quota State
   const [testingStorage, setTestingStorage] = useState<boolean>(false);
   const [storageTestResult, setStorageTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [driveLoggedIn, setDriveLoggedIn] = useState<boolean | null>(null);
+  const [driveAccountEmail, setDriveAccountEmail] = useState<string | null>(null);
+  const [driveQuota, setDriveQuota] = useState<DriveStorageQuota | null>(null);
+  const [loadingDriveQuota, setLoadingDriveQuota] = useState<boolean>(false);
 
   // Google Drive for Desktop State
   const [gdriveStatus, setGdriveStatus] = useState<GoogleDriveDesktopStatus | null>(null);
@@ -139,18 +141,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setAutoEnrichCovers(data.autoEnrichCovers);
         setGoogleApiKey(data.googleApiKey || '');
         setGoogleCseId(data.googleCseId || '');
-
-        if (data.imageStorageProvider) setImageStorageProvider(data.imageStorageProvider);
-        if (data.googlePhotosAlbumId) setGooglePhotosAlbumId(data.googlePhotosAlbumId);
-        if (data.customS3Config) {
-          setCustomS3Enabled(Boolean(data.customS3Config.enabled));
-          setCustomS3Endpoint(data.customS3Config.endpoint || '');
-          setCustomS3Bucket(data.customS3Config.bucket || '');
-          setCustomS3AccessKeyId(data.customS3Config.accessKeyId || '');
-          setCustomS3SecretAccessKey(data.customS3Config.secretAccessKey || '');
-          setCustomS3Region(data.customS3Config.region || 'auto');
-          setCustomS3PublicUrlBase(data.customS3Config.publicUrlBase || '');
-        }
       }
 
       if (window.electronAPI?.getF6ProcessStatus) {
@@ -219,6 +209,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } catch {}
   };
 
+  // Google Drive Quota Detection
+  const loadDriveQuota = useCallback(async () => {
+    setLoadingDriveQuota(true);
+    try {
+      if (window.electronAPI?.getAuthStatus) {
+        const auth = await window.electronAPI.getAuthStatus();
+        setDriveLoggedIn(Boolean(auth?.loggedIn));
+        setDriveAccountEmail(auth?.user?.email || null);
+        if (auth?.loggedIn && window.electronAPI?.getDriveStorageQuota) {
+          const q = await window.electronAPI.getDriveStorageQuota();
+          setDriveQuota(q);
+        } else {
+          setDriveQuota(null);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch Google Drive quota in settings:', e);
+      setDriveQuota(null);
+    } finally {
+      setLoadingDriveQuota(false);
+    }
+  }, []);
+
   // Google Drive for Desktop Detection & Apply
   const loadGdriveStatus = useCallback(async () => {
     if (window.electronAPI?.detectGoogleDriveDesktop) {
@@ -238,11 +251,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isOpen) {
       loadData();
       loadGdriveStatus();
+      loadDriveQuota();
     } else {
       setIsListeningKey(false);
       setStatusMsg(null);
     }
-  }, [isOpen, loadData, loadGdriveStatus]);
+  }, [isOpen, loadData, loadGdriveStatus, loadDriveQuota]);
 
   // Global keydown listener when recording hotkey
   useEffect(() => {
@@ -309,17 +323,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           autoEnrichCovers,
           googleApiKey: googleApiKey.trim(),
           googleCseId: googleCseId.trim(),
-          imageStorageProvider,
-          googlePhotosAlbumId: googlePhotosAlbumId.trim(),
-          customS3Config: {
-            enabled: customS3Enabled,
-            endpoint: customS3Endpoint.trim(),
-            bucket: customS3Bucket.trim(),
-            accessKeyId: customS3AccessKeyId.trim(),
-            secretAccessKey: customS3SecretAccessKey.trim(),
-            region: customS3Region.trim() || 'auto',
-            publicUrlBase: customS3PublicUrlBase.trim(),
-          },
+          imageStorageProvider: 'google_drive',
         });
         setSettings(updated);
         setStatusMsg({ type: 'success', text: '✅ Đã lưu cài đặt thành công!' });
@@ -339,20 +343,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setStorageTestResult(null);
     try {
       const res = await window.electronAPI.testStorageConnection({
-        imageStorageProvider,
-        googlePhotosAlbumId: googlePhotosAlbumId.trim(),
-        customS3Config: {
-          enabled: customS3Enabled,
-          endpoint: customS3Endpoint.trim(),
-          bucket: customS3Bucket.trim(),
-          accessKeyId: customS3AccessKeyId.trim(),
-          secretAccessKey: customS3SecretAccessKey.trim(),
-          region: customS3Region.trim() || 'auto',
-          publicUrlBase: customS3PublicUrlBase.trim(),
-        },
+        imageStorageProvider: 'google_drive',
       });
       if (res.ok) {
-        setStorageTestResult({ ok: true, text: 'Kết nối thành công!' });
+        setStorageTestResult({ ok: true, text: 'Kết nối Google Drive thành công!' });
+        loadDriveQuota();
       } else {
         setStorageTestResult({ ok: false, text: `Lỗi kết nối: ${res.error || 'Thất bại'}` });
       }
@@ -1597,19 +1592,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 )}
 
-                {/* TAB 6: DUAL IMAGE STORAGE & CLOUD */}
+                {/* TAB 6: GOOGLE DRIVE STORAGE & CLOUD */}
                 {activeTab === 'storage' && (
                   <div className="space-y-6">
-                    {/* Provider Selection Card */}
+                    {/* Google Drive Storage Overview Card */}
                     <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
                       <div>
                         <span className="text-xs font-bold text-white flex items-center gap-1.5">
                           <Cloud className="h-4 w-4 text-[#ff2a44]" />
-                          <span>Dịch vụ lưu trữ ảnh bìa &amp; Screenshots</span>
+                          <span>Lưu trữ Screenshots &amp; Save Game (Google Drive)</span>
                         </span>
                         <p className="text-[11px] text-[#8e95a5] mt-1">
-                          Chọn nơi lưu trữ hình ảnh custom covers và ảnh chụp màn hình khi đồng bộ hoặc chia sẻ lên đám mây.
-                          (💡 Ảnh chụp screenshots cũng có thể sao lưu 1-click lên Google Drive thông qua <strong>Trung tâm Đồng bộ</strong>).
+                          Screenshots và bản sao lưu save game cá nhân được lưu trực tiếp lên Google Drive theo tài khoản của bạn.
+                          (Còn <strong>Cloudflare D1 Database</strong> chỉ dùng để đồng bộ danh sách game, giờ chơi, ảnh bìa chung và Cộng đồng).
                         </p>
                       </div>
 
@@ -1642,298 +1637,169 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
-                        {/* Option 1: Cloudflare R2 */}
-                        <div
-                          onClick={() => {
-                            setImageStorageProvider('cloudflare_r2');
-                            setStorageTestResult(null);
-                          }}
-                          className={`cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between ${
-                            imageStorageProvider === 'cloudflare_r2'
-                              ? 'border-[#ff2a44] bg-[#ff2a44]/10 shadow-lg shadow-[#ff2a44]/15'
-                              : 'border-[#2a2e3d] bg-[#0e1015] hover:border-[#3d445a]'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500/20 text-orange-400">
-                                <Cloud className="h-4 w-4" />
+                      {/* Active Google Drive Account & Dynamic Quota Card */}
+                      <div className="rounded-xl border border-[#ff2a44]/60 bg-[#ff2a44]/5 p-4 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
+                              <HardDrive className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-white flex items-center gap-2">
+                                <span>Google Drive cá nhân</span>
+                                {driveAccountEmail && (
+                                  <span className="text-[10px] font-normal text-[#8e95a5]">({driveAccountEmail})</span>
+                                )}
                               </div>
-                              <div>
-                                <div className="text-xs font-bold text-white">Cloudflare R2</div>
-                                <div className="text-[10px] text-emerald-400 font-semibold">Tốc độ cao · 0đ Egress</div>
+                              <div className="text-[11px] text-emerald-400 font-semibold">
+                                {loadingDriveQuota ? (
+                                  <span className="inline-flex items-center gap-1 text-[#8e95a5]">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Đang kiểm tra dung lượng theo tài khoản...
+                                  </span>
+                                ) : driveQuota ? (
+                                  `${driveQuota.formattedLimit} · Chuẩn gốc`
+                                ) : driveLoggedIn === false ? (
+                                  'Chưa đăng nhập Google · Chuẩn gốc'
+                                ) : (
+                                  'Theo dung lượng tài khoản Google · Chuẩn gốc'
+                                )}
                               </div>
                             </div>
-                            <input
-                              type="radio"
-                              name="storageProvider"
-                              checked={imageStorageProvider === 'cloudflare_r2'}
-                              onChange={() => {}}
-                              className="mt-1 text-[#ff2a44] focus:ring-0"
-                            />
                           </div>
-                          <p className="mt-3 text-[11px] text-[#8e95a5] leading-relaxed">
-                            Mặc định dùng bucket R2 10GB miễn phí của app qua Cloudflare Worker, hoặc hỗ trợ tài khoản Cloudflare R2 riêng.
-                          </p>
+
+                          <button
+                            type="button"
+                            onClick={loadDriveQuota}
+                            disabled={loadingDriveQuota}
+                            className="flex items-center gap-1 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1 text-[11px] font-semibold text-[#8e95a5] hover:text-white hover:border-emerald-400/50 transition-colors disabled:opacity-50"
+                            title="Làm mới dung lượng Google Drive"
+                          >
+                            <RefreshCw className={`h-3 w-3 ${loadingDriveQuota ? 'animate-spin' : ''}`} />
+                            <span>Làm mới</span>
+                          </button>
                         </div>
 
-                        {/* Option 2: Google Drive cá nhân */}
-                        <div
-                          onClick={() => {
-                            setImageStorageProvider('google_drive');
-                            setStorageTestResult(null);
-                          }}
-                          className={`cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between ${
-                            imageStorageProvider === 'google_drive' || imageStorageProvider === 'google_photos'
-                              ? 'border-[#ff2a44] bg-[#ff2a44]/10 shadow-lg shadow-[#ff2a44]/15'
-                              : 'border-[#2a2e3d] bg-[#0e1015] hover:border-[#3d445a]'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400">
-                                <HardDrive className="h-4 w-4" />
-                              </div>
-                              <div>
-                                <div className="text-xs font-bold text-white">Google Drive cá nhân</div>
-                                <div className="text-[10px] text-emerald-400 font-semibold">15GB Riêng tư · Chuẩn gốc</div>
-                              </div>
+                        {driveQuota && (
+                          <div className="space-y-1.5 pt-1">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-[#8e95a5]">Dung lượng đã dùng trên Drive</span>
+                              <span className="font-mono font-bold text-emerald-400">
+                                {driveQuota.formattedUsage} / {driveQuota.formattedLimit} ({driveQuota.percentUsed}%)
+                              </span>
                             </div>
-                            <input
-                              type="radio"
-                              name="storageProvider"
-                              checked={imageStorageProvider === 'google_drive' || imageStorageProvider === 'google_photos'}
-                              onChange={() => {}}
-                              className="mt-1 text-[#ff2a44] focus:ring-0"
-                            />
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-[#1e2230]">
+                              <div
+                                className={`h-full transition-all duration-300 ${
+                                  driveQuota.percentUsed > 90
+                                    ? 'bg-rose-500'
+                                    : driveQuota.percentUsed > 75
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.max(1, driveQuota.percentUsed))}%` }}
+                              />
+                            </div>
                           </div>
-                          <p className="mt-3 text-[11px] text-[#8e95a5] leading-relaxed">
-                            Lưu trữ ảnh bìa và screenshots vào Google Drive riêng (appDataFolder). Giữ 100% chất lượng gốc và cấu trúc thư mục game, dễ dàng kéo về máy mới.
-                          </p>
-                        </div>
+                        )}
+
+                        <p className="text-[11px] text-[#8e95a5] leading-relaxed">
+                          Lưu trữ ảnh bìa, screenshots và save game vào thư mục <code className="text-white">Drive của tôi / GameVault</code>. Giữ 100% chất lượng gốc và cấu trúc thư mục game, dễ dàng kéo về máy mới.
+                        </p>
                       </div>
                     </div>
 
-                    {/* Conditional Settings based on Provider */}
-                    {imageStorageProvider === 'cloudflare_r2' && (
-                      <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <HardDrive className="h-4 w-4 text-[#ff2a44]" />
-                              <span>Cấu hình tài khoản Cloudflare R2 / S3 riêng</span>
-                            </span>
-                            <p className="text-[11px] text-[#8e95a5] mt-0.5">
-                              {customS3Enabled
-                                ? 'Đang dùng tài khoản S3/R2 cá nhân của bạn.'
-                                : 'Mặc định: Sử dụng bucket R2 10GB chung của app do developer cung cấp (không cần cài đặt gì thêm).'}
-                            </p>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setCustomS3Enabled(!customS3Enabled)}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                              customS3Enabled ? 'bg-[#ff2a44]' : 'bg-[#2a2e3d]'
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                customS3Enabled ? 'translate-x-6' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
+                    {/* Google Drive Actions */}
+                    <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <HardDrive className="h-4 w-4 text-emerald-400" />
+                            <span>Cấu hình &amp; Thao tác Google Drive</span>
+                          </span>
+                          <p className="text-[11px] text-[#8e95a5] mt-0.5">
+                            Ảnh và save game được lưu trữ vào thư mục <code className="text-white">Drive của tôi / GameVault</code> trên Google Drive của bạn.
+                          </p>
                         </div>
 
-                        {customS3Enabled && (
-                          <div className="space-y-3 pt-2 border-t border-[#2a2e3d]">
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-[11px] font-semibold text-[#8e95a5]">S3 / R2 Endpoint URL *</label>
-                                <input
-                                  type="text"
-                                  placeholder="https://<account_id>.r2.cloudflarestorage.com"
-                                  value={customS3Endpoint}
-                                  onChange={(e) => setCustomS3Endpoint(e.target.value)}
-                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="text-[11px] font-semibold text-[#8e95a5]">Bucket Name *</label>
-                                <input
-                                  type="text"
-                                  placeholder="game-vault-covers"
-                                  value={customS3Bucket}
-                                  onChange={(e) => setCustomS3Bucket(e.target.value)}
-                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-[11px] font-semibold text-[#8e95a5]">Access Key ID *</label>
-                                <input
-                                  type="text"
-                                  placeholder="AKIA..."
-                                  value={customS3AccessKeyId}
-                                  onChange={(e) => setCustomS3AccessKeyId(e.target.value)}
-                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="text-[11px] font-semibold text-[#8e95a5]">Secret Access Key *</label>
-                                <input
-                                  type="password"
-                                  placeholder="••••••••"
-                                  value={customS3SecretAccessKey}
-                                  onChange={(e) => setCustomS3SecretAccessKey(e.target.value)}
-                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="text-[11px] font-semibold text-[#8e95a5]">Region (Mặc định: auto)</label>
-                                <input
-                                  type="text"
-                                  placeholder="auto"
-                                  value={customS3Region}
-                                  onChange={(e) => setCustomS3Region(e.target.value)}
-                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="text-[11px] font-semibold text-[#8e95a5]">Public URL Base (Tùy chọn)</label>
-                                <input
-                                  type="text"
-                                  placeholder="https://cdn.yourdomain.com"
-                                  value={customS3PublicUrlBase}
-                                  onChange={(e) => setCustomS3PublicUrlBase(e.target.value)}
-                                  className="mt-1 w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-[#f1f3f7] focus:border-[#ff2a44] focus:outline-none"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between pt-2">
-                          <button
-                            type="button"
-                            onClick={handleTestStorage}
-                            disabled={testingStorage}
-                            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3.5 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-[#ff2a44] hover:text-white transition-all disabled:opacity-50"
-                          >
-                            {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />}
-                            <span>Kiểm tra kết nối {customS3Enabled ? 'S3' : 'R2 chung'}</span>
-                          </button>
-
-                          {storageTestResult && (
-                            <span className={`text-xs font-medium ${storageTestResult.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {storageTestResult.text}
-                            </span>
-                          )}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={handleTestStorage}
+                          disabled={testingStorage}
+                          className="shrink-0 flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-emerald-400 hover:text-white transition-all disabled:opacity-50"
+                        >
+                          {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />}
+                          <span>Kiểm tra quyền Drive</span>
+                        </button>
                       </div>
-                    )}
 
-                    {(imageStorageProvider === 'google_drive' || imageStorageProvider === 'google_photos') && (
-                      <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <HardDrive className="h-4 w-4 text-emerald-400" />
-                              <span>Cấu hình &amp; Thao tác Google Drive</span>
-                            </span>
-                            <p className="text-[11px] text-[#8e95a5] mt-0.5">
-                              Ảnh và save game được lưu trữ vào thư mục riêng tư <code className="text-white">appDataFolder/GameVault</code> trên Google Drive của bạn.
-                            </p>
-                          </div>
+                      {storageTestResult && (
+                        <div className={`text-xs font-medium p-2.5 rounded-lg border ${storageTestResult.ok ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-rose-400 bg-rose-500/10 border-rose-500/30'}`}>
+                          {storageTestResult.text}
+                        </div>
+                      )}
+
+                      {actionResultMsg && (
+                        <div className={`text-xs font-semibold p-2.5 rounded-lg border animate-in fade-in ${actionResultMsg.ok ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40' : 'text-rose-300 bg-rose-500/15 border-rose-500/40'}`}>
+                          {actionResultMsg.text}
+                        </div>
+                      )}
+
+                      {/* Quick 1-click sync actions right inside Settings */}
+                      <div className="pt-2 border-t border-[#2a2e3d]/80 space-y-2">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-[#8e95a5]">
+                          Thao tác đồng bộ tức thì:
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={handleQuickSyncLibrary}
+                            disabled={syncingLibrary}
+                            className="flex items-center justify-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 text-xs font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 disabled:opacity-50 transition-all"
+                          >
+                            {syncingLibrary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            <span>Đồng bộ Thư viện</span>
+                          </button>
 
                           <button
                             type="button"
-                            onClick={handleTestStorage}
-                            disabled={testingStorage}
-                            className="shrink-0 flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs font-semibold text-[#f1f3f7] hover:border-emerald-400 hover:text-white transition-all disabled:opacity-50"
+                            onClick={handleQuickUploadDrive}
+                            disabled={syncingDrive}
+                            className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 disabled:opacity-50 transition-all"
                           >
-                            {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />}
-                            <span>Kiểm tra quyền Drive</span>
+                            {syncingDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
+                            <span>Sao lưu ảnh lên Drive</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleQuickRestoreDrive}
+                            disabled={restoringDrive}
+                            className="flex items-center justify-center gap-1.5 rounded-lg border border-teal-500/40 bg-teal-500/10 p-2.5 text-xs font-bold text-teal-400 hover:bg-teal-500/20 active:scale-95 disabled:opacity-50 transition-all"
+                          >
+                            {restoringDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
+                            <span>Kéo ảnh về máy này</span>
                           </button>
                         </div>
 
-                        {storageTestResult && (
-                          <div className={`text-xs font-medium p-2.5 rounded-lg border ${storageTestResult.ok ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-rose-400 bg-rose-500/10 border-rose-500/30'}`}>
-                            {storageTestResult.text}
+                        {onOpenSyncCenter && (
+                          <div className="pt-2 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                onOpenSyncCenter();
+                              }}
+                              className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 transition-colors"
+                            >
+                              <span>Mở Trung tâm Đồng bộ toàn diện &amp; gom ảnh F6</span>
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         )}
-
-                        {actionResultMsg && (
-                          <div className={`text-xs font-semibold p-2.5 rounded-lg border animate-in fade-in ${actionResultMsg.ok ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40' : 'text-rose-300 bg-rose-500/15 border-rose-500/40'}`}>
-                            {actionResultMsg.text}
-                          </div>
-                        )}
-
-                        {/* Quick 1-click sync actions right inside Settings */}
-                        <div className="pt-2 border-t border-[#2a2e3d]/80 space-y-2">
-                          <div className="text-[11px] font-bold uppercase tracking-wider text-[#8e95a5]">
-                            Thao tác đồng bộ tức thì:
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <button
-                              type="button"
-                              onClick={handleQuickSyncLibrary}
-                              disabled={syncingLibrary}
-                              className="flex items-center justify-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 text-xs font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 disabled:opacity-50 transition-all"
-                            >
-                              {syncingLibrary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                              <span>Đồng bộ Thư viện</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={handleQuickUploadDrive}
-                              disabled={syncingDrive}
-                              className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 disabled:opacity-50 transition-all"
-                            >
-                              {syncingDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />}
-                              <span>Sao lưu ảnh lên Drive</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={handleQuickRestoreDrive}
-                              disabled={restoringDrive}
-                              className="flex items-center justify-center gap-1.5 rounded-lg border border-teal-500/40 bg-teal-500/10 p-2.5 text-xs font-bold text-teal-400 hover:bg-teal-500/20 active:scale-95 disabled:opacity-50 transition-all"
-                            >
-                              {restoringDrive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
-                              <span>Kéo ảnh về máy này</span>
-                            </button>
-                          </div>
-
-                          {onOpenSyncCenter && (
-                            <div className="pt-2 flex justify-end">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onClose();
-                                  onOpenSyncCenter();
-                                }}
-                                className="flex items-center gap-1.5 text-xs font-bold text-sky-400 hover:text-sky-300 transition-colors"
-                              >
-                                <span>Mở Trung tâm Đồng bộ toàn diện &amp; gom ảnh F6</span>
-                                <ExternalLink className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </>

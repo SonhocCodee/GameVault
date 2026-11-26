@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { initDb, closeDb, createGame, getGames, getGameByTitle, updateGame, deleteGame } from '../src/main/db.ts';
+import { initDb, closeDb, createGame, getGames, getGameByTitle, updateGame, deleteGame, createSession, getSessions } from '../src/main/db.ts';
 import {
   configureCloudDb,
   getCloudLibrary,
@@ -303,6 +303,49 @@ describe('Multi-Device Game Library Sync Suite (Cloudflare D1 + Worker)', () => 
       // Check cloud library directly
       const cloudLib = await getCloudLibrary();
       assert.equal(cloudLib.stats.completed, 2);
+    });
+
+    test('syncs non-manual play sessions and completed_at across two machines without manual audit noise', async () => {
+      const ds = createGame({
+        title: 'Dead Space',
+        steam_id: 1693980,
+        status: 'completed',
+        completed_at: '2026-07-16T22:11:28',
+        playtime_minutes: 0,
+      });
+      createSession({
+        game_id: ds.id,
+        start_time: '2026-07-16T20:00:00.000Z',
+        end_time: '2026-07-16T22:00:00.000Z',
+        duration_minutes: 120,
+        is_running: 0,
+        source: 'amd_import',
+      });
+      createSession({
+        game_id: ds.id,
+        start_time: '2026-11-24T18:55:49',
+        end_time: '2026-11-24T18:55:49',
+        duration_minutes: -1500,
+        is_running: 0,
+        source: 'manual',
+      });
+
+      await syncLibraryWithCloud();
+
+      // Switch to Machine B (empty DB)
+      closeDb();
+      initDb(':memory:');
+
+      await syncLibraryWithCloud();
+
+      const pulledDs = getGameByTitle('Dead Space');
+      assert.ok(pulledDs);
+      assert.equal(pulledDs.completed_at, '2026-07-16T22:11:28');
+      assert.equal(pulledDs.playtime_minutes, 120);
+      const pulledSessions = getSessions(pulledDs.id);
+      assert.equal(pulledSessions.length, 1);
+      assert.equal(pulledSessions[0].source, 'amd_import');
+      assert.equal(pulledSessions[0].start_time, '2026-07-16T20:00:00.000Z');
     });
   });
 });

@@ -84,7 +84,12 @@ async function deletePost(env: Env, id: string) {
 async function listPosts(request: Request, env: Env, url: URL, id?: string) {
   const uid = await viewer(request, env);
   const { limit, offset } = paging(url);
-  const where = ["p.hidden=0", "COALESCE(cp.suspended,0)=0", visibleTo("p")];
+  const where = [
+    "p.hidden=0",
+    "COALESCE(cp.suspended,0)=0",
+    "NOT (p.kind='review' AND TRIM(p.body)='')",
+    visibleTo("p"),
+  ];
   const binds: any[] = [uid, uid, uid, uid];
   if (id) {
     where.push("p.id=?");
@@ -111,12 +116,17 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
   const rows =
     (
       await env.DB.prepare(
-        `SELECT p.*,cp.nickname,
+        `SELECT p.*,cp.nickname,u.photo_url AS avatar_url,
+    rt.score AS review_score,rt.dropped AS review_dropped,rt.playtime_minutes AS review_playtime,
     (SELECT COUNT(*) FROM community_likes l WHERE l.post_id=p.id) AS likes,
     (SELECT COUNT(*) FROM community_comments c WHERE c.post_id=p.id AND c.hidden=0 AND ${visibleTo("c")}) AS comments,
     EXISTS(SELECT 1 FROM community_likes l WHERE l.post_id=p.id AND l.uid=?) AS liked,
     EXISTS(SELECT 1 FROM community_saved s WHERE s.post_id=p.id AND s.uid=?) AS saved
-    FROM community_posts p LEFT JOIN community_profiles cp ON cp.uid=p.uid WHERE ${where.join(" AND ")}
+    FROM community_posts p
+    LEFT JOIN community_profiles cp ON cp.uid=p.uid
+    LEFT JOIN users u ON u.uid=p.uid
+    LEFT JOIN ratings rt ON rt.uid=p.uid AND rt.game_key=p.game_key AND p.kind='review'
+    WHERE ${where.join(" AND ")}
     ORDER BY p.created_at DESC,p.id DESC LIMIT ? OFFSET ?`,
       )
         .bind(uid, uid, ...binds, limit + 1, offset)
@@ -132,27 +142,34 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
           .all<any>()
       ).results || []
     : [];
-  const items = rows.map((r) => ({
-    id: r.id,
-    uid: r.uid,
-    nickname: safeName(r.nickname),
-    gameKey: r.game_key,
-    title: r.game_title,
-    steamId: r.steam_id,
-    coverUrl: publicUrl(r.cover_url),
-    kind: r.kind,
-    body: r.body,
-    spoiler: !!r.spoiler,
-    edited: !!r.edited,
-    createdAt: r.created_at,
-    likes: Number(r.likes),
-    comments: Number(r.comments),
-    liked: !!r.liked,
-    saved: !!r.saved,
-    images: images
-      .filter((i) => i.post_id === r.id)
-      .map((i) => `/api/community/images/${i.key}`),
-  }));
+  const items = rows.map((r) => {
+    const avatar = publicUrl(r.avatar_url);
+    return {
+      id: r.id,
+      uid: r.uid,
+      nickname: safeName(r.nickname),
+      ...(avatar ? { avatarUrl: avatar } : {}),
+      gameKey: r.game_key,
+      title: r.game_title,
+      steamId: r.steam_id,
+      coverUrl: publicUrl(r.cover_url),
+      kind: r.kind,
+      body: r.body,
+      spoiler: !!r.spoiler,
+      edited: !!r.edited,
+      createdAt: r.created_at,
+      likes: Number(r.likes),
+      comments: Number(r.comments),
+      liked: !!r.liked,
+      saved: !!r.saved,
+      ...(r.review_score != null ? { reviewScore: Number(r.review_score) } : {}),
+      ...(r.review_dropped != null ? { reviewDropped: !!r.review_dropped } : {}),
+      ...(r.review_playtime != null ? { playtimeMinutes: Number(r.review_playtime) } : {}),
+      images: images
+        .filter((i) => i.post_id === r.id)
+        .map((i) => `/api/community/images/${i.key}`),
+    };
+  });
   if (id) {
     if (!items.length) throw new CommunityError("Post not found", 404);
     return jsonResponse(items[0]);
@@ -177,7 +194,7 @@ export function registerCommunityRoutes(router: Router) {
     const user = await requireUser(request, env, true);
     await ensureProfile(env, user);
     const p = await env.DB.prepare(
-      "SELECT * FROM community_profiles WHERE uid=?",
+      "SELECT cp.*,u.photo_url AS avatar_url FROM community_profiles cp LEFT JOIN users u ON u.uid=cp.uid WHERE cp.uid=?",
     )
       .bind(user.uid)
       .first<any>();
@@ -185,6 +202,7 @@ export function registerCommunityRoutes(router: Router) {
       uid: user.uid,
       nickname: safeName(p.nickname),
       bio: p.bio,
+      avatarUrl: publicUrl(p.avatar_url || user.photoUrl),
       shareLibrary: !!p.share_library,
       suspended: !!p.suspended,
       isAdmin: isAdminUser(user, env),
@@ -267,7 +285,7 @@ export function registerCommunityRoutes(router: Router) {
     const uid = text(ctx.params?.uid, 160, true);
     const who = await viewer(request, env);
     const p = await env.DB.prepare(
-      `SELECT p.* FROM community_profiles p WHERE p.uid=? AND p.suspended=0 AND ${visibleTo("p")}`,
+      `SELECT p.*,u.photo_url AS avatar_url FROM community_profiles p LEFT JOIN users u ON u.uid=p.uid WHERE p.uid=? AND p.suspended=0 AND ${visibleTo("p")}`,
     )
       .bind(uid, who, who)
       .first<any>();
@@ -285,6 +303,7 @@ export function registerCommunityRoutes(router: Router) {
       uid,
       nickname: safeName(p.nickname),
       bio: p.bio,
+      avatarUrl: publicUrl(p.avatar_url),
       shareLibrary: !!p.share_library,
       games: games.map((g) => ({
         gameKey: g.game_key,
@@ -381,17 +400,23 @@ export function registerCommunityRoutes(router: Router) {
     const order = Object.hasOwn(orders, sort) ? orders[sort] : undefined;
     if (!order) throw new CommunityError("Invalid player sort");
     const rows = (await env.DB.prepare(`
-      SELECT p.uid,p.nickname,COUNT(*) AS totalGames,
+      SELECT p.uid,p.nickname,u.photo_url AS avatar_url,COUNT(*) AS totalGames,
         SUM(CASE WHEN l.status='completed' THEN 1 ELSE 0 END) AS completedGames,
         SUM(l.playtime_minutes) AS totalMinutes
       FROM community_profiles p JOIN community_library l ON l.uid=p.uid
+      LEFT JOIN users u ON u.uid=p.uid
       WHERE p.share_library=1 AND p.suspended=0 AND ${visibleTo("p")}
       GROUP BY p.uid ORDER BY ${order},p.uid ASC LIMIT ? OFFSET ?
     `).bind(uid, uid, limit + 1, offset).all<any>()).results || [];
-    return jsonResponse(page(rows.map(r => ({
-      uid: r.uid, nickname: safeName(r.nickname), totalGames: Number(r.totalGames),
-      completedGames: Number(r.completedGames), totalMinutes: Number(r.totalMinutes),
-    })), limit, offset));
+    return jsonResponse(page(rows.map(r => {
+      const avatar = publicUrl(r.avatar_url);
+      return {
+        uid: r.uid, nickname: safeName(r.nickname),
+        ...(avatar ? { avatarUrl: avatar } : {}),
+        totalGames: Number(r.totalGames),
+        completedGames: Number(r.completedGames), totalMinutes: Number(r.totalMinutes),
+      };
+    }), limit, offset));
   });
   add("GET", "/posts", async (r, e, c) => listPosts(r, e, c.url));
   add("GET", "/posts/:id", async (r, e, c) =>
@@ -545,7 +570,7 @@ export function registerCommunityRoutes(router: Router) {
     const rows =
       (
         await env.DB.prepare(
-          `SELECT c.*,p.nickname FROM community_comments c LEFT JOIN community_profiles p ON p.uid=c.uid
+          `SELECT c.*,p.nickname,u.photo_url AS avatar_url FROM community_comments c LEFT JOIN community_profiles p ON p.uid=c.uid LEFT JOIN users u ON u.uid=c.uid
       WHERE c.post_id=? AND c.hidden=0 AND COALESCE(p.suspended,0)=0 AND ${visibleTo("c")}
       ORDER BY c.created_at,c.id LIMIT ? OFFSET ?`,
         )
@@ -559,6 +584,7 @@ export function registerCommunityRoutes(router: Router) {
           postId: c.post_id,
           uid: c.uid,
           nickname: safeName(c.nickname),
+          avatarUrl: publicUrl(c.avatar_url),
           body: c.body,
           createdAt: c.created_at,
         })),
@@ -758,8 +784,8 @@ export function registerCommunityRoutes(router: Router) {
     const rows =
       (
         await env.DB.prepare(
-          `SELECT r.*,cp.nickname,COALESCE(m.spoiler,0) AS spoiler FROM ratings r
-      LEFT JOIN community_profiles cp ON cp.uid=r.uid LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
+          `SELECT r.*,cp.nickname,u.photo_url AS avatar_url,COALESCE(m.spoiler,0) AS spoiler FROM ratings r
+      LEFT JOIN community_profiles cp ON cp.uid=r.uid LEFT JOIN users u ON u.uid=r.uid LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
       WHERE r.game_key=? AND COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")}
       ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?`,
         )
@@ -772,6 +798,7 @@ export function registerCommunityRoutes(router: Router) {
           id: r.id,
           uid: r.uid,
           nickname: safeName(r.nickname),
+          avatarUrl: publicUrl(r.avatar_url),
           gameKey: r.game_key,
           score: Number(r.score),
           review: r.review,

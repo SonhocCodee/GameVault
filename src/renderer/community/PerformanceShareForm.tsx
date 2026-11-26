@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { CheckCircle2, Cpu, Gauge } from "lucide-react";
 import type {
   CommunityAdapter,
   GraphicsContext,
@@ -6,6 +7,15 @@ import type {
   PublicGame,
 } from "../../shared/community.ts";
 import { communityError } from "./client.ts";
+
+const PRESETS = ["Low", "Medium", "High", "Ultra", "Custom"];
+const RESOLUTIONS: Array<[string, number, number]> = [
+  ["720p", 1280, 720],
+  ["1080p", 1920, 1080],
+  ["1440p", 2560, 1440],
+  ["4K", 3840, 2160],
+];
+
 export function GraphicsFields({
   value,
   onChange,
@@ -21,82 +31,108 @@ export function GraphicsFields({
       [key]: v,
       source: "manual",
     });
+
   return (
-    <div className="gv-spec-form">
-      <label>
-        Chiều ngang game (px)
-        <input
-          type="number"
-          min={320}
-          max={16384}
-          disabled={disabled}
-          value={value.width ?? ""}
-          placeholder="1920"
-          onChange={(e) =>
-            set("width", e.target.value ? Number(e.target.value) : null)
-          }
-        />
-      </label>
-      <label>
-        Chiều cao game (px)
-        <input
-          type="number"
-          min={200}
-          max={16384}
-          disabled={disabled}
-          value={value.height ?? ""}
-          placeholder="1080"
-          onChange={(e) =>
-            set("height", e.target.value ? Number(e.target.value) : null)
-          }
-        />
-      </label>
-      <label>
-        Mức đồ họa
-        <select
-          disabled={disabled}
-          value={value.preset}
-          onChange={(e) => set("preset", e.target.value)}
-        >
-          <option value="">Chưa xác nhận</option>
-          {["Low", "Medium", "High", "Ultra", "Custom"].map((p) => (
-            <option key={p}>{p}</option>
+    <div className="gv-stack">
+      {!disabled && (
+        <div className="gv-actions" style={{ gap: 6 }}>
+          <span className="gv-muted" style={{ fontSize: 12 }}>
+            Chọn nhanh:
+          </span>
+          {RESOLUTIONS.map(([label, w, h]) => (
+            <button
+              key={label}
+              type="button"
+              className={`gv-chip ${value.width === w && value.height === h ? "active" : ""}`}
+              onClick={() =>
+                onChange({ ...value, width: w, height: h, source: "manual" })
+              }
+            >
+              {label}
+            </button>
           ))}
-        </select>
-      </label>
-      <label>
-        Nâng độ phân giải
-        <input
-          disabled={disabled}
-          maxLength={80}
-          value={value.upscaling}
-          placeholder="Off / DLSS Quality / FSR..."
-          onChange={(e) => set("upscaling", e.target.value)}
-        />
-      </label>
-      <label>
-        Tạo khung hình
-        <input
-          disabled={disabled}
-          maxLength={80}
-          value={value.frameGeneration}
-          placeholder="Off / DLSS FG / FSR FG..."
-          onChange={(e) => set("frameGeneration", e.target.value)}
-        />
-      </label>
-      <label>
-        Ray Tracing
-        <input
-          disabled={disabled}
-          maxLength={80}
-          value={value.rayTracing}
-          placeholder="Off / Low / High..."
-          onChange={(e) => set("rayTracing", e.target.value)}
-        />
-      </label>
+        </div>
+      )}
+
+      <div className="gv-spec-form">
+        <label>
+          Chiều ngang game (px)
+          <input
+            type="number"
+            min={320}
+            max={16384}
+            disabled={disabled}
+            value={value.width ?? ""}
+            placeholder="1920"
+            onChange={(e) =>
+              set("width", e.target.value ? Number(e.target.value) : null)
+            }
+          />
+        </label>
+        <label>
+          Chiều cao game (px)
+          <input
+            type="number"
+            min={200}
+            max={16384}
+            disabled={disabled}
+            value={value.height ?? ""}
+            placeholder="1080"
+            onChange={(e) =>
+              set("height", e.target.value ? Number(e.target.value) : null)
+            }
+          />
+        </label>
+        <label>
+          Mức đồ họa
+          <select
+            disabled={disabled}
+            value={value.preset}
+            onChange={(e) => set("preset", e.target.value)}
+          >
+            <option value="">Chưa xác nhận</option>
+            {PRESETS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Nâng độ phân giải
+          <input
+            disabled={disabled}
+            maxLength={80}
+            value={value.upscaling}
+            placeholder="Off / DLSS Quality / FSR..."
+            onChange={(e) => set("upscaling", e.target.value)}
+          />
+        </label>
+        <label>
+          Tạo khung hình
+          <input
+            disabled={disabled}
+            maxLength={80}
+            value={value.frameGeneration}
+            placeholder="Off / DLSS FG / FSR FG..."
+            onChange={(e) => set("frameGeneration", e.target.value)}
+          />
+        </label>
+        <label>
+          Ray Tracing
+          <input
+            disabled={disabled}
+            maxLength={80}
+            value={value.rayTracing}
+            placeholder="Off / Low / High..."
+            onChange={(e) => set("rayTracing", e.target.value)}
+          />
+        </label>
+      </div>
     </div>
   );
 }
+
 const blank: GraphicsContext = {
   width: null,
   height: null,
@@ -106,6 +142,7 @@ const blank: GraphicsContext = {
   rayTracing: "",
   source: "manual",
 };
+
 export function PerformanceShareForm({
   api,
   game,
@@ -119,18 +156,25 @@ export function PerformanceShareForm({
   onShared?: () => void;
   defaults?: Partial<PerformanceReport>;
 }) {
-  const [cpu, setCpu] = useState(measured?.cpu || defaults?.cpu || ""),
-    [gpu, setGpu] = useState(measured?.gpu || defaults?.gpu || ""),
-    [ram, setRam] = useState(measured?.ramGb ? String(measured.ramGb) : defaults?.ramGb ? String(defaults.ramGb) : ""),
-    [fps, setFps] = useState(measured ? String(measured.fpsAverage) : ""),
-    [graphics, setGraphics] = useState<GraphicsContext>(
-      measured?.graphics || defaults?.graphics || blank,
-    ),
-    [notes, setNotes] = useState(""),
-    [complete, setComplete] = useState(false),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    [success, setSuccess] = useState(false);
+  const [cpu, setCpu] = useState(measured?.cpu || defaults?.cpu || "");
+  const [gpu, setGpu] = useState(measured?.gpu || defaults?.gpu || "");
+  const [ram, setRam] = useState(
+    measured?.ramGb
+      ? String(measured.ramGb)
+      : defaults?.ramGb
+        ? String(defaults.ramGb)
+        : "",
+  );
+  const [fps, setFps] = useState(measured ? String(measured.fpsAverage) : "");
+  const [graphics, setGraphics] = useState<GraphicsContext>(
+    measured?.graphics || defaults?.graphics || blank,
+  );
+  const [notes, setNotes] = useState("");
+  const [complete, setComplete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -168,16 +212,29 @@ export function PerformanceShareForm({
       setBusy(false);
     }
   };
+
   return (
-    <form className="gv-form" onSubmit={submit}>
-      <h3>
-        {measured ? "Chia sẻ phiên đo đã chọn" : "Chia sẻ kết quả tự khai báo"}
-      </h3>
-      <p className="gv-muted">
-        {measured
-          ? "FPS và cấu hình lấy từ snapshot của phiên này."
-          : "Thông tin bạn nhập sẽ có nhãn tự khai báo; không được coi là benchmark đã xác minh."}
-      </p>
+    <form className="gv-card-subtle gv-stack" onSubmit={submit}>
+      <div className="gv-top">
+        <div className="gv-actions">
+          {measured ? (
+            <Gauge size={17} className="gv-text-emerald" />
+          ) : (
+            <Cpu size={17} className="gv-text-accent" />
+          )}
+          <h3>
+            {measured
+              ? "Chia sẻ phiên đo PresentMon"
+              : "Chia sẻ cấu hình & FPS tự khai báo"}
+          </h3>
+        </div>
+        <span
+          className={`gv-pill ${measured ? "gv-pill-emerald" : "gv-pill-amber"}`}
+        >
+          {measured ? "Đo bằng PresentMon" : "Tự khai báo"}
+        </span>
+      </div>
+
       {error && (
         <p className="gv-error" role="alert">
           {error}
@@ -185,9 +242,11 @@ export function PerformanceShareForm({
       )}
       {success && (
         <p className="gv-notice" role="status">
-          Đã chia sẻ kết quả. Mỗi người có một kết quả hiện tại cho game này.
+          <CheckCircle2 size={15} />
+          Đã chia sẻ kết quả lên trang cộng đồng của game.
         </p>
       )}
+
       <div className="gv-spec-form">
         <label>
           CPU
@@ -236,11 +295,13 @@ export function PerformanceShareForm({
           />
         </label>
       </div>
+
       <GraphicsFields
         value={graphics}
         onChange={setGraphics}
         disabled={!!measured}
       />
+
       <label>
         Ghi chú điều kiện chơi
         <textarea
@@ -251,6 +312,7 @@ export function PerformanceShareForm({
           placeholder="Phiên bản game, khu vực đo, VSync, giới hạn FPS..."
         />
       </label>
+
       <label className="gv-check">
         <input
           required
@@ -258,8 +320,9 @@ export function PerformanceShareForm({
           checked={complete}
           onChange={(e) => setComplete(e.target.checked)}
         />
-        Tôi đã hoàn thành game và đồng ý công khai cấu hình/kết quả này.
+        Tôi xác nhận đã hoàn thành game và đồng ý công khai cấu hình/FPS này.
       </label>
+
       <div>
         <button
           className="gv-primary"
