@@ -448,6 +448,97 @@ export function CommunityHub({
     [top3Games.length, rankings.items],
   );
 
+  const renderRankingCard = (g: GameRanking, rank: number, isPodium: boolean) => {
+    const poster = g.coverUrl ? qualifyCommunityUrl(api.publicBase, g.coverUrl) : "";
+    const rawBanner =
+      g.bannerUrl ||
+      (g.steamId
+        ? `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${g.steamId}/header.jpg`
+        : "");
+    const banner = rawBanner ? qualifyCommunityUrl(api.publicBase, rawBanner) : "";
+    const podiumTierClass =
+      rank === 1 ? "gv-pill-amber" : rank === 2 ? "gv-pill-cyan" : "gv-pill-accent";
+
+    return (
+      <button
+        type="button"
+        key={g.gameKey}
+        className={`gv-game-card ${isPodium ? `is-podium rank-${rank}` : ""}`}
+        onClick={() => onGame(g)}
+      >
+        <div className={`gv-game-card-banner ${isPodium ? "is-tall" : ""}`}>
+          {banner ? (
+            <img src={banner} alt="" loading="lazy" />
+          ) : poster ? (
+            <img src={poster} alt="" loading="lazy" className="gv-game-card-blur-bg" />
+          ) : (
+            <div className="gv-game-card-banner-fallback" />
+          )}
+          <div className="gv-game-card-banner-fade" />
+          <div className="gv-game-card-banner-badges">
+            {isPodium ? (
+              <span className={`gv-pill ${podiumTierClass}`}>
+                <Trophy size={12} /> Hạng #{rank}
+              </span>
+            ) : (
+              <span className="gv-pill gv-rank-badge">#{rank}</span>
+            )}
+            {g.averageScore != null ? (
+              <span className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}>
+                <Star size={12} />
+                {isPodium ? `${g.averageScore.toFixed(1)}/10` : g.averageScore.toFixed(1)}
+              </span>
+            ) : (
+              <span className="gv-pill">{isPodium ? "Chưa chấm điểm" : "Chưa chấm"}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="gv-game-card-body">
+          <div className="gv-game-card-head">
+            {poster ? (
+              <img
+                className={`gv-game-card-poster ${isPodium ? "is-lg" : ""}`}
+                src={poster}
+                alt=""
+                loading="lazy"
+              />
+            ) : (
+              <div className={`gv-game-card-poster ${isPodium ? "is-lg" : ""}`} />
+            )}
+            <div className="gv-game-card-title-col">
+              <h3 className="gv-game-card-title">{g.title}</h3>
+              <span className="gv-muted" style={{ fontSize: 12 }}>
+                {g.reviewCount > 0
+                  ? `${g.reviewCount} lượt đánh giá`
+                  : isPodium
+                    ? "Chưa có lượt đánh giá"
+                    : "Xem cấu hình & đánh giá"}
+              </span>
+            </div>
+          </div>
+
+          <div className="gv-stat-mini-grid">
+            <div className="gv-stat-mini">
+              <span className="gv-stat-mini-label">Giờ chơi</span>
+              <span className="gv-stat-mini-value gv-text-emerald">
+                {minutesLabel(g.totalMinutes)}
+              </span>
+            </div>
+            <div className="gv-stat-mini">
+              <span className="gv-stat-mini-label">Người chơi</span>
+              <span className="gv-stat-mini-value">{g.players}</span>
+            </div>
+            <div className="gv-stat-mini">
+              <span className="gv-stat-mini-label">Phá đảo</span>
+              <span className="gv-stat-mini-value gv-text-cyan">{g.completedPlayers}</span>
+            </div>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
   return (
     <div className="gv-community">
       {/* Header Shell */}
@@ -988,20 +1079,20 @@ export function CommunityHub({
             </button>
           </div>
 
-          <form
-            className="gv-search-bar"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setGameQuery(query.trim());
-            }}
-          >
-            <input
-              maxLength={80}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Tìm tên game trong danh sách..."
-            />
-            <div className="gv-actions">
+          <div className="gv-topgames-toolbar">
+            <form
+              className="gv-topgames-search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setGameQuery(query.trim());
+              }}
+            >
+              <input
+                maxLength={80}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Tìm tên game trong cộng đồng..."
+              />
               <button type="submit" className="gv-primary" disabled={loading}>
                 <Search size={15} />
                 Tìm
@@ -1014,28 +1105,28 @@ export function CommunityHub({
                     setGameQuery("");
                   }}
                 >
-                  Xóa lọc
+                  Xóa
                 </button>
               )}
-            </div>
-          </form>
+            </form>
 
-          <div className="gv-chip-row">
-            {[
-              ["hours", "Tổng giờ chơi"],
-              ["score", "Điểm đánh giá cao"],
-              ["completed", "Nhiều người phá đảo"],
-              ["players", "Nhiều người chơi"],
-            ].map(([id, label]) => (
-              <button
-                type="button"
-                key={id}
-                className={`gv-chip ${sort === id ? "active" : ""}`}
-                onClick={() => setSort(id)}
-              >
-                {label}
-              </button>
-            ))}
+            <div className="gv-chip-row">
+              {[
+                ["hours", "Tổng giờ chơi"],
+                ["score", "Điểm đánh giá cao"],
+                ["completed", "Nhiều người phá đảo"],
+                ["players", "Nhiều người chơi"],
+              ].map(([id, label]) => (
+                <button
+                  type="button"
+                  key={id}
+                  className={`gv-chip ${sort === id ? "active" : ""}`}
+                  onClick={() => setSort(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {me && !me.shareLibrary && (
@@ -1062,154 +1153,15 @@ export function CommunityHub({
 
           {top3Games.length > 0 && (
             <div className="gv-podium-grid">
-              {top3Games.map((g, idx) => {
-                const img = g.coverUrl
-                  ? qualifyCommunityUrl(api.publicBase, g.coverUrl)
-                  : "";
-                return (
-                  <button
-                    type="button"
-                    key={g.gameKey}
-                    className={`gv-podium-card rank-${idx + 1}`}
-                    onClick={() => onGame(g)}
-                  >
-                    <div className="gv-top">
-                      <span
-                        className={`gv-pill ${
-                          idx === 0
-                            ? "gv-pill-amber"
-                            : idx === 1
-                              ? "gv-pill-cyan"
-                              : "gv-pill-accent"
-                        }`}
-                      >
-                        <Trophy size={12} /> Hạng #{idx + 1}
-                      </span>
-                      {g.averageScore != null ? (
-                        <span
-                          className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}
-                        >
-                          <Star size={12} />
-                          {g.averageScore.toFixed(1)}/10
-                        </span>
-                      ) : (
-                        <span className="gv-pill">Chưa chấm điểm</span>
-                      )}
-                    </div>
-
-                    <div className="gv-podium-top">
-                      {img ? (
-                        <img
-                          className="gv-poster-md"
-                          src={img}
-                          alt=""
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="gv-poster-md" />
-                      )}
-                      <div className="gv-podium-meta">
-                        <strong style={{ fontSize: 15, lineHeight: 1.35 }}>
-                          {g.title}
-                        </strong>
-                        <span className="gv-muted" style={{ fontSize: 12 }}>
-                          {g.reviewCount > 0
-                            ? `${g.reviewCount} lượt đánh giá`
-                            : "Chưa có lượt đánh giá"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="gv-stat-mini-grid">
-                      <div className="gv-stat-mini">
-                        <span className="gv-stat-mini-label">Giờ chơi</span>
-                        <span className="gv-stat-mini-value gv-text-emerald">
-                          {minutesLabel(g.totalMinutes)}
-                        </span>
-                      </div>
-                      <div className="gv-stat-mini">
-                        <span className="gv-stat-mini-label">Người chơi</span>
-                        <span className="gv-stat-mini-value">{g.players}</span>
-                      </div>
-                      <div className="gv-stat-mini">
-                        <span className="gv-stat-mini-label">Phá đảo</span>
-                        <span className="gv-stat-mini-value gv-text-cyan">
-                          {g.completedPlayers}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+              {top3Games.map((g, idx) => renderRankingCard(g, idx + 1, true))}
             </div>
           )}
 
           {restGames.length > 0 && (
-            <div className="gv-rank-list">
-              {restGames.map((g, index) => {
-                const rank = top3Games.length ? index + 4 : index + 1;
-                const img = g.coverUrl
-                  ? qualifyCommunityUrl(api.publicBase, g.coverUrl)
-                  : "";
-                return (
-                  <button
-                    type="button"
-                    className="gv-rank-row"
-                    key={g.gameKey}
-                    onClick={() => onGame(g)}
-                  >
-                    <span className="gv-rank-num">#{rank}</span>
-                    <div className="gv-actions" style={{ gap: 12, minWidth: 0 }}>
-                      {img ? (
-                        <img
-                          className="gv-poster-sm"
-                          src={img}
-                          alt=""
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="gv-poster-sm" />
-                      )}
-                      <div style={{ minWidth: 0 }}>
-                        <strong
-                          style={{
-                            fontSize: 14,
-                            display: "block",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {g.title}
-                        </strong>
-                        <span className="gv-muted" style={{ fontSize: 12 }}>
-                          {g.reviewCount > 0
-                            ? `${g.reviewCount} lượt đánh giá`
-                            : "Chưa có lượt đánh giá"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="gv-rank-metrics">
-                      <span className="gv-pill gv-pill-cyan">
-                        <Clock size={11} /> {minutesLabel(g.totalMinutes)}
-                      </span>
-                      <span className="gv-pill">
-                        <Users size={11} /> {g.players} người chơi
-                      </span>
-                      <span className="gv-pill gv-pill-emerald">
-                        <CheckCircle2 size={11} /> {g.completedPlayers} phá đảo
-                      </span>
-                      {g.averageScore != null && (
-                        <span
-                          className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}
-                        >
-                          <Star size={12} /> {g.averageScore.toFixed(1)}/10
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="gv-game-grid">
+              {restGames.map((g, index) =>
+                renderRankingCard(g, top3Games.length ? index + 4 : index + 1, false),
+              )}
             </div>
           )}
 

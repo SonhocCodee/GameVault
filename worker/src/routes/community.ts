@@ -997,7 +997,7 @@ export function registerCommunityRoutes(router: Router) {
           `WITH catalog AS (
       SELECT CASE WHEN steam_id>0 THEN CAST(steam_id AS TEXT)
         WHEN game_key GLOB 's_[0-9]*' THEN SUBSTR(game_key,3) ELSE game_key END AS game_key,
-        MAX(title) AS title,MAX(steam_id) AS steamId,MAX(cover_url) AS coverUrl
+        MAX(title) AS title,MAX(steam_id) AS steamId,MAX(cover_url) AS coverUrl,MAX(banner_url) AS bannerUrl
       FROM game_covers
       WHERE NOT (
         game_key LIKE 't_%'
@@ -1019,6 +1019,7 @@ export function registerCommunityRoutes(router: Router) {
       WHERE COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")} GROUP BY r.game_key
     ), game_keys AS (SELECT game_key FROM catalog UNION SELECT game_key FROM libraries UNION SELECT game_key FROM reviews)
     SELECT k.game_key AS gameKey,COALESCE(c.title,l.title,r.title) AS title,COALESCE(c.steamId,l.steamId) AS steamId,COALESCE(c.coverUrl,l.coverUrl,r.coverUrl) AS coverUrl,
+      c.bannerUrl AS bannerUrl,
       COALESCE(l.players,0) AS players,COALESCE(l.completedPlayers,0) AS completedPlayers,COALESCE(l.totalMinutes,0) AS totalMinutes,r.averageScore,COALESCE(r.reviewCount,0) AS reviewCount
     FROM game_keys k LEFT JOIN catalog c ON c.game_key=k.game_key LEFT JOIN libraries l ON l.game_key=k.game_key LEFT JOIN reviews r ON r.game_key=k.game_key
     WHERE COALESCE(c.title,l.title,r.title) LIKE ? ESCAPE '\\'
@@ -1033,6 +1034,7 @@ export function registerCommunityRoutes(router: Router) {
         rows.map((r) => ({
           ...r,
           coverUrl: publicUrl(r.coverUrl),
+          bannerUrl: publicUrl(r.bannerUrl),
         })),
         limit,
         offset,

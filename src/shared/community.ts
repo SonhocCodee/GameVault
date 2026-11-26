@@ -132,6 +132,7 @@ export interface SteamRequirements extends PublicGame {
   available: boolean;
 }
 export interface GameRanking extends PublicGame {
+  bannerUrl?: string | null;
   players: number;
   completedPlayers: number;
   totalMinutes: number;

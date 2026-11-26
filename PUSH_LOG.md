@@ -26,6 +26,29 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 12:55] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- Thiết kế lại toàn bộ giao diện tab **Top game cộng đồng** (`CommunityHub.tsx` + `community.css`):
+  - Gom thanh tìm kiếm và bộ lọc sắp xếp vào một toolbar full-width gọn gàng (`.gv-topgames-toolbar`).
+  - Thay podium và danh sách hàng ngang ảnh nhỏ bằng **Card Showcase lưới 3 cột** (`.gv-podium-grid` cho Top 3 và `.gv-game-grid` cho hạng #4+): mỗi card có ảnh bìa rộng (`bannerUrl` / Steam header / blurred poster fallback), poster đứng kích thước lớn (`86×124` cho Top 3, `74×106` cho hạng #4+) chồng lên banner, huy hiệu hạng + điểm đánh giá nổi trên góc, và cụm 3 ô thống kê (`Giờ chơi`, `Người chơi`, `Phá đảo`) đầy đặn không còn khoảng trống thừa.
+- Bổ sung trường `bannerUrl` trong `GET /api/community/rankings` (`worker/src/routes/community.ts` & `src/shared/community.ts`).
+
+### File chính đã thay đổi
+- `src/shared/community.ts`
+- `worker/src/routes/community.ts`
+- `src/renderer/community/CommunityHub.tsx`
+- `src/renderer/community/community.css`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass (exit 0).
+- `npm run build`, `npm run build:admin`, `npm run build:community`: Pass.
+- `npm test`: **478 pass / 0 fail / 0 skipped** (96 suites).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Đã deploy Worker + `/community/` assets lên Cloudflare (`game-vault-worker`).
+- Thoát hẳn GameVault Desktop (kể cả System Tray) và mở lại để nạp UI mới.
+
 ## [2026-11-26 12:51] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc
