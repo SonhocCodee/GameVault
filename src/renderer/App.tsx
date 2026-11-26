@@ -33,6 +33,8 @@ import {
   XCircle,
   PlayCircle,
   ArrowLeft,
+  Library,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 // Normalizes a title for alphanumeric matching (library titles vs Steam results)
@@ -96,6 +98,11 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<string>('playtime_desc');
   const [libraryLayout, setLibraryLayout] = useState<'grid' | 'timeline'>('grid');
+
+  // Bottom "Tất cả game" section filters (in 'all' tab)
+  const [allSearchQuery, setAllSearchQuery] = useState<string>('');
+  const [allStatusSubFilter, setAllStatusSubFilter] = useState<string>('all');
+  const [allSortBy, setAllSortBy] = useState<string>('title_asc');
 
   // External (Steam) search — shown under the library grid when searching,
   // lets you add games played on other machines as 'Đã phá đảo' or Wishlist
@@ -407,6 +414,48 @@ export default function App() {
       other: otherGames,
     };
   }, [games, trackerStatus?.activeGameTitle]);
+
+  // Filtered & sorted list for the bottom "Tất cả game" section in the 'all' tab
+  const filteredAllGames = useMemo(() => {
+    const q = allSearchQuery.trim().toLowerCase();
+    const recentTimeOf = (g: Game) => {
+      const raw = g.last_played_at || g.updated_at || g.created_at;
+      if (!raw) return 0;
+      const t = new Date(raw).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+
+    const list = games.filter((g) => {
+      if (allStatusSubFilter !== 'all' && g.status !== allStatusSubFilter) return false;
+      if (q) {
+        const titleMatch = (g.title || '').toLowerCase().includes(q);
+        const exeMatch = (g.exe_name || '').toLowerCase().includes(q);
+        if (!titleMatch && !exeMatch) return false;
+      }
+      return true;
+    });
+
+    return [...list].sort((a, b) => {
+      switch (allSortBy) {
+        case 'title_asc':
+          return (a.title || '').localeCompare(b.title || '', 'vi', { sensitivity: 'base' });
+        case 'title_desc':
+          return (b.title || '').localeCompare(a.title || '', 'vi', { sensitivity: 'base' });
+        case 'recent_played': {
+          const diff = recentTimeOf(b) - recentTimeOf(a);
+          return diff !== 0 ? diff : (b.playtime_minutes || 0) - (a.playtime_minutes || 0);
+        }
+        case 'rating_desc':
+          return (
+            (b.user_rating || 0) - (a.user_rating || 0) ||
+            (b.playtime_minutes || 0) - (a.playtime_minutes || 0)
+          );
+        case 'playtime_desc':
+        default:
+          return (b.playtime_minutes || 0) - (a.playtime_minutes || 0);
+      }
+    });
+  }, [games, allSearchQuery, allStatusSubFilter, allSortBy]);
 
   const getStatusTabInfo = (status: string) => {
     switch (status) {
@@ -726,9 +775,9 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  /* Categorized Sections View on Home Page */
-                  <div className="space-y-4">
-                    {/* Row 1: Game chơi gần đây (đang chơi & gần đây nhất ở đầu) */}
+                  /* Home Page ("Tất cả" tab): Top row = Game chơi gần đây, Bottom = All games grid with search & A-Z filter */
+                  <div>
+                    {/* Row 1: Game chơi gần đây */}
                     {categorizedGames.playing.length > 0 ? (
                       <GameRowSection
                         id="section-playing"
@@ -753,89 +802,126 @@ export default function App() {
                       )
                     )}
 
-                    {/* Row 2: Đã phá đảo */}
-                    {categorizedGames.completed.length > 0 && (
-                      <GameRowSection
-                        id="section-completed"
-                        title="Đã phá đảo"
-                        subtitle="Bộ sưu tập các tựa game đã hoàn thành xuất sắc"
-                        icon={<Trophy className="h-4 w-4 text-amber-400" />}
-                        badgeLabel="Đã hoàn thành"
-                        badgeColorClass="border-amber-500/30 bg-amber-500/10 text-amber-400"
-                        games={categorizedGames.completed}
-                        activeGameTitle={trackerStatus?.activeGameTitle}
-                        onSelectGame={handleSelectGame}
-                        onDeleteGame={handleDeleteGameCard}
-                        onFilterToThisStatus={() => setStatusFilter('completed')}
-                      />
-                    )}
+                    {/* Divider separating Recent Games from All Games */}
+                    <div className="my-8 flex items-center gap-4">
+                      <div className="h-px flex-1 bg-gradient-to-r from-transparent via-[#2a2e3d] to-[#2a2e3d]" />
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-[#8e95a5]">
+                        Toàn bộ thư viện
+                      </span>
+                      <div className="h-px flex-1 bg-gradient-to-l from-transparent via-[#2a2e3d] to-[#2a2e3d]" />
+                    </div>
 
-                    {/* Row 3: Chờ chơi (Wishlist) */}
-                    {categorizedGames.backlog.length > 0 && (
-                      <GameRowSection
-                        id="section-backlog"
-                        title="Chờ chơi (Wishlist)"
-                        subtitle="Danh sách game dự kiến trải nghiệm tiếp theo"
-                        icon={<BookmarkCheck className="h-4 w-4 text-purple-400" />}
-                        badgeLabel="Wishlist"
-                        badgeColorClass="border-purple-500/30 bg-purple-500/10 text-purple-400"
-                        games={categorizedGames.backlog}
-                        activeGameTitle={trackerStatus?.activeGameTitle}
-                        onSelectGame={handleSelectGame}
-                        onDeleteGame={handleDeleteGameCard}
-                        onFilterToThisStatus={() => setStatusFilter('backlog')}
-                      />
-                    )}
+                    {/* Bottom Section: All Games Grid + Search & Sort (A-Z, etc.) */}
+                    <section id="section-all-games">
+                      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#2a2e3d] bg-[#161821] text-white">
+                            <Library className="h-5 w-5 text-[#ff2a44]" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h2 className="text-lg font-bold text-white">Tất cả game</h2>
+                              <span className="rounded-full border border-[#2a2e3d] bg-[#161821] px-2.5 py-0.5 text-xs font-bold text-[#f1f3f7]">
+                                {filteredAllGames.length} game
+                              </span>
+                            </div>
+                            <p className="text-xs text-[#8e95a5]">
+                              Hiển thị toàn bộ các tựa game trong thư viện của bạn
+                            </p>
+                          </div>
+                        </div>
 
-                    {/* Row 4: Tạm dừng */}
-                    {categorizedGames.paused.length > 0 && (
-                      <GameRowSection
-                        id="section-paused"
-                        title="Tạm dừng"
-                        subtitle="Các game tạm gác lại, sẽ tiếp tục sau"
-                        icon={<PauseCircle className="h-4 w-4 text-blue-400" />}
-                        badgeLabel="Tạm dừng"
-                        badgeColorClass="border-blue-500/30 bg-blue-500/10 text-blue-400"
-                        games={categorizedGames.paused}
-                        activeGameTitle={trackerStatus?.activeGameTitle}
-                        onSelectGame={handleSelectGame}
-                        onDeleteGame={handleDeleteGameCard}
-                        onFilterToThisStatus={() => setStatusFilter('paused')}
-                      />
-                    )}
+                        {/* Search & Filter Toolbar */}
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <div className="relative flex-1 sm:w-64 sm:flex-initial">
+                            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-[#8e95a5]">
+                              <Search className="h-3.5 w-3.5" />
+                            </div>
+                            <input
+                              type="text"
+                              value={allSearchQuery}
+                              onChange={(e) => setAllSearchQuery(e.target.value)}
+                              placeholder="Tìm game trong thư viện..."
+                              className="w-full rounded-lg border border-[#2a2e3d] bg-[#161821] py-2 pl-9 pr-8 text-xs text-[#f1f3f7] placeholder-[#8e95a5] outline-none transition-all focus:border-[#ff2a44] focus:ring-1 focus:ring-[#ff2a44]"
+                            />
+                            {allSearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => setAllSearchQuery('')}
+                                className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-[#8e95a5] hover:text-white"
+                                title="Xóa tìm kiếm"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
 
-                    {/* Row 5: Bỏ dở */}
-                    {categorizedGames.dropped.length > 0 && (
-                      <GameRowSection
-                        id="section-dropped"
-                        title="Bỏ dở"
-                        subtitle="Các game đã ngưng không tiếp tục"
-                        icon={<XCircle className="h-4 w-4 text-rose-400" />}
-                        badgeLabel="Bỏ dở"
-                        badgeColorClass="border-rose-500/30 bg-rose-500/10 text-rose-400"
-                        games={categorizedGames.dropped}
-                        activeGameTitle={trackerStatus?.activeGameTitle}
-                        onSelectGame={handleSelectGame}
-                        onDeleteGame={handleDeleteGameCard}
-                        onFilterToThisStatus={() => setStatusFilter('dropped')}
-                      />
-                    )}
+                          <select
+                            value={allStatusSubFilter}
+                            onChange={(e) => setAllStatusSubFilter(e.target.value)}
+                            className="cursor-pointer rounded-lg border border-[#2a2e3d] bg-[#161821] px-2.5 py-2 text-xs text-[#f1f3f7] outline-none transition-colors hover:border-[#ff2a44] focus:border-[#ff2a44]"
+                            title="Lọc theo trạng thái"
+                          >
+                            <option value="all" className="bg-[#161821] text-[#f1f3f7]">Tất cả trạng thái</option>
+                            <option value="playing" className="bg-[#161821] text-[#f1f3f7]">Đang chơi</option>
+                            <option value="completed" className="bg-[#161821] text-[#f1f3f7]">Đã phá đảo</option>
+                            <option value="backlog" className="bg-[#161821] text-[#f1f3f7]">Chờ chơi</option>
+                            <option value="paused" className="bg-[#161821] text-[#f1f3f7]">Tạm dừng</option>
+                            <option value="dropped" className="bg-[#161821] text-[#f1f3f7]">Bỏ dở</option>
+                          </select>
 
-                    {/* Fallback: Khác (nếu có game trạng thái khác) */}
-                    {categorizedGames.other.length > 0 && (
-                      <GameRowSection
-                        id="section-other"
-                        title="Khác"
-                        subtitle="Các trò chơi khác trong thư viện"
-                        icon={<Gamepad2 className="h-4 w-4 text-[#8e95a5]" />}
-                        badgeLabel="Khác"
-                        badgeColorClass="border-slate-500/30 bg-slate-500/10 text-slate-400"
-                        games={categorizedGames.other}
-                        activeGameTitle={trackerStatus?.activeGameTitle}
-                        onSelectGame={handleSelectGame}
-                        onDeleteGame={handleDeleteGameCard}
-                      />
-                    )}
+                          <div className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#161821] px-2.5 py-2">
+                            <SlidersHorizontal className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
+                            <select
+                              value={allSortBy}
+                              onChange={(e) => setAllSortBy(e.target.value)}
+                              className="cursor-pointer bg-transparent text-xs text-[#f1f3f7] outline-none"
+                              title="Sắp xếp danh sách"
+                            >
+                              <option value="title_asc" className="bg-[#161821] text-[#f1f3f7]">Tên (A - Z)</option>
+                              <option value="title_desc" className="bg-[#161821] text-[#f1f3f7]">Tên (Z - A)</option>
+                              <option value="playtime_desc" className="bg-[#161821] text-[#f1f3f7]">Thời gian chơi nhiều nhất</option>
+                              <option value="recent_played" className="bg-[#161821] text-[#f1f3f7]">Mới chơi gần đây</option>
+                              <option value="rating_desc" className="bg-[#161821] text-[#f1f3f7]">Điểm đánh giá cao nhất</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {filteredAllGames.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 sm:gap-4">
+                          {filteredAllGames.map((game) => (
+                            <GameCard
+                              key={game.id}
+                              game={game}
+                              isActive={
+                                trackerStatus?.activeGameTitle
+                                  ? game.title.toLowerCase() === trackerStatus.activeGameTitle.toLowerCase()
+                                  : false
+                              }
+                              onSelect={handleSelectGame}
+                              onDelete={handleDeleteGameCard}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-[#2a2e3d] bg-[#161821]/30 p-8 text-center text-xs text-[#8e95a5]">
+                          <p>Không tìm thấy trò chơi nào khớp với bộ lọc hiện tại.</p>
+                          {(allSearchQuery || allStatusSubFilter !== 'all') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAllSearchQuery('');
+                                setAllStatusSubFilter('all');
+                              }}
+                              className="mt-3 rounded-lg border border-[#2a2e3d] bg-[#161821] px-3 py-1.5 text-xs font-semibold text-white hover:border-[#ff2a44]"
+                            >
+                              Xóa bộ lọc
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </section>
                   </div>
                 )}
 

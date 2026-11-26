@@ -26,6 +26,15 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 10:57] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Thiết kế lại tab **Tất cả** trong thư viện: hàng đầu giữ **Game chơi gần đây**, phân cách rõ với phần dưới hiển thị **Tất cả game** dạng lưới đầy đủ kèm ô tìm kiếm, lọc trạng thái và sắp xếp (mặc định A - Z).
+- **Thay đổi chính:**
+  - `src/renderer/App.tsx`: Thêm `allSearchQuery`, `allStatusSubFilter`, `allSortBy` (`title_asc` mặc định, `title_desc`, `playtime_desc`, `recent_played`, `rating_desc`), `filteredAllGames`, vạch phân cách "Toàn bộ thư viện" và lưới `GameCard` đầy đủ cho toàn bộ game.
+- **Kiểm tra:**
+  - `npm run build`: Build Electron main/preload và Vite thành công.
+  - `npm test`: **405/405 tests pass** (`93 suites`, `0 fail`).
+- **Bàn giao / Tiếp theo:** Nếu app đang chạy ngầm ở System Tray trên máy `DESKTOP-BU4IIOC`, thoát hẳn rồi mở lại để dùng bản build mới.
+
 ## [2026-11-26 10:53] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Sửa tab "Theo dõi thời gian chơi" không còn dính các game chỉ chỉnh giờ thủ công (`manual` audit rows như Dark Souls III, Armored Core VI, Baldur's Gate 3, Forza Horizon 5, The Witcher 3, Ghost of Tsushima, Dead Space -1500m) vào Tháng 11, tính gộp khoảng thời gian (interval union) theo tháng để chống đếm trùng giữa `tracker` / `amd_import` / `ptwatch`, và bổ sung chống cộng giờ khi máy sleep/hibernate trong `PlaytimeTracker`.
 - **Thay đổi chính:**
