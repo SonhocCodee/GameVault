@@ -7,6 +7,8 @@ import {
   updateGame,
   getDeletedGames,
   getDb,
+  getSetting,
+  setSetting,
   recalculatePlaytime,
 } from './db.ts';
 import { normalizeForMatch } from './media.ts';
@@ -20,6 +22,7 @@ import type {
   Game,
   HardwareProfile,
   LeaderboardEntry,
+  LibrarySyncOptions,
   LibrarySyncResponse,
   LibrarySyncResult,
   UserLibraryItem,
@@ -627,8 +630,12 @@ export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
   return data;
 }
 
-export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
+const SYNC_EPOCH_SETTING_KEY = 'library_sync_epoch';
+
+export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promise<LibrarySyncResult> {
   const db = getDb();
+  const syncMode = options?.mode === 'overwrite' ? 'overwrite' : 'merge';
+  const localSyncEpoch = Number(getSetting(SYNC_EPOCH_SETTING_KEY) || '0') || 0;
 
   // 1. Sanitize local paths in DB (reset local/non-HTTP paths to NULL so canonical web covers are enriched)
   try {
@@ -777,7 +784,12 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
     '/api/library/sync',
     {
       method: 'POST',
-      body: JSON.stringify({ items, sessions: sessionsPayload }),
+      body: JSON.stringify({
+        mode: syncMode,
+        clientSyncEpoch: localSyncEpoch,
+        items,
+        sessions: sessionsPayload,
+      }),
     },
     true
   );
@@ -787,9 +799,14 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
   }
 
   const result: LibrarySyncResponse = await resp.json();
+  const serverSyncEpoch = Number(result.syncEpoch) || 0;
+  const isAuthoritativePull =
+    Boolean(result.authoritativePull) ||
+    (syncMode !== 'overwrite' && serverSyncEpoch > localSyncEpoch);
 
   let pulled = 0;
   let updated = 0;
+  const matchedLocalGameIds = new Set<number>();
 
   for (const remote of result.games) {
     if (remote.isDeleted) continue;
@@ -840,7 +857,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
 
     if (!existing) {
       // Game exists on cloud (from another machine) but not locally
-      createGame({
+      const created = createGame({
         title: remote.title,
         status: remote.status,
         playtime_minutes: remote.playtimeMinutes,
@@ -852,8 +869,10 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         completed_at: remote.completedAt || null,
         media_folder: remote.title.replace(/[<>:"/\\|?*]/g, '').trim() || 'Unknown_Game',
       });
+      matchedLocalGameIds.add(created.id);
       pulled++;
     } else {
+      matchedLocalGameIds.add(existing.id);
       // Game exists locally: reconcile status, playtime, covers
       const patch: Partial<Game> = {};
       let needsUpdate = false;
@@ -861,58 +880,93 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
       const localMs = parseTimestampMs(existing.updated_at);
       const remoteIsNewer = Number.isFinite(remoteMs) && Number.isFinite(localMs) && remoteMs > localMs;
 
-      // Completed status rule: if remote or local is completed, it stays completed!
-      if (remote.status === 'completed' && existing.status !== 'completed') {
-        patch.status = 'completed';
-        needsUpdate = true;
-      } else if (remote.status !== existing.status && remoteIsNewer) {
-        patch.status = remote.status;
-        needsUpdate = true;
-      }
-
-      // Playtime rule: highest playtime wins
-      if (remote.playtimeMinutes > (existing.playtime_minutes || 0)) {
-        patch.playtime_minutes = remote.playtimeMinutes;
-        needsUpdate = true;
-      }
-
-      // Covers & metadata enrichment from cloud:
-      // Master catalog (game_covers) or permanent /api/images/ URLs override stale/broken local covers
-      const hasMasterCover = Boolean((remote as any).masterCoverUpdatedAt);
-      const isCloudHostedCover = Boolean(validRemoteCover && validRemoteCover.includes('/api/images/'));
-      if (
-        validRemoteCover &&
-        validRemoteCover !== existing.cover_url &&
-        (!existing.cover_url || hasMasterCover || isCloudHostedCover)
-      ) {
-        patch.cover_url = validRemoteCover;
-        needsUpdate = true;
-      }
-      const isCloudHostedBanner = Boolean(validRemoteBanner && validRemoteBanner.includes('/api/images/'));
-      if (
-        validRemoteBanner &&
-        validRemoteBanner !== existing.banner_url &&
-        (!existing.banner_url || hasMasterCover || isCloudHostedBanner)
-      ) {
-        patch.banner_url = validRemoteBanner;
-        needsUpdate = true;
-      }
-      if (existing.user_rating == null && remote.userScore != null) {
-        patch.user_rating = remote.userScore;
-        needsUpdate = true;
-      }
-      if (!existing.notes && remote.userNotes) {
-        patch.notes = remote.userNotes;
-        needsUpdate = true;
-      }
-      if ((!existing.steam_id || existing.steam_id <= 0) && remote.steamId && remote.steamId > 0) {
-        patch.steam_id = remote.steamId;
-        needsUpdate = true;
-      }
-      if (remote.completedAt && remote.completedAt !== existing.completed_at) {
-        if (!existing.completed_at || remoteIsNewer) {
-          patch.completed_at = remote.completedAt;
+      if (isAuthoritativePull) {
+        if (remote.status !== existing.status) {
+          patch.status = remote.status;
           needsUpdate = true;
+        }
+        if ((remote.playtimeMinutes || 0) !== (existing.playtime_minutes || 0)) {
+          patch.playtime_minutes = remote.playtimeMinutes || 0;
+          needsUpdate = true;
+        }
+        if (validRemoteCover && validRemoteCover !== existing.cover_url) {
+          patch.cover_url = validRemoteCover;
+          needsUpdate = true;
+        }
+        if (validRemoteBanner && validRemoteBanner !== existing.banner_url) {
+          patch.banner_url = validRemoteBanner;
+          needsUpdate = true;
+        }
+        if ((remote.userScore ?? null) !== (existing.user_rating ?? null)) {
+          patch.user_rating = remote.userScore ?? null;
+          needsUpdate = true;
+        }
+        if ((remote.userNotes ?? null) !== (existing.notes ?? null)) {
+          patch.notes = remote.userNotes ?? null;
+          needsUpdate = true;
+        }
+        if (remote.steamId && remote.steamId > 0 && remote.steamId !== existing.steam_id) {
+          patch.steam_id = remote.steamId;
+          needsUpdate = true;
+        }
+        if ((remote.completedAt ?? null) !== (existing.completed_at ?? null)) {
+          patch.completed_at = remote.completedAt ?? null;
+          needsUpdate = true;
+        }
+      } else {
+        // Completed status rule: if remote or local is completed, it stays completed!
+        if (remote.status === 'completed' && existing.status !== 'completed') {
+          patch.status = 'completed';
+          needsUpdate = true;
+        } else if (remote.status !== existing.status && remoteIsNewer) {
+          patch.status = remote.status;
+          needsUpdate = true;
+        }
+
+        // Playtime rule: highest playtime wins
+        if (remote.playtimeMinutes > (existing.playtime_minutes || 0)) {
+          patch.playtime_minutes = remote.playtimeMinutes;
+          needsUpdate = true;
+        }
+
+        // Covers & metadata enrichment from cloud:
+        // Master catalog (game_covers) or permanent /api/images/ URLs override stale/broken local covers
+        const hasMasterCover = Boolean((remote as any).masterCoverUpdatedAt);
+        const isCloudHostedCover = Boolean(validRemoteCover && validRemoteCover.includes('/api/images/'));
+        if (
+          validRemoteCover &&
+          validRemoteCover !== existing.cover_url &&
+          (!existing.cover_url || hasMasterCover || isCloudHostedCover)
+        ) {
+          patch.cover_url = validRemoteCover;
+          needsUpdate = true;
+        }
+        const isCloudHostedBanner = Boolean(validRemoteBanner && validRemoteBanner.includes('/api/images/'));
+        if (
+          validRemoteBanner &&
+          validRemoteBanner !== existing.banner_url &&
+          (!existing.banner_url || hasMasterCover || isCloudHostedBanner)
+        ) {
+          patch.banner_url = validRemoteBanner;
+          needsUpdate = true;
+        }
+        if (existing.user_rating == null && remote.userScore != null) {
+          patch.user_rating = remote.userScore;
+          needsUpdate = true;
+        }
+        if (!existing.notes && remote.userNotes) {
+          patch.notes = remote.userNotes;
+          needsUpdate = true;
+        }
+        if ((!existing.steam_id || existing.steam_id <= 0) && remote.steamId && remote.steamId > 0) {
+          patch.steam_id = remote.steamId;
+          needsUpdate = true;
+        }
+        if (remote.completedAt && remote.completedAt !== existing.completed_at) {
+          if (!existing.completed_at || remoteIsNewer) {
+            patch.completed_at = remote.completedAt;
+            needsUpdate = true;
+          }
         }
       }
 
@@ -923,9 +977,26 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
     }
   }
 
-  // 2.5 Pull & merge remote play sessions (so monthly Timeline & playtime stay 100% synced across machines)
-  if (Array.isArray(result.sessions) && result.sessions.length > 0) {
+  // In authoritative pull mode, remove stale local games that do not exist in Cloud snapshot
+  if (isAuthoritativePull && result.games.length > 0) {
     try {
+      const currentLocal = getGames();
+      for (const g of currentLocal) {
+        if (!matchedLocalGameIds.has(g.id)) {
+          db.prepare('DELETE FROM games WHERE id = ?').run(g.id);
+        }
+      }
+    } catch (err) {
+      console.warn('Authoritative pull stale game cleanup warning:', err);
+    }
+  }
+
+  // 2.5 Pull & merge remote play sessions (so monthly Timeline & playtime stay 100% synced across machines)
+  if (Array.isArray(result.sessions) && (result.sessions.length > 0 || isAuthoritativePull)) {
+    try {
+      if (isAuthoritativePull) {
+        db.prepare('DELETE FROM sessions').run();
+      }
       const refreshedGames = getGames();
       const idByKey = new Map<string, number>();
       for (const g of refreshedGames) {
@@ -964,7 +1035,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         }
       }
 
-      if (touchedIds.size > 0) {
+      if (touchedIds.size > 0 && !isAuthoritativePull) {
         recalculatePlaytime(db, [...touchedIds]);
       }
     } catch (err) {
@@ -981,6 +1052,10 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
 
   await syncLocalReviews();
 
+  if (serverSyncEpoch > 0) {
+    setSetting(SYNC_EPOCH_SETTING_KEY, String(serverSyncEpoch));
+  }
+
   return {
     pushed: items.length,
     pulled,
@@ -989,5 +1064,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
     totalCount: result.stats.total,
     timestamp: result.syncedAt,
     stats: result.stats,
+    syncEpoch: serverSyncEpoch,
+    authoritativePull: isAuthoritativePull,
   };
 }

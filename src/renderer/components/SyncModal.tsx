@@ -157,14 +157,21 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   if (!isOpen) return null;
 
   // Handler: Sync Library with Cloudflare D1
-  const handleSyncLibrary = async () => {
+  const handleSyncLibrary = async (mode: 'merge' | 'overwrite' = 'merge') => {
+    if (mode === 'overwrite') {
+      const confirmed = window.confirm(
+        'Thao tác này sẽ dùng toàn bộ thư viện & lịch sử chơi của MÁY NÀY làm chuẩn, ghi đè sạch dữ liệu cũ trên Cloud. Các máy khác khi bấm Đồng bộ lần tới sẽ tự động kéo bản chuẩn này về. Tiếp tục?'
+      );
+      if (!confirmed) return;
+    }
+
     setLibraryLoading(true);
     setLibraryError(null);
     setLibraryResult(null);
 
     try {
       if (window.electronAPI?.syncLibrary) {
-        const res = await window.electronAPI.syncLibrary();
+        const res = await window.electronAPI.syncLibrary({ mode });
         setLibraryResult(res);
         onSuccess();
       } else {
@@ -416,7 +423,11 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <div className="flex items-center justify-between text-emerald-400 font-bold text-sm">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-5 w-5" />
-                      <span>Đồng bộ thư viện thành công!</span>
+                      <span>
+                        {libraryResult.authoritativePull
+                          ? 'Đã kéo lại toàn bộ dữ liệu chuẩn từ Cloud!'
+                          : 'Đồng bộ thư viện thành công!'}
+                      </span>
                     </div>
                     <span className="text-xs font-mono text-[#8e95a5]">
                       Tổng: {libraryResult.totalCount} game trên Cloud
@@ -483,10 +494,10 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 </ul>
               </div>
 
-              {/* Sync Button */}
-              <div className="pt-2">
+              {/* Sync Buttons */}
+              <div className="pt-2 space-y-2">
                 <button
-                  onClick={handleSyncLibrary}
+                  onClick={() => handleSyncLibrary('merge')}
                   disabled={libraryLoading || !isLoggedIn}
                   className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-5 py-3 text-xs font-bold text-white shadow-lg shadow-sky-500/25 hover:brightness-110 active:scale-95 disabled:opacity-50 transition-all"
                 >
@@ -501,6 +512,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                       <span>Bắt đầu Đồng bộ Thư viện ngay</span>
                     </>
                   )}
+                </button>
+
+                <button
+                  onClick={() => handleSyncLibrary('overwrite')}
+                  disabled={libraryLoading || !isLoggedIn}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 active:scale-95 disabled:opacity-50 transition-all"
+                  title="Dùng dữ liệu máy này làm bản chuẩn duy nhất, xóa dữ liệu lệch trên Cloud để máy khác tự kéo về"
+                >
+                  <UploadCloud className="h-4 w-4" />
+                  <span>Đặt máy này làm chuẩn (Ghi đè Cloud)</span>
                 </button>
               </div>
             </div>

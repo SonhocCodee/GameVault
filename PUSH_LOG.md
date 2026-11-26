@@ -26,6 +26,28 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 13:46] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Bổ sung cơ chế Đồng bộ chuẩn hóa theo `sync_epoch` & Chế độ Ghi đè Cloud (`mode: 'overwrite'`)**:
+  - Cho phép chọn **Đặt máy này làm chuẩn (Ghi đè Cloud)** trong `SyncModal` để xóa dữ liệu lệch (`user_library`, `user_sessions`) trên Cloud và nạp 100% dữ liệu từ máy chuẩn, đồng thời tăng `sync_epoch` trong `user_sync_state`.
+  - Khi máy khác bấm **Đồng bộ** bình thường với `clientSyncEpoch < serverSyncEpoch`, Worker từ chối merge dữ liệu lệch từ máy đó lên và trả về `authoritativePull: true` kèm bản chuẩn từ Cloud; Client tự động mirror chính xác `playtime_minutes` (cho phép giảm giờ thừa), `status`, `completed_at`, xóa game/session rác và nạp lại `sessions` chuẩn.
+
+### File chính đã thay đổi
+- `worker/src/routes/library.ts`, `worker/schema.sql`, `worker/migrations/0004_library_sync_epoch.sql`: Thêm `user_sync_state`, xử lý `mode: 'overwrite'`, kiểm tra `clientSyncEpoch` và trả `authoritativePull`.
+- `src/main/cloud-db.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/types.ts`: Lưu `library_sync_epoch` trong `app_settings`, truyền `LibrarySyncOptions`, xử lý mirror toàn bộ thư viện & `sessions` khi `authoritativePull = true`.
+- `src/renderer/components/SyncModal.tsx`: Thêm nút **Đặt máy này làm chuẩn (Ghi đè Cloud)** và thông báo khi kéo bản chuẩn từ Cloud.
+- `tests/library-sync.test.js`: Bổ sung test kiểm tra luồng overwrite trên máy chuẩn → máy lệch tự động pull về khớp 100% → sync cộng thêm giờ sau đó bình thường.
+
+### Kiểm tra (Verify)
+- `npm run build` (Electron main/preload + Vite): Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm test`: **479/479 tests pass** (`96 suites`, `0 fail`, `0 skipped`).
+
+### Bàn giao / Tiếp theo
+- Chạy migration `worker/migrations/0004_library_sync_epoch.sql` lên D1 production (`game-vault-d1`) và `npm run deploy:worker`.
+- Sau khi deploy: trên máy chuẩn bấm **Đặt máy này làm chuẩn (Ghi đè Cloud)** trong `SyncModal`; trên máy kia mở app (thoát hẳn Tray nếu đang mở bản cũ) và bấm **Đồng bộ** để tự kéo toàn bộ dữ liệu chuẩn về.
+
 ## [2026-11-26 13:42] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

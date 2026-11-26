@@ -347,5 +347,101 @@ describe('Multi-Device Game Library Sync Suite (Cloudflare D1 + Worker)', () => 
       assert.equal(pulledSessions[0].source, 'amd_import');
       assert.equal(pulledSessions[0].start_time, '2026-07-16T20:00:00.000Z');
     });
+
+    test('overwrite mode sets authoritative Cloud snapshot and stale machine auto-pulls exact playtime and sessions', async () => {
+      // 1. Machine A (corrupted/inflated data) pushes first
+      const inflatedGame = createGame({
+        title: 'Elden Ring',
+        steam_id: 1245620,
+        status: 'playing',
+        playtime_minutes: 9999,
+      });
+      createSession({
+        game_id: inflatedGame.id,
+        start_time: '2026-11-20T01:00:00.000Z',
+        end_time: '2026-11-20T10:00:00.000Z',
+        duration_minutes: 540,
+        is_running: 0,
+        source: 'tracker',
+      });
+      createGame({
+        title: 'Stale Junk Game',
+        status: 'backlog',
+        playtime_minutes: 50,
+      });
+
+      await syncLibraryWithCloud();
+
+      // 2. Machine B (authoritative clean machine) has accurate 120m playtime and 1 clean session
+      closeDb();
+      initDb(':memory:');
+
+      const cleanGame = createGame({
+        title: 'Elden Ring',
+        steam_id: 1245620,
+        status: 'completed',
+        completed_at: '2026-11-25T20:00:00',
+        playtime_minutes: 120,
+      });
+      createSession({
+        game_id: cleanGame.id,
+        start_time: '2026-11-25T18:00:00.000Z',
+        end_time: '2026-11-25T20:00:00.000Z',
+        duration_minutes: 120,
+        is_running: 0,
+        source: 'tracker',
+      });
+
+      const overwriteRes = await syncLibraryWithCloud({ mode: 'overwrite' });
+      assert.equal(overwriteRes.syncEpoch, 1);
+      assert.equal(overwriteRes.totalCount, 1);
+
+      // 3. Machine A (with stale inflated 9999m and Stale Junk Game) runs normal merge sync
+      closeDb();
+      initDb(':memory:');
+      const staleA = createGame({
+        title: 'Elden Ring',
+        steam_id: 1245620,
+        status: 'playing',
+        playtime_minutes: 9999,
+      });
+      createSession({
+        game_id: staleA.id,
+        start_time: '2026-11-20T01:00:00.000Z',
+        end_time: '2026-11-20T10:00:00.000Z',
+        duration_minutes: 540,
+        is_running: 0,
+        source: 'tracker',
+      });
+      createGame({
+        title: 'Stale Junk Game',
+        status: 'backlog',
+        playtime_minutes: 50,
+      });
+
+      const pullResA = await syncLibraryWithCloud();
+      assert.equal(pullResA.authoritativePull, true);
+      assert.equal(pullResA.syncEpoch, 1);
+
+      // Machine A must now match Machine B 100%
+      const gamesA = getGames();
+      assert.equal(gamesA.length, 1);
+      assert.equal(gamesA[0].title, 'Elden Ring');
+      assert.equal(gamesA[0].playtime_minutes, 120);
+      assert.equal(gamesA[0].status, 'completed');
+      assert.equal(gamesA[0].completed_at, '2026-11-25T20:00:00');
+
+      const sessionsA = getSessions(gamesA[0].id);
+      assert.equal(sessionsA.length, 1);
+      assert.equal(sessionsA[0].start_time, '2026-11-25T18:00:00.000Z');
+      assert.equal(sessionsA[0].duration_minutes, 120);
+
+      // 4. Subsequent normal sync on Machine A with new playtime works normally
+      updateGame(gamesA[0].id, { playtime_minutes: 180 });
+      const nextResA = await syncLibraryWithCloud();
+      assert.equal(nextResA.authoritativePull, false);
+      const cloudLib = await getCloudLibrary();
+      assert.equal(cloudLib.games[0].playtimeMinutes, 180);
+    });
   });
 });

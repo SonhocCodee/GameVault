@@ -86,7 +86,35 @@ function isValidStoredCoverUrl(url: unknown): url is string {
   return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/api/images/');
 }
 
-async function fetchUserLibraryResponse(env: Env, uid: string): Promise<LibrarySyncResponse> {
+async function getUserSyncEpoch(env: Env, uid: string): Promise<number> {
+  try {
+    const row = await env.DB.prepare('SELECT sync_epoch FROM user_sync_state WHERE uid = ?').bind(uid).first<any>();
+    return Number(row?.sync_epoch) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function bumpUserSyncEpoch(env: Env, uid: string): Promise<number> {
+  try {
+    await env.DB.prepare(`
+      INSERT INTO user_sync_state (uid, sync_epoch, updated_at)
+      VALUES (?, 1, datetime('now'))
+      ON CONFLICT(uid) DO UPDATE SET
+        sync_epoch = user_sync_state.sync_epoch + 1,
+        updated_at = datetime('now')
+    `).bind(uid).run();
+    return await getUserSyncEpoch(env, uid);
+  } catch {
+    return 0;
+  }
+}
+
+async function fetchUserLibraryResponse(
+  env: Env,
+  uid: string,
+  extra?: { authoritativePull?: boolean }
+): Promise<LibrarySyncResponse> {
   const query = `
     SELECT ul.game_key, ul.title, ul.steam_id,
            COALESCE(gc.cover_url, ul.cover_url) AS cover_url,
@@ -124,11 +152,15 @@ async function fetchUserLibraryResponse(env: Env, uid: string): Promise<LibraryS
     // Graceful fallback if user_sessions table is not yet migrated in an isolated test DB
   }
 
+  const syncEpoch = await getUserSyncEpoch(env, uid);
+
   return {
     games,
     sessions,
     syncedAt: new Date().toISOString(),
     stats,
+    syncEpoch,
+    ...(extra?.authoritativePull ? { authoritativePull: true } : {}),
   };
 }
 
@@ -157,6 +189,27 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
   const items = Array.isArray(body?.items) ? body.items : null;
   if (!items) {
     return errorResponse('Payload must include an "items" array', 400);
+  }
+
+  const syncMode = body?.mode === 'overwrite' ? 'overwrite' : 'merge';
+  const clientSyncEpoch = Number.isFinite(Number(body?.clientSyncEpoch))
+    ? Math.max(0, Math.floor(Number(body.clientSyncEpoch)))
+    : 0;
+  const serverSyncEpoch = await getUserSyncEpoch(env, user.uid);
+
+  // If Cloud has a newer authoritative snapshot than this client, do NOT merge stale/corrupted
+  // local data into Cloud. Return the authoritative Cloud snapshot so the client mirrors it.
+  if (syncMode !== 'overwrite' && serverSyncEpoch > 0 && clientSyncEpoch < serverSyncEpoch) {
+    return jsonResponse(await fetchUserLibraryResponse(env, user.uid, { authoritativePull: true }));
+  }
+
+  if (syncMode === 'overwrite') {
+    await env.DB.prepare('DELETE FROM user_library WHERE uid = ?').bind(user.uid).run();
+    try {
+      await env.DB.prepare('DELETE FROM user_sessions WHERE uid = ?').bind(user.uid).run();
+    } catch {
+      // Ignore if user_sessions is not migrated in older test fixtures
+    }
   }
 
   const upsertStmt = env.DB.prepare(`
@@ -284,6 +337,10 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
     } catch {
       // Ignore if user_sessions is not migrated in older test fixtures
     }
+  }
+
+  if (syncMode === 'overwrite') {
+    await bumpUserSyncEpoch(env, user.uid);
   }
 
   return jsonResponse(await fetchUserLibraryResponse(env, user.uid));
