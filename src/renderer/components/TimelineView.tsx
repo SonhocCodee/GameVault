@@ -20,10 +20,10 @@ import {
   X,
   Pin,
 } from 'lucide-react';
-import type { Game, Session, MediaItem, TrackerStatus } from '../../shared/types.js';
+import type { Game, MediaItem, TrackerStatus } from '../../shared/types.js';
 import { formatPlaytime, getStatusMeta, formatDisplayUrl } from './GameCard.js';
 
-export type TimelineTreeTab = 'completed' | 'all' | 'sessions';
+export type TimelineTreeTab = 'completed' | 'all';
 
 export interface TimelineViewProps {
   games: Game[];
@@ -75,15 +75,13 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   searchQuery = '',
   statusFilter = 'all',
 }) => {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loadingSessions, setLoadingSessions] = useState<boolean>(true);
   const [collapsedYears, setCollapsedYears] = useState<Record<number, boolean>>({});
 
-  // Tree View Tab: 'completed' (Đã phá đảo - chính) vs 'all' (Tất cả game) vs 'sessions' (Theo dõi thời gian chơi - phụ)
+  // Tree View Tab: 'completed' (Đã phá đảo - chính) vs 'all' (Tất cả game)
   const [treeTab, setTreeTab] = useState<TimelineTreeTab>(() => {
     try {
       const saved = localStorage.getItem('gv_tree_view_tab');
-      if (saved === 'all' || saved === 'completed' || saved === 'sessions') return saved;
+      if (saved === 'all' || saved === 'completed') return saved;
       const legacy = localStorage.getItem('gv_tree_view_mode');
       if (legacy === 'all' || legacy === 'completed') return legacy;
     } catch {}
@@ -121,32 +119,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   const [hoveredMediaLoading, setHoveredMediaLoading] = useState<boolean>(false);
   const hoverDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Fetch all sessions from SQLite backend
-  useEffect(() => {
-    let isMounted = true;
-    const fetchAllSessions = async () => {
-      setLoadingSessions(true);
-      try {
-        if (window.electronAPI?.getSessions) {
-          const res = await window.electronAPI.getSessions();
-          if (isMounted) {
-            setSessions(res || []);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load sessions for timeline:', err);
-      } finally {
-        if (isMounted) {
-          setLoadingSessions(false);
-        }
-      }
-    };
-    fetchAllSessions();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   // Filter games based on search, statusFilter, and treeTab
   const filteredGamesMap = useMemo(() => {
@@ -291,273 +263,61 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     // theo mốc thời gian hoàn thành hoặc chơi gần nhất.
     // Các game không có mốc thời gian hoặc <= 2020 được gom vào nhóm "2020 về trước".
     // =========================================================================
-    if (treeTab === 'all') {
-      const monthGamesMap = new Map<string, TimelineGameItem[]>();
-      const before2020Games: TimelineGameItem[] = [];
+    const monthGamesMap = new Map<string, TimelineGameItem[]>();
+    const before2020Games: TimelineGameItem[] = [];
 
-      for (const game of filteredGamesMap.values()) {
-        const refDate = game.completed_at || game.last_played_at;
-        const item: TimelineGameItem = {
-          game,
-          monthPlaytimeMinutes: game.playtime_minutes || 0,
-          sessionCount: 1,
-          lastSessionDate: refDate || undefined,
-          isCompletedInMonth: game.status === 'completed',
-        };
-
-        if (refDate && refDate.length >= 7 && refDate.includes('-')) {
-          const yearNum = parseInt(refDate.slice(0, 4), 10);
-          if (yearNum <= 2020) {
-            before2020Games.push(item);
-          } else {
-            const monthKey = refDate.slice(0, 7); // 'YYYY-MM'
-            if (!monthGamesMap.has(monthKey)) {
-              monthGamesMap.set(monthKey, []);
-            }
-            monthGamesMap.get(monthKey)!.push(item);
-          }
-        } else {
-          before2020Games.push(item);
-        }
-      }
-
-      const monthsArray: TimelineMonthGroup[] = [];
-
-      monthGamesMap.forEach((items, monthKey) => {
-        const [yearStr, monthStr] = monthKey.split('-');
-        const year = parseInt(yearStr, 10);
-        const month = parseInt(monthStr, 10);
-        if (isNaN(year) || isNaN(month)) return;
-
-        items.sort((a, b) => {
-          const da = a.game.completed_at || a.game.last_played_at || '';
-          const db = b.game.completed_at || b.game.last_played_at || '';
-          return db.localeCompare(da);
-        });
-
-        const totalMinutes = items.reduce((acc, it) => acc + (it.game.playtime_minutes || 0), 0);
-
-        monthsArray.push({
-          key: monthKey,
-          year,
-          month,
-          monthLabel: `Tháng ${month.toString().padStart(2, '0')}`,
-          totalMinutes,
-          games: items,
-        });
-      });
-
-      const yearMap = new Map<number, TimelineMonthGroup[]>();
-      for (const m of monthsArray) {
-        if (!yearMap.has(m.year)) {
-          yearMap.set(m.year, []);
-        }
-        yearMap.get(m.year)!.push(m);
-      }
-
-      const yearGroups: TimelineYearGroup[] = [];
-      yearMap.forEach((months, year) => {
-        months.sort((a, b) => b.month - a.month);
-        const totalMinutes = months.reduce((acc, m) => acc + m.totalMinutes, 0);
-        const uniqueGameIds = new Set(months.flatMap((m) => m.games.map((g) => g.game.id)));
-
-        yearGroups.push({
-          year,
-          totalMinutes,
-          uniqueGamesCount: uniqueGameIds.size,
-          months,
-        });
-      });
-
-      yearGroups.sort((a, b) => b.year - a.year);
-
-      // Cột mốc 2020 về trước cho các game không có thời gian
-      if (before2020Games.length > 0) {
-        before2020Games.sort((a, b) => a.game.title.localeCompare(b.game.title));
-        const totalMinutes = before2020Games.reduce((acc, it) => acc + (it.game.playtime_minutes || 0), 0);
-        yearGroups.push({
-          year: 2020,
-          totalMinutes,
-          uniqueGamesCount: before2020Games.length,
-          months: [
-            {
-              key: '2020-00',
-              year: 2020,
-              month: 0,
-              monthLabel: '2020 về trước',
-              totalMinutes,
-              games: before2020Games,
-            },
-          ],
-        });
-      }
-
-      return yearGroups;
-    }
-
-    // =========================================================================
-    // TAB 3 (PHỤ): "THEO DÕI THỜI GIAN CHƠI" (Playtime Tracker across months)
-    // Gom nhóm theo các phiên chơi thực tế qua từng tháng.
-    // (Một game có thể trải dài qua nhiều tháng để theo dõi số giờ chơi từng tháng)
-    // =========================================================================
-    // Map: 'YYYY-MM' -> Map<gameId, { intervals: Array<[number, number]>, fallbackMinutes: number, count: number, lastDate?: string }>
-    const monthStats = new Map<
-      string,
-      Map<
-        number,
-        {
-          intervals: Array<[number, number]>;
-          fallbackMinutes: number;
-          count: number;
-          lastDate?: string;
-        }
-      >
-    >();
-
-    // Set of gameIds that have at least one real (non-manual) play session recorded
-    const gamesWithSessions = new Set<number>();
-
-    const parseTs = (raw?: string | null): number | null => {
-      if (!raw) return null;
-      const ms = new Date(raw.trim().replace(' ', 'T')).getTime();
-      return Number.isFinite(ms) ? ms : null;
-    };
-
-    // 1. Process all real play sessions (exclude 'manual' audit/delta rows)
-    for (const session of sessions) {
-      if (!session.start_time) continue;
-      if (session.source === 'manual') continue;
-      const game = filteredGamesMap.get(session.game_id);
-      if (!game) continue; // Not matching current filter
-
-      gamesWithSessions.add(game.id);
-
-      // Extract YYYY-MM safely
-      const datePart = session.start_time.slice(0, 7); // e.g. "2026-11"
-      if (!datePart || datePart.length !== 7 || !datePart.includes('-')) continue;
-
-      if (!monthStats.has(datePart)) {
-        monthStats.set(datePart, new Map());
-      }
-      const gMap = monthStats.get(datePart)!;
-      const current = gMap.get(game.id) || { intervals: [], fallbackMinutes: 0, count: 0 };
-
-      const startMs = parseTs(session.start_time);
-      const endMs = parseTs(session.end_time) ?? parseTs((session as any).last_poll);
-      if (startMs !== null && endMs !== null && endMs > startMs) {
-        current.intervals.push([startMs, endMs]);
-      } else {
-        current.fallbackMinutes += Math.max(0, session.duration_minutes || 0);
-      }
-
-      current.count += 1;
-      if (!current.lastDate || session.start_time > current.lastDate) {
-        current.lastDate = session.start_time;
-      }
-      gMap.set(game.id, current);
-    }
-
-    // 2. Fallback for games without sessions (imported from AMD or added manually)
-    // Place them in the month of their last_played_at or completed_at (never created_at)
     for (const game of filteredGamesMap.values()) {
-      if (!gamesWithSessions.has(game.id)) {
-        const refDate = game.last_played_at || game.completed_at;
-        if (!refDate) continue;
-        const datePart = refDate.slice(0, 7);
-        if (!datePart || datePart.length !== 7 || !datePart.includes('-')) continue;
+      const refDate = game.completed_at || game.last_played_at;
+      const item: TimelineGameItem = {
+        game,
+        monthPlaytimeMinutes: game.playtime_minutes || 0,
+        sessionCount: 1,
+        lastSessionDate: refDate || undefined,
+        isCompletedInMonth: game.status === 'completed',
+      };
 
-        if (!monthStats.has(datePart)) {
-          monthStats.set(datePart, new Map());
+      if (refDate && refDate.length >= 7 && refDate.includes('-')) {
+        const yearNum = parseInt(refDate.slice(0, 4), 10);
+        if (yearNum <= 2020) {
+          before2020Games.push(item);
+        } else {
+          const monthKey = refDate.slice(0, 7); // 'YYYY-MM'
+          if (!monthGamesMap.has(monthKey)) {
+            monthGamesMap.set(monthKey, []);
+          }
+          monthGamesMap.get(monthKey)!.push(item);
         }
-        const gMap = monthStats.get(datePart)!;
-        if (!gMap.has(game.id)) {
-          gMap.set(game.id, {
-            intervals: [],
-            fallbackMinutes: game.playtime_minutes || 0,
-            count: 1,
-            lastDate: refDate,
-          });
-        }
+      } else {
+        before2020Games.push(item);
       }
     }
 
-    const computeUnionMinutes = (intervals: Array<[number, number]>, fallbackMinutes: number): number => {
-      if (intervals.length === 0) return fallbackMinutes;
-      const sorted = [...intervals].sort((a, b) => a[0] - b[0]);
-      let unionMs = 0;
-      let cursorEnd = -1;
-      for (const [start, end] of sorted) {
-        if (start > cursorEnd) {
-          unionMs += end - start;
-          cursorEnd = end;
-        } else if (end > cursorEnd) {
-          unionMs += end - cursorEnd;
-          cursorEnd = end;
-        }
-      }
-      return Math.round(unionMs / 60000) + fallbackMinutes;
-    };
-
-    // 3. Assemble Month Groups
     const monthsArray: TimelineMonthGroup[] = [];
 
-    monthStats.forEach((gMap, monthKey) => {
+    monthGamesMap.forEach((items, monthKey) => {
       const [yearStr, monthStr] = monthKey.split('-');
       const year = parseInt(yearStr, 10);
       const month = parseInt(monthStr, 10);
-
       if (isNaN(year) || isNaN(month)) return;
 
-      let monthTotalMinutes = 0;
-      const gameItems: TimelineGameItem[] = [];
-
-      gMap.forEach((stats, gameId) => {
-        const game = filteredGamesMap.get(gameId);
-        if (!game) return;
-
-        const playtime = computeUnionMinutes(stats.intervals, stats.fallbackMinutes);
-        monthTotalMinutes += playtime;
-
-        // Check if completed in this month
-        let isCompletedInMonth = false;
-        if (game.status === 'completed') {
-          if (game.completed_at && game.completed_at.startsWith(monthKey)) {
-            isCompletedInMonth = true;
-          } else if (game.last_played_at && game.last_played_at.startsWith(monthKey)) {
-            isCompletedInMonth = true;
-          }
-        }
-
-        gameItems.push({
-          game,
-          monthPlaytimeMinutes: playtime,
-          sessionCount: stats.count,
-          lastSessionDate: stats.lastDate,
-          isCompletedInMonth,
-        });
+      items.sort((a, b) => {
+        const da = a.game.completed_at || a.game.last_played_at || '';
+        const db = b.game.completed_at || b.game.last_played_at || '';
+        return db.localeCompare(da);
       });
 
-      // Sort games within this month: Highest playtime first
-      gameItems.sort((a, b) => {
-        if (b.monthPlaytimeMinutes !== a.monthPlaytimeMinutes) {
-          return b.monthPlaytimeMinutes - a.monthPlaytimeMinutes;
-        }
-        return b.game.playtime_minutes - a.game.playtime_minutes;
-      });
+      const totalMinutes = items.reduce((acc, it) => acc + (it.game.playtime_minutes || 0), 0);
 
-      if (gameItems.length > 0) {
-        monthsArray.push({
-          key: monthKey,
-          year,
-          month,
-          monthLabel: `Tháng ${month.toString().padStart(2, '0')}`,
-          totalMinutes: monthTotalMinutes,
-          games: gameItems,
-        });
-      }
+      monthsArray.push({
+        key: monthKey,
+        year,
+        month,
+        monthLabel: `Tháng ${month.toString().padStart(2, '0')}`,
+        totalMinutes,
+        games: items,
+      });
     });
 
-    // 4. Assemble Year Groups
     const yearMap = new Map<number, TimelineMonthGroup[]>();
     for (const m of monthsArray) {
       if (!yearMap.has(m.year)) {
@@ -568,9 +328,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
     const yearGroups: TimelineYearGroup[] = [];
     yearMap.forEach((months, year) => {
-      // Sort months descending: Tháng 12 -> Tháng 1
       months.sort((a, b) => b.month - a.month);
-
       const totalMinutes = months.reduce((acc, m) => acc + m.totalMinutes, 0);
       const uniqueGameIds = new Set(months.flatMap((m) => m.games.map((g) => g.game.id)));
 
@@ -582,11 +340,31 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       });
     });
 
-    // Sort years descending: 2026 -> 2025 -> 2024...
     yearGroups.sort((a, b) => b.year - a.year);
 
+    // Cột mốc 2020 về trước cho các game không có thời gian
+    if (before2020Games.length > 0) {
+      before2020Games.sort((a, b) => a.game.title.localeCompare(b.game.title));
+      const totalMinutes = before2020Games.reduce((acc, it) => acc + (it.game.playtime_minutes || 0), 0);
+      yearGroups.push({
+        year: 2020,
+        totalMinutes,
+        uniqueGamesCount: before2020Games.length,
+        months: [
+          {
+            key: '2020-00',
+            year: 2020,
+            month: 0,
+            monthLabel: '2020 về trước',
+            totalMinutes,
+            games: before2020Games,
+          },
+        ],
+      });
+    }
+
     return yearGroups;
-  }, [filteredGamesMap, sessions, treeTab]);
+  }, [filteredGamesMap, treeTab]);
 
   const loadMediaForGame = useCallback((gameTitle: string) => {
     if (mediaCache.current.has(gameTitle)) {
@@ -685,31 +463,23 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                 className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
                   treeTab === 'completed'
                     ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
-                    : treeTab === 'all'
-                    ? 'border-blue-400/40 bg-blue-400/15 text-blue-400'
-                    : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
+                    : 'border-blue-400/40 bg-blue-400/15 text-blue-400'
                 }`}
               >
-                {treeTab === 'completed'
-                  ? '🏆 Cột mốc phá đảo'
-                  : treeTab === 'all'
-                  ? '🎮 Tất cả game'
-                  : '⏱️ Theo dõi thời gian chơi'}
+                {treeTab === 'completed' ? '🏆 Cột mốc phá đảo' : '🎮 Tất cả game'}
               </span>
             </div>
             <p className="text-xs text-[#8e95a5]">
               {treeTab === 'completed'
                 ? 'Danh sách game đã về nước theo đúng tháng/năm phá đảo (mỗi game xuất hiện duy nhất 1 lần)'
-                : treeTab === 'all'
-                ? 'Toàn bộ thư viện trò chơi theo mốc thời gian hoàn thành hoặc chơi gần nhất'
-                : 'Theo dõi chi tiết số giờ chơi game qua từng tháng (game có thể trải dài qua nhiều tháng)'}
+                : 'Toàn bộ thư viện trò chơi theo mốc thời gian hoàn thành hoặc chơi gần nhất'}
             </p>
           </div>
         </div>
 
         {/* Actions & Jump Bar */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Tree View 3-Tab Switcher: Đã phá đảo (chính) | Tất cả game | Theo dõi thời gian chơi (phụ) */}
+          {/* Tree View 2-Tab Switcher: Đã phá đảo (chính) | Tất cả game */}
           <div className="flex items-center rounded-xl border border-[#2a2e3d] bg-[#12141c] p-1 shadow-sm">
             <button
               type="button"
@@ -747,25 +517,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             >
               <Gamepad2 className="h-3.5 w-3.5" />
               <span>Tất cả game ({totalCount})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setTreeTab('sessions');
-                try {
-                  localStorage.setItem('gv_tree_view_tab', 'sessions');
-                } catch {}
-              }}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
-                treeTab === 'sessions'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md shadow-emerald-600/30'
-                  : 'text-[#8e95a5] hover:text-white'
-              }`}
-              title="Theo dõi chi tiết số giờ chơi game qua từng tháng (game có thể trải dài qua nhiều tháng)"
-            >
-              <Clock className="h-3.5 w-3.5 text-emerald-300" />
-              <span>Theo dõi thời gian chơi</span>
             </button>
           </div>
 
@@ -825,12 +576,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         </div>
       </div>
 
-      {loadingSessions ? (
-        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
-          <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#ff2a44] border-t-transparent" />
-          <p className="text-xs text-[#8e95a5]">Đang tập hợp dữ liệu thời gian chơi...</p>
-        </div>
-      ) : timelineData.length === 0 ? (
+      {timelineData.length === 0 ? (
         /* Empty State */
         <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-3xl border border-dashed border-[#2a2e3d] bg-[#161821]/40 p-12 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2a2e3d] bg-[#161821] text-[#8e95a5]">
@@ -840,9 +586,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           <p className="mt-1.5 max-w-md text-xs text-[#8e95a5]">
             {treeTab === 'completed'
               ? 'Chưa có tựa game nào được đánh dấu đã phá đảo. Hãy cập nhật trạng thái game đã phá đảo để lưu giữ cột mốc.'
-              : treeTab === 'all'
-              ? 'Không có trò chơi nào phù hợp với bộ lọc tìm kiếm hiện tại.'
-              : 'Không tìm thấy dữ liệu phiên chơi nào. Hãy chơi game hoặc nhập lịch sử từ AMD để hiển thị mốc thời gian.'}
+              : 'Không có trò chơi nào phù hợp với bộ lọc tìm kiếm hiện tại.'}
           </p>
         </div>
       ) : (
@@ -879,15 +623,11 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                     <div className="flex items-center gap-2 border-l border-[#2a2e3d] pl-3 text-xs text-[#8e95a5]">
                       <span className="font-semibold text-[#f1f3f7]">
                         {yearGroup.uniqueGamesCount}{' '}
-                        {treeTab === 'completed'
-                          ? 'game đã phá đảo'
-                          : treeTab === 'all'
-                          ? 'trò chơi'
-                          : 'game'}
+                        {treeTab === 'completed' ? 'game đã phá đảo' : 'trò chơi'}
                       </span>
                       <span>•</span>
                       <span className="font-bold text-amber-400">
-                        {yearHours} giờ {treeTab === 'sessions' ? 'đã chơi' : 'tổng cộng'}
+                        {yearHours} giờ tổng cộng
                       </span>
                     </div>
                     {isCollapsed ? (
@@ -928,18 +668,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                             <div className="flex items-center gap-2 text-xs text-[#8e95a5]">
                               <span className="rounded-md bg-[#202433] px-2 py-0.5 font-medium text-[#f1f3f7]">
                                 {monthGroup.games.length}{' '}
-                                {treeTab === 'completed'
-                                  ? 'game đã phá đảo'
-                                  : treeTab === 'all'
-                                  ? 'trò chơi'
-                                  : 'game'}
+                                {treeTab === 'completed' ? 'game đã phá đảo' : 'trò chơi'}
                               </span>
                               <span>•</span>
                               <span className="flex items-center gap-1 font-bold text-emerald-400">
                                 <Clock className="h-3 w-3" />
-                                {treeTab === 'sessions'
-                                  ? `Đã chơi ${formatPlaytime(monthGroup.totalMinutes)}`
-                                  : `Tổng thời lượng ${formatPlaytime(monthGroup.totalMinutes)}`}
+                                {`Tổng thời lượng ${formatPlaytime(monthGroup.totalMinutes)}`}
                               </span>
                             </div>
                           </div>
@@ -1006,7 +740,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                       >
                                         <Trophy className="h-3 w-3" />
                                       </div>
-                                    ) : treeTab === 'all' ? (
+                                    ) : (
                                       <div
                                         className={`absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-md ${
                                           getStatusMeta(item.game.status).colorClass
@@ -1017,31 +751,13 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                         )}
                                         <span className="truncate max-w-[65px]">{getStatusMeta(item.game.status).label}</span>
                                       </div>
-                                    ) : (
-                                      /* sessions mode: show monthly playtime */
-                                      <div className="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-950/80 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 shadow-sm backdrop-blur-md">
-                                        <Clock className="h-2.5 w-2.5" />
-                                        <span>{formatPlaytime(item.monthPlaytimeMinutes)}</span>
-                                      </div>
                                     )}
 
-                                    {/* Top-right Badge based on treeTab */}
-                                    {treeTab === 'completed' || treeTab === 'all' ? (
-                                      <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-[#2a2e3d] bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 shadow-sm backdrop-blur-md">
-                                        <Clock className="h-2.5 w-2.5" />
-                                        <span>{formatPlaytime(item.game.playtime_minutes)}</span>
-                                      </div>
-                                    ) : (
-                                      /* sessions mode: show trophy if completed in this month */
-                                      item.isCompletedInMonth && (
-                                        <div
-                                          className="absolute top-2 right-2 z-10 flex h-5 w-5 items-center justify-center rounded-md border border-amber-400/50 bg-amber-950/80 text-amber-300 shadow-sm backdrop-blur-md"
-                                          title="Đã phá đảo trong tháng này"
-                                        >
-                                          <Trophy className="h-3 w-3" />
-                                        </div>
-                                      )
-                                    )}
+                                    {/* Top-right Playtime Badge */}
+                                    <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-[#2a2e3d] bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 shadow-sm backdrop-blur-md">
+                                      <Clock className="h-2.5 w-2.5" />
+                                      <span>{formatPlaytime(item.game.playtime_minutes)}</span>
+                                    </div>
 
                                     {/* Gradient overlay at bottom */}
                                     <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#161821] via-[#161821]/70 to-transparent" />
@@ -1061,13 +777,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                           ? (item.game.completed_at && parseInt(item.game.completed_at.slice(0, 4), 10) > 2020
                                               ? formatSafeDate(item.game.completed_at)
                                               : '2020 về trước')
-                                          : treeTab === 'all'
-                                          ? (item.game.last_played_at && parseInt(item.game.last_played_at.slice(0, 4), 10) > 2020
+                                          : (item.game.last_played_at && parseInt(item.game.last_played_at.slice(0, 4), 10) > 2020
                                               ? `Chơi: ${formatSafeDate(item.game.last_played_at)}`
-                                              : '2020 về trước')
-                                          : (item.sessionCount > 0
-                                              ? `${item.sessionCount} phiên`
-                                              : 'Tổng cộng')}
+                                              : '2020 về trước')}
                                       </span>
                                       {item.game.user_rating && (
                                         <span className="flex items-center gap-0.5 font-bold text-amber-400">
@@ -1193,11 +905,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           <div className="mt-2.5 grid grid-cols-2 gap-2 rounded-xl border border-[#2a2e3d]/80 bg-[#10121a] p-2.5">
             <div>
               <p className="text-[10px] font-medium text-[#8e95a5]">
-                {treeTab === 'completed'
-                  ? 'Thời điểm phá đảo'
-                  : treeTab === 'all'
-                  ? 'Mốc thời gian'
-                  : `Trong ${hoveredData.monthLabel}`}
+                {treeTab === 'completed' ? 'Thời điểm phá đảo' : 'Mốc thời gian'}
               </p>
               <p className="flex items-center gap-1 text-xs font-bold text-emerald-400 mt-0.5">
                 {treeTab === 'completed' ? (
@@ -1209,7 +917,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                         : '2020 về trước'}
                     </span>
                   </>
-                ) : treeTab === 'all' ? (
+                ) : (
                   <>
                     <Calendar className="h-3 w-3 text-blue-400" />
                     <span>
@@ -1217,11 +925,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                         ? formatSafeDate(hoveredData.item.lastSessionDate)
                         : '2020 về trước'}
                     </span>
-                  </>
-                ) : (
-                  <>
-                    <Clock className="h-3 w-3" />
-                    {formatPlaytime(hoveredData.item.monthPlaytimeMinutes)}
                   </>
                 )}
               </p>

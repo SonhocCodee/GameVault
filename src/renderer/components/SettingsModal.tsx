@@ -216,7 +216,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (window.electronAPI?.getAuthStatus) {
         const auth = await window.electronAPI.getAuthStatus();
         setDriveLoggedIn(Boolean(auth?.loggedIn));
-        setDriveAccountEmail(auth?.user?.email || null);
+        setDriveAccountEmail(auth?.profile?.email || null);
         if (auth?.loggedIn && window.electronAPI?.getDriveStorageQuota) {
           const q = await window.electronAPI.getDriveStorageQuota();
           setDriveQuota(q);

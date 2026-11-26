@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { CalendarDays, RefreshCw, Trophy, Users, Vote } from "lucide-react";
 import type {
   CommunityAdapter,
+  CommunitySearchRequest,
   PublicGame,
   SharedLibraryGame,
 } from "../../shared/community.ts";
@@ -25,9 +26,13 @@ export function gameToPublic(game: Game): SharedLibraryGame {
     coverUrl: game.cover_url,
     status: game.status,
     playtimeMinutes: game.playtime_minutes,
+    recordedPlaytimeMinutes: game.recorded_playtime_minutes ?? game.playtime_minutes,
     localGameId: game.id,
   };
 }
+
+const COMMUNITY_PROFILE_SYNC_COOLDOWN_MS = 3 * 60 * 1000;
+let lastCommunityProfileSyncAt = 0;
 
 export function createDesktopAdapter(publicBase: string): CommunityAdapter {
   return {
@@ -37,8 +42,13 @@ export function createDesktopAdapter(publicBase: string): CommunityAdapter {
       method = "GET",
       body?: unknown,
     ): Promise<T> => {
-      if (method === "PUT" && path === "/me" && (body as any)?.shareLibrary)
-        await window.electronAPI.syncLibrary?.();
+      if (method === "GET" && path === "/me") {
+        const now = Date.now();
+        if (now - lastCommunityProfileSyncAt >= COMMUNITY_PROFILE_SYNC_COOLDOWN_MS) {
+          lastCommunityProfileSyncAt = now;
+          await window.electronAPI.syncLibrary?.();
+        }
+      }
       return window.electronAPI.communityRequest!<T>(
         `/api/community${path}`,
         method,
@@ -51,6 +61,9 @@ export function createDesktopAdapter(publicBase: string): CommunityAdapter {
         file.type,
       ),
     signIn: async () => {
+      if (!document.querySelector("[data-navbar-sign-in]")) {
+        document.querySelector<HTMLButtonElement>('[aria-label="Menu tài khoản"]')?.click();
+      }
       document
         .querySelector<HTMLButtonElement>("[data-navbar-sign-in]")
         ?.focus();
@@ -60,12 +73,18 @@ export function createDesktopAdapter(publicBase: string): CommunityAdapter {
 }
 
 export function DesktopCommunity({
+  onBack,
+  searchRequest,
   authStatus,
   initialGame,
+  profileRequest,
   onLocalGame,
 }: {
+  onBack?: () => void;
+  searchRequest?: CommunitySearchRequest;
   authStatus?: AuthStatus | null;
   initialGame?: PublicGame | null;
+  profileRequest?: number;
   onLocalGame?: (id: number) => void;
 }) {
   const [base, setBase] = useState("");
@@ -146,11 +165,14 @@ export function DesktopCommunity({
         </div>
       )}
       <CommunityHub
+        onBackToLibrary={onBack}
+        searchRequest={searchRequest}
         key={`${authStatus?.profile?.uid || "guest"}:${reviewVersion}`}
         api={api}
         embedded
         shellAuth={authStatus}
         initialGame={initialGame}
+        profileRequest={profileRequest}
         onLocalGame={onLocalGame}
         games={games.map(gameToPublic)}
         onAdd={async (g) => {

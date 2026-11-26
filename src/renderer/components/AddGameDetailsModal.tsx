@@ -18,8 +18,8 @@ export interface AddGameDetailsModalProps {
 
 /**
  * Rating/review prompt shown before a game found via external search is
- * added to the library ("Đã phá đảo" or "Chờ chơi"). Both fields are
- * optional — confirm adds the game straight away.
+ * added to the library as completed. Both fields are optional. Backlog
+ * entries only ask for confirmation and do not collect ratings/reviews.
  */
 export const AddGameDetailsModal: React.FC<AddGameDetailsModalProps> = ({
   pending,
@@ -80,6 +80,17 @@ export const AddGameDetailsModal: React.FC<AddGameDetailsModalProps> = ({
         )}
 
         <div className="space-y-4 text-xs">
+          {isCompleted ? (
+            <p className="text-[#8e95a5]">
+              Có thể chấm điểm game đã chơi trước đây mà không cần chạy lại. Ngày phá đảo để trống cho đến khi bạn chọn trong chi tiết game.
+            </p>
+          ) : (
+            <p className="text-[#8e95a5]">
+              Thêm game vào danh sách chờ chơi. Bạn có thể chấm điểm và viết cảm nhận sau khi trải nghiệm game.
+            </p>
+          )}
+
+          {isCompleted && <>
           {/* 10-star personal rating */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">
@@ -136,14 +147,11 @@ export const AddGameDetailsModal: React.FC<AddGameDetailsModalProps> = ({
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
               disabled={busy}
-              placeholder={
-                isCompleted
-                  ? 'Cảm nhận về game... (để trống nếu không muốn viết)'
-                  : 'Lý do muốn chơi, ghi chú... (để trống nếu không muốn viết)'
-              }
+              placeholder="Cảm nhận về game... (để trống nếu không muốn viết)"
               className="w-full resize-none rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 text-white placeholder-[#5b6273] outline-none focus:border-[#ff2a44] disabled:opacity-50"
             />
           </div>
+          </>}
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-2 pt-1">
@@ -157,7 +165,7 @@ export const AddGameDetailsModal: React.FC<AddGameDetailsModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onConfirm(rating, notes)}
+              onClick={() => onConfirm(isCompleted ? rating : null, isCompleted ? notes : '')}
               disabled={busy}
               className={`flex items-center gap-1.5 rounded-lg px-4 py-1.5 font-bold text-white shadow disabled:opacity-50 ${
                 isCompleted

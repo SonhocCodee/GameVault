@@ -7,6 +7,7 @@ import { updateGame, getDb } from './db.ts';
 import { normalizeForMatch, resolveFolderAlias, levenshteinDistance } from './media.ts';
 import { optimizeAndSaveCover } from './thumbnails.ts';
 import { getCloudGameCover, cacheCloudGameCover, uploadCloudGameCover } from './cloud-db.ts';
+import { encryptSecretString, decryptSecretString, writePrivateFileAtomic } from './secure-storage.ts';
 
 // In Electron runtime, electronModule has app, dialog. In test mode, fallback safely.
 const electron = (typeof electronModule === 'object' && electronModule !== null ? electronModule : {}) as any;
@@ -1119,7 +1120,8 @@ export function getGoogleConfig(): GoogleConfig {
     const p = getSettingsPath();
     if (fs.existsSync(p)) {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      return { apiKey: parsed.googleApiKey, cseId: parsed.googleCseId };
+      const apiKey = parsed.googleApiKey ? decryptSecretString(String(parsed.googleApiKey)) : undefined;
+      return { apiKey, cseId: parsed.googleCseId };
     }
   } catch {}
   return {};
@@ -1131,13 +1133,10 @@ export function setGoogleConfig(apiKey: string, cseId: string): GoogleConfig {
   try {
     if (fs.existsSync(p)) settings = JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch {}
-  settings.googleApiKey = apiKey;
+  settings.googleApiKey = apiKey ? encryptSecretString(apiKey) : '';
   settings.googleCseId = cseId;
   try {
-    if (!fs.existsSync(path.dirname(p))) fs.mkdirSync(path.dirname(p), { recursive: true });
-    const tmp = `${p}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(settings));
-    fs.renameSync(tmp, p);
+    writePrivateFileAtomic(p, JSON.stringify(settings));
   } catch {}
   return { apiKey, cseId };
 }
@@ -1161,7 +1160,8 @@ export interface IgdbConfig {
 export function getIgdbConfig(): IgdbConfig {
   try {
     const parsed = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf-8'));
-    return { clientId: parsed.igdbClientId, clientSecret: parsed.igdbClientSecret };
+    const clientSecret = parsed.igdbClientSecret ? decryptSecretString(String(parsed.igdbClientSecret)) : undefined;
+    return { clientId: parsed.igdbClientId, clientSecret };
   } catch {
     return {};
   }
@@ -1174,16 +1174,13 @@ export function setIgdbConfig(clientId: string, clientSecret: string): IgdbConfi
     if (fs.existsSync(p)) settings = JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch {}
   settings.igdbClientId = clientId;
-  settings.igdbClientSecret = clientSecret;
+  settings.igdbClientSecret = clientSecret ? encryptSecretString(clientSecret) : '';
   // Credentials changed → drop any cached token
   igdbTokenCache = null;
   delete settings.igdbToken;
   delete settings.igdbTokenExpiresAt;
   try {
-    if (!fs.existsSync(path.dirname(p))) fs.mkdirSync(path.dirname(p), { recursive: true });
-    const tmp = `${p}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(settings));
-    fs.renameSync(tmp, p);
+    writePrivateFileAtomic(p, JSON.stringify(settings));
   } catch {}
   return { clientId, clientSecret };
 }
@@ -1198,9 +1195,10 @@ async function igdbAccessToken(opts: LiveResolveOptions): Promise<{ clientId: st
   // Reuse a persisted token from a previous run
   try {
     const parsed = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf-8'));
-    if (typeof parsed.igdbToken === 'string' && typeof parsed.igdbTokenExpiresAt === 'number' && Date.now() < parsed.igdbTokenExpiresAt) {
-      igdbTokenCache = { token: parsed.igdbToken, expiresAt: parsed.igdbTokenExpiresAt };
-      return { clientId: cfg.clientId, token: parsed.igdbToken };
+    const storedToken = typeof parsed.igdbToken === 'string' ? decryptSecretString(parsed.igdbToken) : '';
+    if (storedToken && typeof parsed.igdbTokenExpiresAt === 'number' && Date.now() < parsed.igdbTokenExpiresAt) {
+      igdbTokenCache = { token: storedToken, expiresAt: parsed.igdbTokenExpiresAt };
+      return { clientId: cfg.clientId, token: storedToken };
     }
   } catch {}
 
@@ -1217,11 +1215,9 @@ async function igdbAccessToken(opts: LiveResolveOptions): Promise<{ clientId: st
     try {
       let settings: Record<string, unknown> = {};
       if (fs.existsSync(p)) settings = JSON.parse(fs.readFileSync(p, 'utf-8'));
-      settings.igdbToken = data.access_token;
+      settings.igdbToken = encryptSecretString(data.access_token);
       settings.igdbTokenExpiresAt = expiresAt;
-      const tmp = `${p}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(settings));
-      fs.renameSync(tmp, p);
+      writePrivateFileAtomic(p, JSON.stringify(settings));
     } catch {}
     return { clientId: cfg.clientId, token: data.access_token };
   } catch {

@@ -6,6 +6,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { getDb, getDbDir, getSetting, setSetting } from './db.ts';
 import { DEFAULT_SCREENSHOTS_DIR, DEFAULT_MEDIA_DIR } from './sync-screenshots.ts';
 import { SETTING_VAULT_ROOT, DEFAULT_VAULT_ROOT, setVaultRoot } from './save-manager.ts';
+import { encryptSecretString, decryptSecretString } from './secure-storage.ts';
 import type { AppSettings, F6ProcessStatus, PlaytimeWatchStatus } from '../shared/types.js';
 
 const execAsync = promisify(exec);
@@ -72,7 +73,7 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
   const setupCompletedStr = getSetting('setup_completed', customDb);
   const playtimeWatchStr = getSetting('playtime_watch_enabled', customDb);
   const hddModeStr = getSetting('hdd_mode', customDb);
-  const googleApiKey = getSetting('google_api_key', customDb) || '';
+  const googleApiKey = decryptSecretString(getSetting('google_api_key', customDb) || '');
   const googleCseId = getSetting('google_cse_id', customDb) || '';
 
   // Cloud & Dual Image Storage
@@ -81,7 +82,7 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
   const customS3Endpoint = getSetting('custom_s3_endpoint', customDb) || '';
   const customS3Bucket = getSetting('custom_s3_bucket', customDb) || '';
   const customS3AccessKeyId = getSetting('custom_s3_access_key_id', customDb) || '';
-  const customS3SecretAccessKey = getSetting('custom_s3_secret_access_key', customDb) || '';
+  const customS3SecretAccessKey = decryptSecretString(getSetting('custom_s3_secret_access_key', customDb) || '');
   const customS3Region = getSetting('custom_s3_region', customDb) || 'auto';
   const customS3PublicUrlBase = getSetting('custom_s3_public_url_base', customDb) || '';
   const googlePhotosAlbumId = getSetting('google_photos_album_id', customDb) || '';
@@ -135,6 +136,9 @@ export function maskSettingsSecrets(settings: AppSettings): AppSettings {
   if (copy.customS3Config && copy.customS3Config.secretAccessKey) {
     copy.customS3Config.hasSecretKey = true;
     copy.customS3Config.secretAccessKey = MASK_SECRET;
+  }
+  if (copy.googleApiKey) {
+    copy.googleApiKey = MASK_SECRET;
   }
   return copy;
 }
@@ -242,7 +246,12 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
     setSetting('hdd_mode', patch.hddMode ? 'true' : 'false', customDb);
   }
   if (patch.googleApiKey !== undefined) {
-    setSetting('google_api_key', patch.googleApiKey, customDb);
+    const apiKey = (patch.googleApiKey || '').trim();
+    if (apiKey === '') {
+      setSetting('google_api_key', '', customDb);
+    } else if (apiKey !== MASK_SECRET) {
+      setSetting('google_api_key', encryptSecretString(apiKey), customDb);
+    }
   }
   if (patch.googleCseId !== undefined) {
     setSetting('google_cse_id', patch.googleCseId, customDb);
@@ -275,7 +284,7 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
     if (s3.secretAccessKey !== undefined) {
       const secret = (s3.secretAccessKey || '').trim();
       if (secret && secret !== MASK_SECRET) {
-        setSetting('custom_s3_secret_access_key', secret, customDb);
+        setSetting('custom_s3_secret_access_key', encryptSecretString(secret), customDb);
       }
     }
     if (s3.region !== undefined) {

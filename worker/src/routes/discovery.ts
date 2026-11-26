@@ -7,6 +7,7 @@ import {
   communityFailure,
   CommunityError,
   ensureProfile,
+  communityAvatar,
   jsonBody,
   key,
   number,
@@ -75,9 +76,11 @@ async function cached<T>(
   )
     .bind(cacheKey, JSON.stringify(data), now + 21600)
     .run();
-  await env.DB.prepare("DELETE FROM community_steam_cache WHERE expires_at<?")
-    .bind(now - 86400)
-    .run();
+  if (Math.random() < 0.05) {
+    await env.DB.prepare("DELETE FROM community_steam_cache WHERE expires_at<?")
+      .bind(now - 86400)
+      .run();
+  }
   return data;
 }
 async function steamJson(url: string): Promise<any> {
@@ -304,30 +307,31 @@ export function registerDiscoveryRoutes(router: Router) {
     // A report is an independent opt-in. Never read a non-consenting private library.
     const rows = (await env.DB.prepare(`
       WITH participants AS (
-        SELECT l.uid,l.status,l.playtime_minutes FROM community_library l
+        SELECT l.uid,l.status,l.playtime_minutes,l.recorded_playtime_minutes FROM community_library l
         JOIN community_profiles p ON p.uid=l.uid
         WHERE l.game_key=? AND p.share_library=1 AND p.suspended=0
           AND (l.playtime_minutes>0 OR l.status IN ('completed','playing'))
         UNION ALL
-        SELECT f.uid,'completed',NULL FROM community_performance f
+        SELECT f.uid,'completed',NULL,NULL FROM community_performance f
         JOIN community_profiles p ON p.uid=f.uid
         WHERE f.game_key=? AND f.hidden=0 AND p.suspended=0
         AND NOT EXISTS(SELECT 1 FROM community_library l WHERE l.uid=f.uid AND l.game_key=f.game_key AND p.share_library=1 AND (l.playtime_minutes>0 OR l.status IN ('completed','playing')))
       )
-      SELECT x.uid,p.nickname,u.photo_url AS avatar_url,x.status,x.playtime_minutes,f.data_json,f.id AS report_id
+      SELECT x.uid,p.nickname,COALESCE('/community/profile-presets/avatars/'||p.avatar_preset||'.svg',u.photo_url) AS avatar_url,x.status,x.playtime_minutes,x.recorded_playtime_minutes,f.data_json,f.id AS report_id
       FROM participants x JOIN community_profiles p ON p.uid=x.uid
       LEFT JOIN users u ON u.uid=x.uid
       LEFT JOIN community_performance f ON f.uid=x.uid AND f.game_key=? AND f.hidden=0
       WHERE ${visibleTo("x")} ${status ? "AND x.status='completed'" : ""}
-      ORDER BY x.playtime_minutes DESC,x.uid ASC LIMIT ? OFFSET ?
+      ORDER BY x.recorded_playtime_minutes DESC,x.uid ASC LIMIT ? OFFSET ?
     `).bind(gameKey, gameKey, gameKey, uid, uid, limit + 1, offset).all<any>()).results || [];
     return jsonResponse(page(rows.map(r => {
-      const avatar = publicUrl(r.avatar_url);
+      const avatar = communityAvatar(request, r.avatar_url);
       return {
         uid: r.uid, nickname: safeName(r.nickname),
         ...(avatar ? { avatarUrl: avatar } : {}),
         status: r.status,
         playtimeMinutes: r.playtime_minutes == null ? null : Number(r.playtime_minutes),
+        recordedPlaytimeMinutes: r.recorded_playtime_minutes == null ? null : Number(r.recorded_playtime_minutes),
         performance: r.data_json ? { ...JSON.parse(r.data_json), id: r.report_id, uid: r.uid, nickname: safeName(r.nickname) } : null,
       };
     }), limit, offset));

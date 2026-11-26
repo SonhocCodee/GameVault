@@ -16,10 +16,9 @@ import type {
 } from "../../shared/community.ts";
 import {
   communityError,
-  minutesLabel,
   qualifyCommunityUrl,
 } from "./client.ts";
-import { Avatar } from "./CommunityWidgets.tsx";
+import { Avatar, PlaytimeDisplay } from "./CommunityWidgets.tsx";
 
 export function PlayerBoard({
   api,
@@ -78,7 +77,7 @@ export function PlayerBoard({
         <div>
           <h2>Top người chơi GameVault</h2>
           <p className="gv-muted">
-            Di chuột vào thẻ người chơi để xem nhanh những tựa game họ chơi nhiều giờ nhất.
+            Xếp hạng giờ chơi chỉ tính giờ app ghi nhận. Di chuột vào dấu ! để xem phần giờ tự thêm.
           </p>
         </div>
         <div className="gv-actions">
@@ -96,7 +95,7 @@ export function PlayerBoard({
       <div className="gv-chip-row" aria-label="Sắp xếp người chơi">
         {[
           ["completed", "Game đã phá đảo"],
-          ["hours", "Tổng giờ chơi"],
+          ["hours", "Giờ app ghi nhận"],
           ["games", "Tổng số game"],
         ].map(([value, label]) => (
           <button
@@ -210,9 +209,13 @@ export function PlayerBoard({
                       </span>
                     </div>
                     <div className="gv-stat-mini">
-                      <span className="gv-stat-mini-label">Giờ chơi</span>
+                      <span className="gv-stat-mini-label">Giờ tính top</span>
                       <span className="gv-stat-mini-value gv-text-cyan">
-                        {minutesLabel(player.totalMinutes)}
+                        <PlaytimeDisplay
+                          totalMinutes={player.totalMinutes}
+                          recordedMinutes={player.recordedMinutes}
+                          showRanked
+                        />
                       </span>
                     </div>
                     <div className="gv-stat-mini">
@@ -279,7 +282,11 @@ export function PlayerBoard({
                                 {tg.title}
                               </strong>
                               <span className="gv-muted" style={{ fontSize: 11 }}>
-                                {minutesLabel(tg.playtimeMinutes)}
+                                <PlaytimeDisplay
+                                  totalMinutes={tg.playtimeMinutes}
+                                  recordedMinutes={tg.recordedPlaytimeMinutes}
+                                  focusable={false}
+                                />
                                 {tg.status === "completed" ? " · Đã phá đảo" : ""}
                               </span>
                             </div>
@@ -301,13 +308,13 @@ export function PlayerBoard({
 
       {!loading && !error && board.items.length === 0 && (
         <div className="gv-empty">
-          <h3>Chưa có người chơi chia sẻ thư viện</h3>
+          <h3>Chưa có người chơi trên bảng xếp hạng</h3>
           <p>
-            Mở Hồ sơ và bật chia sẻ thư viện để số game phá đảo và giờ chơi của
+            Đồng bộ thư viện để số game phá đảo và giờ chơi của
             bạn góp mặt trên bảng xếp hạng.
           </p>
           <button type="button" className="gv-primary" onClick={onShareLibrary}>
-            Mở thiết lập chia sẻ
+            Hồ sơ của tôi
           </button>
         </div>
       )}

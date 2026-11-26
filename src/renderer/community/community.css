@@ -1,4 +1,5 @@
 .gv-community {
+  box-sizing: border-box;
   --gv-bg: #0e1015;
   --gv-surface: #161821;
   --gv-surface-2: #1c1f2b;
@@ -24,6 +25,43 @@
   overflow-x: hidden;
   line-height: 1.55;
   font-size: 14px;
+}
+
+.community-search {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #2a2e3d;
+  border-radius: 8px;
+  background: #161821;
+  color: #f1f3f7;
+}
+.community-search:focus-within { border-color: #38bdf8; }
+.community-search select, .community-search input, .community-search button {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.community-search select { max-width: 150px; border-right: 1px solid #2a2e3d; }
+.community-search option { background: #161821; }
+.community-search input { flex: 1; width: 0; min-width: 64px; }
+.community-search input::placeholder { color: #9aa2b5; }
+.community-search button { cursor: pointer; color: #7dd3fc; flex-shrink: 0; }
+.community-search :focus-visible { outline: 2px solid #38bdf8; outline-offset: -2px; }
+.gv-library-return { margin-bottom: 16px; }
+.gv-community > .community-search { margin-bottom: 16px; }
+.gv-player-search-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--gv-border); }
+.gv-community .gv-player-search-identity { flex: 1; min-width: 0; justify-content: flex-start; text-align: left; background: transparent; border: 0; }
+.gv-player-search-identity > span { min-width: 0; overflow-wrap: anywhere; }
+.gv-player-search-identity .gv-muted { display: block; font-weight: 400; }
+@media (max-width: 600px) {
+  .gv-player-search-row { flex-wrap: wrap; gap: 8px; }
+  .community-search select { max-width: 132px; }
 }
 
 .gv-community * {
@@ -95,6 +133,41 @@
 
 .gv-text-danger {
   color: #fb7185;
+}
+
+.gv-playtime {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.gv-playtime-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.gv-playtime-warning {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #fcd34d;
+  border-radius: 3px;
+  cursor: help;
+}
+
+.gv-playtime-ranked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.gv-playtime-total {
+  color: var(--gv-muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .gv-text-emerald {
@@ -314,6 +387,13 @@
   gap: 8px;
 }
 
+.gv-profile-activity-content {
+  display: grid;
+  gap: 16px;
+  min-height: 106px;
+  overflow-anchor: none;
+}
+
 .gv-community .gv-chip {
   padding: 5px 12px;
   min-height: 30px;
@@ -432,28 +512,36 @@
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  border-radius: 10px;
+  border-radius: 8px;
   font-weight: 800;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.gv-score-pill svg,
+.gv-star-gold {
+  color: #facc15 !important;
+  fill: #facc15 !important;
+  flex-shrink: 0;
 }
 
 .gv-score-high {
-  background: rgba(16, 185, 129, 0.18);
-  color: #6ee7b7;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.45);
 }
 
 .gv-score-mid {
-  background: rgba(245, 158, 11, 0.18);
-  color: #fcd34d;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.45);
 }
 
 .gv-score-low {
-  background: rgba(244, 63, 94, 0.18);
-  color: #fda4af;
-  border: 1px solid rgba(244, 63, 94, 0.4);
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.45);
 }
 
 /* Alerts & Banners */
@@ -1083,6 +1171,192 @@
   border-radius: 12px;
   border: 1px solid var(--gv-border-strong);
   background: #090a0d;
+}
+
+/* Metacritic-style Community Rating Showcase */
+.gv-meta-rating-card {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, rgba(19, 23, 34, 0.92) 0%, rgba(12, 15, 23, 0.96) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  margin: 10px 0 12px 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.gv-meta-rating-card:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: linear-gradient(135deg, rgba(25, 30, 44, 0.96) 0%, rgba(16, 20, 30, 0.98) 100%);
+}
+
+.gv-meta-score-box-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.gv-meta-score-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 12px;
+  font-size: 24px;
+  font-weight: 900;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  letter-spacing: -0.5px;
+}
+
+/* Metacritic Tiers */
+.gv-meta-score-badge.gv-meta-high {
+  background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+  color: #ffffff;
+  border: 2px solid #4ade80;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.gv-meta-score-badge.gv-meta-mid {
+  background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+  color: #ffffff;
+  border: 2px solid #fcd34d;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.gv-meta-score-badge.gv-meta-low {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  color: #ffffff;
+  border: 2px solid #f87171;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.gv-meta-score-badge.gv-meta-none {
+  background: #374151;
+  color: #9ca3af;
+  border: 2px solid #4b5563;
+  font-size: 20px;
+}
+
+.gv-meta-score-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gv-meta-score-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gv-meta-verdict {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.gv-meta-text-high {
+  color: #4ade80;
+}
+
+.gv-meta-text-mid {
+  color: #fbbf24;
+}
+
+.gv-meta-text-low {
+  color: #f87171;
+}
+
+.gv-meta-sub {
+  font-size: 12px;
+  color: var(--gv-muted);
+  font-weight: 500;
+}
+
+.gv-meta-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #d1d5db;
+  flex-wrap: wrap;
+}
+
+.gv-meta-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  color: #f3f4f6;
+}
+
+.gv-meta-sep {
+  color: #4b5563;
+}
+
+.gv-meta-count {
+  color: #9ca3af;
+}
+
+.gv-meta-count strong {
+  color: #f3f4f6;
+}
+
+.gv-meta-drop {
+  color: #f87171;
+  font-size: 12px;
+}
+
+/* Performance Box */
+.gv-meta-perf-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 10px;
+  margin-left: auto;
+}
+
+.gv-meta-perf-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  flex-shrink: 0;
+}
+
+.gv-meta-perf-label {
+  font-size: 11px;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.gv-meta-perf-value {
+  font-size: 14px;
+  color: #e5e7eb;
+}
+
+.gv-meta-perf-value strong {
+  color: #34d399;
+  font-size: 16px;
 }
 
 .gv-spec-grid {
@@ -1741,6 +2015,142 @@
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
 }
 
+.gv-profile-editor-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.gv-profile-media-preview {
+  position: relative;
+  padding-bottom: 30px;
+}
+
+.gv-profile-cover-preview {
+  height: 140px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--gv-bg);
+}
+
+.gv-profile-cover-preview img,
+.gv-profile-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gv-profile-avatar-preview {
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  overflow: hidden;
+  border: 4px solid var(--gv-surface);
+  border-radius: 50%;
+  background: var(--gv-bg);
+  color: var(--gv-text);
+  font-size: 30px;
+}
+
+.gv-profile-preset-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.gv-avatar-presets {
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+}
+
+.gv-banner-presets {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.gv-profile-picker-legend {
+  margin-bottom: 8px;
+  color: var(--gv-text);
+  font-weight: 600;
+}
+
+.gv-community .gv-profile-default-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gv-profile-default-choice input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--gv-cyan);
+}
+
+.gv-profile-preset {
+  position: relative;
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  padding: 3px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--gv-bg);
+  cursor: pointer;
+}
+
+.gv-profile-preset:hover {
+  border-color: var(--gv-border-strong);
+}
+
+.gv-profile-preset.is-selected,
+.gv-profile-preset:focus-within {
+  border-color: var(--gv-cyan);
+}
+
+.gv-profile-preset input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.gv-profile-preset img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 5px;
+}
+
+.gv-preset-name {
+  padding: 4px 1px 1px;
+  color: var(--gv-text);
+  font-size: 11px;
+}
+
+.gv-preset-check {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  border-radius: 50%;
+  background: var(--gv-cyan);
+  color: var(--gv-bg);
+}
+
+@media (max-width: 640px) {
+  .gv-avatar-presets {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .gv-banner-presets {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .gv-player-row:hover .gv-row-backdrop {
   opacity: 0.42;
   transform: scale(1.03);
@@ -1813,6 +2223,366 @@
   }
 }
 
+/* ==========================================================================
+   REVIEW CARDS & VIP SHOWCASE
+   ========================================================================== */
+
+.gv-review-card {
+  position: relative;
+  border-radius: 14px;
+  background: #141720;
+  border: 1px solid rgba(46, 52, 70, 0.85);
+  overflow: hidden;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gv-review-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(74, 82, 108, 0.95);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+}
+
+/* Full-card Banner Backdrop */
+.gv-review-backdrop,
+.gv-review-backdrop-fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  pointer-events: none;
+  opacity: 0.48;
+  transition: opacity 0.25s ease, transform 0.35s ease;
+}
+
+.gv-review-card:hover .gv-review-backdrop {
+  opacity: 0.58;
+  transform: scale(1.02);
+}
+
+.gv-review-backdrop-fallback {
+  opacity: 0.7;
+  background:
+    radial-gradient(circle at 88% 20%, rgba(56, 189, 248, 0.2), transparent 48%),
+    radial-gradient(circle at 70% 85%, rgba(255, 42, 68, 0.16), transparent 52%),
+    linear-gradient(135deg, #161925 0%, #101219 100%);
+}
+
+.gv-review-backdrop-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      95deg,
+      rgba(16, 18, 26, 0.96) 0%,
+      rgba(16, 18, 26, 0.88) 45%,
+      rgba(16, 18, 26, 0.56) 100%
+    ),
+    linear-gradient(
+      to top,
+      rgba(16, 18, 26, 0.92) 0%,
+      rgba(16, 18, 26, 0.35) 55%,
+      transparent 100%
+    );
+}
+
+.gv-review-inner {
+  position: relative;
+  z-index: 2;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.gv-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gv-review-author {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gv-review-avatar-frame {
+  position: relative;
+  flex-shrink: 0;
+  padding: 2.5px;
+  border-radius: 999px;
+  background: #141720;
+  border: 2px solid rgba(90, 100, 130, 0.85);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.gv-review-avatar-frame:hover {
+  transform: scale(1.05);
+  border-color: var(--gv-cyan);
+}
+
+.gv-review-avatar-frame .gv-avatar {
+  border-radius: 999px;
+  display: block;
+}
+
+/* User information */
+.gv-review-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gv-review-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Override .gv-community button so nickname stays clean text */
+.gv-community button.gv-review-user-name {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s ease;
+}
+
+.gv-community button.gv-review-user-name:hover:not(:disabled) {
+  background: transparent;
+  border: 0;
+  color: var(--gv-cyan);
+}
+
+/* Score Capsule */
+.gv-review-score-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(14, 16, 21, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.gv-review-score-capsule svg {
+  color: #facc15;
+}
+
+.gv-review-score-capsule.gv-score-high {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #4ade80;
+}
+
+.gv-review-score-capsule.gv-score-mid {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fbbf24;
+}
+
+.gv-review-score-capsule.gv-score-low {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
+
+/* Dropped status pill */
+.gv-review-status-pill.gv-pill-dropped {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+/* Meta row (Playtime & Time) */
+.gv-review-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #a4adc0;
+}
+
+.gv-review-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gv-review-meta-dot {
+  opacity: 0.5;
+}
+
+/* Top action buttons (Edit / Report) */
+.gv-review-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.gv-community button.gv-review-btn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(14, 16, 21, 0.78);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.gv-community button.gv-review-btn-action:hover:not(:disabled) {
+  background: rgba(36, 40, 56, 0.95);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Review Content */
+.gv-review-content {
+  padding-left: 56px;
+}
+
+.gv-review-text {
+  color: #e2e8f0;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+/* Spoiler Box */
+.gv-review-spoiler-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+}
+
+.gv-review-spoiler-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #fbbf24;
+}
+
+.gv-community button.gv-review-btn-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.18);
+  color: #fef08a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gv-community button.gv-review-btn-reveal:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.3);
+  border-color: rgba(245, 158, 11, 0.75);
+}
+
+/* ==========================================================================
+   VIP PRE-STYLING (SẴN SÀNG CHO TÍNH NĂNG VIP SAU NÀY)
+   ========================================================================== */
+
+.gv-review-card.is-vip {
+  border-color: rgba(245, 158, 11, 0.55);
+  box-shadow: 0 6px 26px rgba(245, 158, 11, 0.14),
+              0 0 1px rgba(251, 191, 36, 0.45);
+}
+
+.gv-review-card.is-vip:hover {
+  border-color: rgba(251, 191, 36, 0.9);
+  box-shadow: 0 14px 36px rgba(245, 158, 11, 0.24),
+              0 0 16px rgba(251, 191, 36, 0.35);
+}
+
+.gv-review-card.is-vip .gv-review-avatar-frame,
+.gv-review-avatar-frame.vip-frame-tier-1,
+.gv-review-avatar-frame.vip-frame-tier-2,
+.gv-review-avatar-frame.vip-frame-tier-3 {
+  border: 2.5px solid #fbbf24;
+  background: linear-gradient(135deg, #1f1a14, #292318);
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.48),
+              0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
+.gv-vip-crown-badge {
+  position: absolute;
+  top: -7px;
+  right: -5px;
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #141720;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+.gv-vip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.24), rgba(217, 119, 6, 0.24));
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+}
+
+/* Responsive adjustments */
 @media (max-width: 640px) {
   .gv-game-row-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1831,11 +2601,23 @@
   .gv-game-hero-cover {
     max-width: 180px;
   }
+  .gv-meta-rating-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .gv-meta-perf-box {
+    margin-left: 0;
+    width: 100%;
+  }
   .gv-rank-row,
   .gv-perf-card {
     grid-template-columns: minmax(0, 1fr);
   }
   .gv-search-bar {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .gv-review-content {
+    padding-left: 0;
   }
 }

@@ -94,6 +94,17 @@ export function initDb(customPath?: string): DatabaseSync {
  * column additions must be applied via guarded ALTER TABLE here.
  */
 function migrateSchema(db: DatabaseSync): void {
+  // Existing counters are an accepted historical baseline. Add provenance
+  // without rewriting totals, completion dates, or old session/audit records.
+  const gameColumns = db.prepare('PRAGMA table_xinfo(games)').all() as any[];
+  if (!gameColumns.some((c: any) => c.name === 'manual_playtime_minutes')) {
+    db.exec('ALTER TABLE games ADD COLUMN manual_playtime_minutes REAL NOT NULL DEFAULT 0');
+  }
+  if (!gameColumns.some((c: any) => c.name === 'recorded_playtime_minutes')) {
+    db.exec(`ALTER TABLE games ADD COLUMN recorded_playtime_minutes REAL
+      GENERATED ALWAYS AS (MAX(0, playtime_minutes - manual_playtime_minutes)) VIRTUAL`);
+  }
+
   // sessions.last_poll: last confirmed-alive poll of a running session,
   // used to recover playtime after an abnormal exit (crash / kill)
   try {
@@ -166,6 +177,8 @@ function createTables(db: DatabaseSync): void {
       exe_name TEXT,
       exe_path TEXT,
       playtime_minutes INTEGER NOT NULL DEFAULT 0,
+      manual_playtime_minutes REAL NOT NULL DEFAULT 0,
+      recorded_playtime_minutes REAL GENERATED ALWAYS AS (MAX(0, playtime_minutes - manual_playtime_minutes)) VIRTUAL,
       user_rating REAL DEFAULT NULL,
       status TEXT NOT NULL DEFAULT 'playing',
       cover_url TEXT DEFAULT NULL,
@@ -391,11 +404,11 @@ export function createGame(game: Partial<Game>): Game {
     INSERT INTO games (
       title, exe_name, exe_path, playtime_minutes, user_rating,
       status, cover_url, banner_url, media_folder, completed_at,
-      notes, steam_id, uplay_id, origin_id, amd_game_id
+      notes, steam_id, uplay_id, origin_id, amd_game_id, manual_playtime_minutes
     ) VALUES (
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?
     )
   `);
 
@@ -417,7 +430,11 @@ export function createGame(game: Partial<Game>): Game {
     game.steam_id ?? -1,
     game.uplay_id ?? -1,
     game.origin_id ?? -1,
-    game.amd_game_id ?? null
+    game.amd_game_id ?? null,
+    Math.max(0, (game.playtime_minutes ?? 0) - Math.max(0, Math.min(
+      game.playtime_minutes ?? 0,
+      game.recorded_playtime_minutes ?? game.playtime_minutes ?? 0
+    )))
   );
 
   const insertedId = Number(result.lastInsertRowid);
@@ -425,18 +442,46 @@ export function createGame(game: Partial<Game>): Game {
   if (!created) {
     throw new Error(`Failed to retrieve newly created game with id ${insertedId}`);
   }
+  if ((created.manual_playtime_minutes || 0) > 0) {
+    db.prepare(`INSERT INTO sessions
+      (game_id, start_time, end_time, duration_minutes, is_running, source)
+      VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?, 0, 'manual')`)
+      .run(insertedId, created.manual_playtime_minutes!);
+  }
   return created;
 }
 
 export function updateGame(id: number, data: Partial<Game>): Game {
   const db = getDb();
-  const existing = getGameById(id);
+  let existing = getGameById(id);
   if (!existing) {
     throw new Error(`Game with id ${id} not found`);
   }
 
+  // An ordinary edit changes only the manual component. Internal cloud
+  // reconciliation supplies both counters explicitly and retains provenance.
+  data = { ...data };
+  const isManualEdit = 'playtime_minutes' in data && !('recorded_playtime_minutes' in data);
+  const manualTotal = data.playtime_minutes;
+  if (isManualEdit) {
+    delete data.playtime_minutes;
+  }
+
   const fields: string[] = [];
   const params: any[] = [];
+  let manualDelta = 0;
+
+  if ('recorded_playtime_minutes' in data) {
+    const total = data.playtime_minutes ?? existing.playtime_minutes;
+    const recorded = Number(data.recorded_playtime_minutes);
+    if (!Number.isFinite(total) || total < 0 || !Number.isFinite(recorded) || recorded < 0) {
+      throw new Error('Invalid playtime provenance');
+    }
+    fields.push('manual_playtime_minutes = ?');
+    const manual = Math.max(0, total - Math.min(total, recorded));
+    params.push(manual);
+    manualDelta = manual - (existing.manual_playtime_minutes || 0);
+  }
 
   const allowedFields: Array<keyof Game> = [
     'title', 'exe_name', 'exe_path', 'playtime_minutes', 'user_rating',
@@ -456,6 +501,10 @@ export function updateGame(id: number, data: Partial<Game>): Game {
   }
 
   if (fields.length === 0) {
+    if (isManualEdit) {
+      setManualPlaytime(id, manualTotal as number, db);
+      return getGameById(id)!;
+    }
     return existing;
   }
 
@@ -463,7 +512,24 @@ export function updateGame(id: number, data: Partial<Game>): Game {
   params.push(id);
 
   const sql = `UPDATE games SET ${fields.join(', ')} WHERE id = ?`;
-  db.prepare(sql).run(...params);
+  db.exec('SAVEPOINT update_game');
+  try {
+    if (isManualEdit) setManualPlaytime(id, manualTotal as number, db);
+    db.prepare(sql).run(...params);
+    // Remote/manual-component changes must also reconcile the local audit
+    // offset; otherwise a later union recalc could resurrect removed hours.
+    if (manualDelta !== 0) {
+      db.prepare(`INSERT INTO sessions
+        (game_id, start_time, end_time, duration_minutes, is_running, source)
+        VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?, 0, 'manual')`)
+        .run(id, manualDelta);
+    }
+    db.exec('RELEASE SAVEPOINT update_game');
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT update_game');
+    db.exec('RELEASE SAVEPOINT update_game');
+    throw error;
+  }
 
   const updated = getGameById(id);
   if (!updated) {
@@ -527,6 +593,44 @@ export function setPlaytime(gameId: number, totalMinutes: number): void {
     WHERE id = ?
   `);
   stmt.run(Math.max(0, totalMinutes), gameId);
+}
+
+/** Adjust a displayed total without crediting user-entered minutes to rankings. */
+export function setManualPlaytime(
+  gameId: number,
+  totalMinutes: number,
+  customDb?: DatabaseSync
+): boolean {
+  if (typeof totalMinutes !== 'number' || !Number.isFinite(totalMinutes) || totalMinutes < 0) {
+    throw new Error('Invalid playtime minutes: must be a non-negative number');
+  }
+  const db = customDb || getDb();
+  const game = db.prepare(`SELECT playtime_minutes, recorded_playtime_minutes
+    FROM games WHERE id = ?`).get(gameId) as any;
+  if (!game) throw new Error(`Game with ID ${gameId} not found`);
+  const recorded = Number(game.recorded_playtime_minutes) || 0;
+  if (totalMinutes < recorded) {
+    throw new Error('Tổng giờ chơi không được thấp hơn giờ app đã ghi nhận. Chỉ có thể sửa phần giờ tự thêm.');
+  }
+  const delta = totalMinutes - Number(game.playtime_minutes);
+  if (delta === 0) return true;
+
+  db.exec('SAVEPOINT manual_playtime_edit');
+  try {
+    db.prepare(`UPDATE games SET playtime_minutes = ?, manual_playtime_minutes = ?,
+      updated_at = datetime('now', 'localtime') WHERE id = ?`)
+      .run(totalMinutes, totalMinutes - recorded, gameId);
+    db.prepare(`INSERT INTO sessions
+      (game_id, start_time, end_time, duration_minutes, is_running, source)
+      VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?, 0, 'manual')`)
+      .run(gameId, delta);
+    db.exec('RELEASE SAVEPOINT manual_playtime_edit');
+  } catch (error) {
+    db.exec('ROLLBACK TO SAVEPOINT manual_playtime_edit');
+    db.exec('RELEASE SAVEPOINT manual_playtime_edit');
+    throw error;
+  }
+  return true;
 }
 
 // ==========================================

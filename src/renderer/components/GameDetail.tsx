@@ -97,6 +97,7 @@ export const GameDetail: React.FC<GameDetailProps> = ({
   const [editPlaytimeOpen, setEditPlaytimeOpen] = useState<boolean>(false);
   const [editHours, setEditHours] = useState<number>(0);
   const [editMins, setEditMins] = useState<number>(0);
+  const [editPlaytimeError, setEditPlaytimeError] = useState('');
 
   // Notes state
   const [notesText, setNotesText] = useState<string>('');
@@ -139,7 +140,7 @@ export const GameDetail: React.FC<GameDetailProps> = ({
           setEditMins(Math.round((fetched.playtime_minutes || 0) % 60));
 
           // Load Media
-          loadMedia(fetched.title, fetched);
+          loadMedia(fetched.title);
 
           // Load Media Folder Path — wishlist ('Chờ chơi') games have no folder yet
           if (fetched.status === 'backlog') {
@@ -166,24 +167,12 @@ export const GameDetail: React.FC<GameDetailProps> = ({
     }
   }, [gameId]);
 
-  const loadMedia = async (title: string, currentGame?: Game) => {
+  const loadMedia = async (title: string) => {
     setMediaLoading(true);
     try {
       if (window.electronAPI?.getGameMedia) {
         const media = await window.electronAPI.getGameMedia(title);
         setMediaItems(media);
-
-        // If game is completed but completed_at is missing, auto-fill with latest screenshot date
-        if (media.length > 0) {
-          const latestItem = media[0];
-          const latestDate = (latestItem.captureDate || latestItem.createdAt)?.slice(0, 10);
-          if (latestDate && currentGame && currentGame.status === 'completed' && !currentGame.completed_at) {
-            setCompletedDate(latestDate);
-            if (window.electronAPI?.updateGame) {
-              window.electronAPI.updateGame(currentGame.id, { completed_at: `${latestDate}T12:00:00` });
-            }
-          }
-        }
       }
     } catch (err) {
       console.error('Failed to fetch media for', title, err);
@@ -249,37 +238,15 @@ window.addEventListener('keydown', handleKeyDown);
       console.error('Failed to save rating:', err);
     }
   };
-// Auto-save status & completed date
-  // Rule: When marked as completed, default completion date is the date of the LAST screenshot taken!
+  // Status changes preserve the existing completion date; only an explicit date selection changes it.
   const handleStatusChange = async (newStatus: GameStatus) => {
     setStatus(newStatus);
     if (!game) return;
-    const nowIso = new Date().toISOString();
-    let newCompletedAt: string | null = null;
-
-    if (newStatus === 'completed') {
-      let resolvedDate = completedDate;
-      // Auto-extract date from the LAST screenshot/video taken in E:\Game
-      if (!resolvedDate || resolvedDate === nowIso.slice(0, 10)) {
-        if (latestMediaDate) {
-          resolvedDate = latestMediaDate;
-        } else if (mediaItems && mediaItems.length > 0) {
-          const raw = mediaItems[0].captureDate || mediaItems[0].createdAt;
-          if (raw) resolvedDate = raw.slice(0, 10);
-        }
-      }
-      if (!resolvedDate) {
-        resolvedDate = nowIso.slice(0, 10);
-      }
-      setCompletedDate(resolvedDate);
-      newCompletedAt = `${resolvedDate}T12:00:00`;
-    }
 
     try {
       if (window.electronAPI?.updateGame) {
         const updated = await window.electronAPI.updateGame(game.id, {
           status: newStatus,
-          completed_at: newCompletedAt,
         });
         setGame(updated);
         onGameUpdated(updated);
@@ -325,6 +292,11 @@ const handleCompletedDateChange = async (dateStr: string) => {
   const handleSaveManualPlaytime = async () => {
     if (!game) return;
     const totalMinutes = editHours * 60 + editMins;
+    setEditPlaytimeError('');
+    if (totalMinutes < recordedMinutes) {
+      setEditPlaytimeError(`Tổng giờ chơi không thể thấp hơn ${formatPlaytime(recordedMinutes)} đã được ghi nhận.`);
+      return;
+    }
     try {
       if (window.electronAPI?.updatePlaytimeManual) {
         await window.electronAPI.updatePlaytimeManual(game.id, totalMinutes);
@@ -342,6 +314,7 @@ const handleCompletedDateChange = async (dateStr: string) => {
       setEditPlaytimeOpen(false);
     } catch (err) {
       console.error('Failed to update playtime manual:', err);
+      setEditPlaytimeError(err instanceof Error ? err.message : 'Không lưu được giờ chơi. Hãy thử lại.');
     }
   };
 // Open Media Folder in Explorer
@@ -362,7 +335,7 @@ const handleCompletedDateChange = async (dateStr: string) => {
     try {
       if (window.electronAPI?.syncScreenshots) {
         const res = await window.electronAPI.syncScreenshots({ dryRun: false, targetGameId: game.id });
-        await loadMedia(game.title, game);
+        await loadMedia(game.title);
         if (window.electronAPI?.getGameById) {
           const fresh = await window.electronAPI.getGameById(game.id);
           if (fresh) {
@@ -437,6 +410,13 @@ const filteredMedia = useMemo(() => {
   }
 
   const statusMeta = getStatusMeta(status);
+  const totalMinutes = Math.max(0, Number(game.playtime_minutes) || 0);
+  const recordedValue = Number(game.recorded_playtime_minutes ?? totalMinutes);
+  const recordedMinutes = Number.isFinite(recordedValue)
+    ? Math.min(totalMinutes, Math.max(0, recordedValue))
+    : totalMinutes;
+  const manualMinutes = Math.max(0, totalMinutes - recordedMinutes);
+  const playtimeExplanation = `Tổng giờ chơi: ${formatPlaytime(totalMinutes)}. App ghi nhận / dữ liệu cũ được giữ lại: ${formatPlaytime(recordedMinutes)}. Nhập thủ công: ${formatPlaytime(manualMinutes)}. Giờ nhập thủ công không tính vào bảng xếp hạng.`;
 
   return (
     <div className="min-h-screen pb-20 select-none animate-in fade-in duration-200">
@@ -539,13 +519,28 @@ const filteredMedia = useMemo(() => {
               <div className="flex items-center gap-2 rounded-xl border border-[#2a2e3d] bg-[#161821] px-4 py-2.5">
                 <Clock className="h-5 w-5 text-[#ff2a44]" />
                 <div>
-                  <div className="text-[10px] uppercase font-bold text-[#8e95a5]">Tổng thời gian chơi</div>
+                  <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-[#8e95a5]">
+                    <span>Tổng thời gian chơi</span>
+                    {manualMinutes > 0 && <button
+                      type="button"
+                      title={playtimeExplanation}
+                      aria-label={playtimeExplanation}
+                      className="rounded text-amber-400 outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    >
+                      <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>}
+                  </div>
                   <div className="font-mono text-base font-black text-white">
                     {formatPlaytime(game.playtime_minutes)}
                   </div>
                 </div>
                 <button
-                  onClick={() => setEditPlaytimeOpen(true)}
+                  onClick={() => {
+                    setEditHours(Math.floor(totalMinutes / 60));
+                    setEditMins(Math.round(totalMinutes % 60));
+                    setEditPlaytimeError('');
+                    setEditPlaytimeOpen(true);
+                  }}
                   className="ml-2 p-1 text-[#8e95a5] hover:text-[#ff2a44] transition-colors"
                   title="Chỉnh sửa giờ chơi thủ công"
                 >
@@ -662,11 +657,11 @@ const filteredMedia = useMemo(() => {
                 </div>
                 {latestMediaDate && latestMediaDate === completedDate ? (
                   <p className="text-[10px] text-emerald-400">
-                    ✓ Đã tự động khớp theo ngày bức ảnh cuối cùng được chụp ({latestMediaDate})
+                    Ngày đã chọn trùng với ảnh/clip cuối cùng ({latestMediaDate}).
                   </p>
                 ) : (
                   <p className="text-[10px] text-[#8e95a5]">
-                    💡 Ngày hoàn thành được tự động gắn với bức ảnh/clip cuối cùng của game.
+                    Không nhớ ngày thì để trống. Chỉ lưu ngày khi bạn chọn hoặc bấm lấy ngày ảnh cuối.
                   </p>
                 )}
               </div>
@@ -1077,7 +1072,10 @@ setGame(updated);
               <span>Chỉnh sửa thời gian chơi</span>
             </h3>
             <p className="text-xs text-[#8e95a5]">
-              Nhập chính xác số giờ và phút tích lũy cho trò chơi {game.title}.
+              Nhập tổng số giờ và phút cho {game.title}. Phần nhập thêm được hiển thị trong thư viện nhưng không tính vào bảng xếp hạng.
+            </p>
+            <p className="text-xs text-[#8e95a5]">
+              Giờ được ghi nhận: {formatPlaytime(recordedMinutes)}. Tổng giờ không thể thấp hơn phần này.
             </p>
 
             <div className="grid grid-cols-2 gap-3">
@@ -1103,6 +1101,10 @@ setGame(updated);
                 />
               </div>
             </div>
+
+            {editPlaytimeError && (
+              <p role="alert" className="text-xs text-rose-400">{editPlaytimeError}</p>
+            )}
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button

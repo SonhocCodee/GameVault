@@ -1,11 +1,15 @@
+import { isProfilePreset, profilePresetPath } from "../../../src/shared/profile-presets.ts";
 import type { Env, RouteHandler } from "../types.ts";
+import { queueMetadataRefresh, refreshCatalogMetadata } from "../game-metadata.ts";
 import { authenticate, isAdminUser } from "../auth.ts";
 import { jsonResponse } from "../utils.ts";
 import type { Router } from "../router.ts";
 import { handleSubmitReview } from "./reviews.ts";
+import { followStats, registerFollowRoutes } from "./follows.ts";
 import {
   boundedBody,
   communityFailure,
+  communityAvatar,
   CommunityError,
   ensureProfile,
   jsonBody,
@@ -107,6 +111,16 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
     }
   }
   const excludeKind = url.searchParams.get("excludeKind");
+  const query = text(url.searchParams.get("q"), 100);
+  if (query) {
+    where.push("p.game_title LIKE ? ESCAPE '\\'");
+    binds.push(`%${query.replace(/[\\%_]/g, "\\$&")}%`);
+  }
+  if (url.searchParams.get("following") === "true") {
+    if (!uid) throw new CommunityError("Sign in to view following", 401);
+    where.push("EXISTS(SELECT 1 FROM community_follows f WHERE f.uid=? AND f.followed_uid=p.uid)");
+    binds.push(uid);
+  }
   if (excludeKind) {
     where.push("p.kind!=?");
     binds.push(text(excludeKind, 40));
@@ -121,7 +135,7 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
   const rows =
     (
       await env.DB.prepare(
-        `SELECT p.*,cp.nickname,u.photo_url AS avatar_url,
+        `SELECT p.*,cp.nickname,COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg',u.photo_url) AS avatar_url,
     rt.score AS review_score,rt.dropped AS review_dropped,rt.playtime_minutes AS review_playtime,
     (SELECT COUNT(*) FROM community_likes l WHERE l.post_id=p.id) AS likes,
     (SELECT COUNT(*) FROM community_comments c WHERE c.post_id=p.id AND c.hidden=0 AND ${visibleTo("c")}) AS comments,
@@ -148,7 +162,7 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
       ).results || []
     : [];
   const items = rows.map((r) => {
-    const avatar = publicUrl(r.avatar_url);
+    const avatar = communityAvatar(request, r.avatar_url);
     return {
       id: r.id,
       uid: r.uid,
@@ -199,6 +213,7 @@ export function registerCommunityRoutes(router: Router) {
         return communityFailure(error);
       }
     });
+  registerFollowRoutes(add);
   add("GET", "/config", async (_request, env) =>
     jsonResponse({
       googleClientId: env.WEB_GOOGLE_CLIENT_ID?.split(",")[0]?.trim() || null,
@@ -208,14 +223,15 @@ export function registerCommunityRoutes(router: Router) {
     const user = await requireUser(request, env, true);
     await ensureProfile(env, user);
     const p = await env.DB.prepare(
-      "SELECT cp.*,u.photo_url AS avatar_url FROM community_profiles cp LEFT JOIN users u ON u.uid=cp.uid WHERE cp.uid=?",
+      "SELECT cp.*,u.photo_url AS default_avatar_url,COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg',u.photo_url) AS avatar_url FROM community_profiles cp LEFT JOIN users u ON u.uid=cp.uid WHERE cp.uid=?",
     )
       .bind(user.uid)
       .first<any>();
     const statsRow = await env.DB.prepare(
       `SELECT COUNT(*) AS totalGames,
         SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completedGames,
-        SUM(CASE WHEN ${notIdleSql("")} THEN playtime_minutes ELSE 0 END) AS totalMinutes
+        SUM(CASE WHEN playtime_minutes>0 OR status IN ('playing','completed','paused','dropped') THEN 1 ELSE 0 END) AS playedGames,
+        SUM(playtime_minutes) AS totalMinutes,SUM(recorded_playtime_minutes) AS recordedMinutes
       FROM user_library WHERE uid=? AND is_deleted=0`,
     )
       .bind(user.uid)
@@ -233,14 +249,21 @@ export function registerCommunityRoutes(router: Router) {
       uid: user.uid,
       nickname: safeName(p.nickname),
       bio: p.bio,
-      avatarUrl: publicUrl(p.avatar_url || user.photoUrl),
-      bannerUrl: publicUrl(topBanner?.banner_url),
+      avatarUrl: communityAvatar(request, p.avatar_url || user.photoUrl),
+      bannerUrl: profilePresetPath("banners", p.banner_preset) || publicUrl(topBanner?.banner_url),
+      avatarPreset: p.avatar_preset || null,
+      bannerPreset: p.banner_preset || null,
+      defaultAvatarUrl: publicUrl(p.default_avatar_url || user.photoUrl),
+      defaultBannerUrl: publicUrl(topBanner?.banner_url),
       shareLibrary: !!p.share_library,
       suspended: !!p.suspended,
       isAdmin: isAdminUser(user, env),
+      ...await followStats(env, user.uid, user.uid),
       totalGames: Number(statsRow?.totalGames || 0),
       completedGames: Number(statsRow?.completedGames || 0),
+      playedGames: Number(statsRow?.playedGames || 0),
       totalMinutes: Number(statsRow?.totalMinutes || 0),
+      recordedMinutes: Number(statsRow?.recordedMinutes || 0),
     });
   });
   add("PUT", "/me", async (request, env) => {
@@ -250,14 +273,21 @@ export function registerCommunityRoutes(router: Router) {
     const nickname = text(b.nickname, 60, true);
     if (nickname.includes("@"))
       throw new CommunityError("Use a nickname instead of an email address");
-    if (typeof b.shareLibrary !== "boolean")
-      throw new CommunityError("Sharing preference is required");
+    await ensureProfile(env, user);
+    const current = await env.DB.prepare("SELECT avatar_preset,banner_preset FROM community_profiles WHERE uid=?").bind(user.uid).first<any>();
+    // Only catalogue IDs are accepted. Uploaded image keys/URLs cannot be attached to a profile.
+    if (b.avatarKey !== undefined || b.bannerKey !== undefined || b.avatarUrl !== undefined || b.bannerUrl !== undefined)
+      throw new CommunityError("Choose a profile image from the preset catalogue");
+    const media: Record<string, string | null> = {};
+    for (const [field, column, kind] of [["avatarPreset", "avatar_preset", "avatars"], ["bannerPreset", "banner_preset", "banners"]] as const) {
+      const value = b[field] === undefined ? current?.[column] || null : b[field];
+      if (value !== null && !isProfilePreset(kind, value))
+        throw new CommunityError("Invalid profile image preset");
+      media[column] = value;
+    }
     await env.DB.prepare(
-      `INSERT INTO community_profiles(uid,nickname,bio,share_library) VALUES (?,?,?,?)
-      ON CONFLICT(uid) DO UPDATE SET nickname=excluded.nickname,bio=excluded.bio,share_library=excluded.share_library,updated_at=datetime('now')`,
-    )
-      .bind(user.uid, nickname, text(b.bio, 300), b.shareLibrary ? 1 : 0)
-      .run();
+      `UPDATE community_profiles SET nickname=?,bio=?,share_library=1,avatar_preset=?,banner_preset=?,updated_at=datetime('now') WHERE uid=?`,
+    ).bind(nickname, text(b.bio, 300), media.avatar_preset, media.banner_preset, user.uid).run();
     await refreshSharedLibrary(env, user.uid);
     return jsonResponse({
       success: true,
@@ -299,7 +329,7 @@ export function registerCommunityRoutes(router: Router) {
             "DELETE FROM community_profiles WHERE uid=? AND suspended=0",
           ).bind(user.uid),
           env.DB.prepare(
-            "UPDATE community_profiles SET nickname='Player',bio='',share_library=0 WHERE uid=? AND suspended=1",
+            "UPDATE community_profiles SET nickname='Player',bio='',share_library=1,avatar_preset=NULL,banner_preset=NULL WHERE uid=? AND suspended=1",
           ).bind(user.uid),
           env.DB.prepare(
             "DELETE FROM community_notifications WHERE uid=? OR actor_uid=?",
@@ -307,6 +337,7 @@ export function registerCommunityRoutes(router: Router) {
           env.DB.prepare(
             "DELETE FROM community_blocks WHERE uid=? OR blocked_uid=?",
           ).bind(user.uid, user.uid),
+          env.DB.prepare("DELETE FROM community_follows WHERE uid=? OR followed_uid=?").bind(user.uid, user.uid),
           env.DB.prepare(
             "DELETE FROM community_reports WHERE reporter_uid=?",
           ).bind(user.uid),
@@ -320,7 +351,7 @@ export function registerCommunityRoutes(router: Router) {
     const uid = text(ctx.params?.uid, 160, true);
     const who = await viewer(request, env);
     const p = await env.DB.prepare(
-      `SELECT p.*,u.photo_url AS avatar_url FROM community_profiles p LEFT JOIN users u ON u.uid=p.uid WHERE p.uid=? AND p.suspended=0 AND ${visibleTo("p")}`,
+      `SELECT p.*,COALESCE('/community/profile-presets/avatars/'||p.avatar_preset||'.svg',u.photo_url) AS avatar_url FROM community_profiles p LEFT JOIN users u ON u.uid=p.uid WHERE p.uid=? AND p.suspended=0 AND ${visibleTo("p")}`,
     )
       .bind(uid, who, who)
       .first<any>();
@@ -337,16 +368,11 @@ export function registerCommunityRoutes(router: Router) {
             .all<any>()
         ).results || []
       : [];
-    const totalMinutes = games.reduce(
-      (sum: number, g: any) =>
-        sum +
-        (IDLE_APP_KEYS.includes(`'${String(g.game_key || "").toLowerCase()}'`) ||
-        IDLE_APP_TITLES.includes(`'${String(g.title || "").trim().toLowerCase()}'`)
-          ? 0
-          : Number(g.playtime_minutes) || 0),
-      0,
-    );
-    const completedGames = games.filter((g: any) => g.status === "completed").length;
+    const stats = await env.DB.prepare(`SELECT COUNT(*) AS totalGames,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completedGames,
+      SUM(CASE WHEN playtime_minutes>0 OR status IN ('playing','completed','paused','dropped') THEN 1 ELSE 0 END) AS playedGames,
+      SUM(playtime_minutes) AS totalMinutes,SUM(recorded_playtime_minutes) AS recordedMinutes FROM community_library WHERE uid=?`)
+      .bind(uid).first<any>();
     const heroBanner =
       games.find(
         (g: any) =>
@@ -358,12 +384,17 @@ export function registerCommunityRoutes(router: Router) {
       uid,
       nickname: safeName(p.nickname),
       bio: p.bio,
-      avatarUrl: publicUrl(p.avatar_url),
-      bannerUrl: publicUrl(heroBanner?.resolved_banner || heroBanner?.resolved_cover),
+      avatarUrl: communityAvatar(request, p.avatar_url),
+      bannerUrl: profilePresetPath("banners", p.banner_preset) || publicUrl(heroBanner?.resolved_banner || heroBanner?.resolved_cover),
+      avatarPreset: p.avatar_preset || null,
+      bannerPreset: p.banner_preset || null,
       shareLibrary: !!p.share_library,
-      totalGames: games.length,
-      completedGames,
-      totalMinutes,
+      ...await followStats(env, uid, who),
+      totalGames: Number(stats?.totalGames || 0),
+      completedGames: Number(stats?.completedGames || 0),
+      playedGames: Number(stats?.playedGames || 0),
+      totalMinutes: Number(stats?.totalMinutes || 0),
+      recordedMinutes: Number(stats?.recordedMinutes || 0),
       games: games.map((g) => ({
         gameKey: g.game_key,
         title: g.title,
@@ -372,6 +403,7 @@ export function registerCommunityRoutes(router: Router) {
         bannerUrl: publicUrl(g.resolved_banner),
         status: g.status,
         playtimeMinutes: g.playtime_minutes,
+        recordedPlaytimeMinutes: Number(g.recorded_playtime_minutes) || 0,
       })),
     });
   });
@@ -454,16 +486,16 @@ export function registerCommunityRoutes(router: Router) {
     const sort = ctx.url.searchParams.get("sort") || "completed";
     const includeTopGames = ctx.url.searchParams.get("includeTopGames") === "1";
     const orders: Record<string, string> = {
-      completed: "completedGames DESC,totalMinutes DESC",
-      hours: "totalMinutes DESC,completedGames DESC",
+      completed: "completedGames DESC,recordedMinutes DESC",
+      hours: "recordedMinutes DESC,completedGames DESC",
       games: "totalGames DESC,completedGames DESC",
     };
     const order = Object.hasOwn(orders, sort) ? orders[sort] : undefined;
     if (!order) throw new CommunityError("Invalid player sort");
     const rows = (await env.DB.prepare(`
-      SELECT p.uid,p.nickname,p.bio,u.photo_url AS avatar_url,COUNT(*) AS totalGames,
+      SELECT p.uid,p.nickname,p.bio,COALESCE('/community/profile-presets/avatars/'||p.avatar_preset||'.svg',u.photo_url) AS avatar_url,COUNT(*) AS totalGames,
         SUM(CASE WHEN l.status='completed' THEN 1 ELSE 0 END) AS completedGames,
-        SUM(CASE WHEN ${notIdleSql("l")} THEN l.playtime_minutes ELSE 0 END) AS totalMinutes
+        SUM(l.playtime_minutes) AS totalMinutes,SUM(l.recorded_playtime_minutes) AS recordedMinutes
       FROM community_profiles p JOIN community_library l ON l.uid=p.uid
       LEFT JOIN users u ON u.uid=p.uid
       WHERE p.share_library=1 AND p.suspended=0 AND ${visibleTo("p")}
@@ -478,7 +510,7 @@ export function registerCommunityRoutes(router: Router) {
         SELECT l.uid, l.game_key, l.title, l.steam_id,
           COALESCE(gc.cover_url, l.cover_url) AS cover_url,
           gc.banner_url AS banner_url,
-          l.status, l.playtime_minutes
+          l.status, l.playtime_minutes, l.recorded_playtime_minutes
         FROM community_library l
         LEFT JOIN game_covers gc ON gc.game_key = LOWER(l.game_key)
         WHERE l.uid IN (${placeholders}) AND ${notIdleSql("l")}
@@ -495,6 +527,7 @@ export function registerCommunityRoutes(router: Router) {
             bannerUrl: publicUrl(g.banner_url),
             status: g.status,
             playtimeMinutes: Number(g.playtime_minutes) || 0,
+            recordedPlaytimeMinutes: Number(g.recorded_playtime_minutes) || 0,
           });
           topGamesByUid.set(g.uid, list);
         }
@@ -502,7 +535,7 @@ export function registerCommunityRoutes(router: Router) {
     }
 
     return jsonResponse(page(rows.map(r => {
-      const avatar = publicUrl(r.avatar_url);
+      const avatar = communityAvatar(request, r.avatar_url);
       const topGames = includeTopGames ? (topGamesByUid.get(r.uid) || []) : undefined;
       const topBanner = topGames?.find((g) => g.bannerUrl || g.coverUrl);
       return {
@@ -514,7 +547,7 @@ export function registerCommunityRoutes(router: Router) {
           topGames,
         } : {}),
         totalGames: Number(r.totalGames),
-        completedGames: Number(r.completedGames), totalMinutes: Number(r.totalMinutes),
+        completedGames: Number(r.completedGames), totalMinutes: Number(r.totalMinutes), recordedMinutes: Number(r.recordedMinutes) || 0,
       };
     }), limit, offset));
   });
@@ -572,7 +605,7 @@ export function registerCommunityRoutes(router: Router) {
         );
       stmts.push(
         env.DB.prepare(
-          "UPDATE community_images SET post_id=? WHERE key=? AND uid=? AND post_id IS NULL AND EXISTS(SELECT 1 FROM community_posts WHERE id=?)",
+          `UPDATE community_images SET post_id=? WHERE key=? AND uid=? AND post_id IS NULL AND EXISTS(SELECT 1 FROM community_posts WHERE id=?)`,
         ).bind(id, imageKey, user.uid, id),
       );
     }
@@ -670,7 +703,7 @@ export function registerCommunityRoutes(router: Router) {
     const rows =
       (
         await env.DB.prepare(
-          `SELECT c.*,p.nickname,u.photo_url AS avatar_url FROM community_comments c LEFT JOIN community_profiles p ON p.uid=c.uid LEFT JOIN users u ON u.uid=c.uid
+          `SELECT c.*,p.nickname,COALESCE('/community/profile-presets/avatars/'||p.avatar_preset||'.svg',u.photo_url) AS avatar_url FROM community_comments c LEFT JOIN community_profiles p ON p.uid=c.uid LEFT JOIN users u ON u.uid=c.uid
       WHERE c.post_id=? AND c.hidden=0 AND COALESCE(p.suspended,0)=0 AND ${visibleTo("c")}
       ORDER BY c.created_at,c.id LIMIT ? OFFSET ?`,
         )
@@ -684,7 +717,7 @@ export function registerCommunityRoutes(router: Router) {
           postId: c.post_id,
           uid: c.uid,
           nickname: safeName(c.nickname),
-          avatarUrl: publicUrl(c.avatar_url),
+          avatarUrl: communityAvatar(request, c.avatar_url),
           body: c.body,
           createdAt: c.created_at,
         })),
@@ -737,7 +770,7 @@ export function registerCommunityRoutes(router: Router) {
     const expired =
       (
         await env.DB.prepare(
-          "SELECT key FROM community_images WHERE uid=? AND post_id IS NULL AND created_at<datetime('now','-1 day') LIMIT 50",
+          `SELECT key FROM community_images WHERE uid=? AND post_id IS NULL AND created_at<datetime('now','-1 day') LIMIT 50`,
         )
           .bind(user.uid)
           .all<any>()
@@ -754,7 +787,7 @@ export function registerCommunityRoutes(router: Router) {
         );
     }
     const pending = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM community_images WHERE uid=? AND post_id IS NULL",
+      `SELECT COUNT(*) AS n FROM community_images WHERE uid=? AND post_id IS NULL`,
     )
       .bind(user.uid)
       .first<any>();
@@ -818,14 +851,14 @@ export function registerCommunityRoutes(router: Router) {
     const user = await requireUser(request, env, true),
       id = text(ctx.params?.key, 100, true);
     const image = await env.DB.prepare(
-      "SELECT uid,post_id FROM community_images WHERE key=?",
+      `SELECT uid,post_id FROM community_images WHERE key=?`,
     )
       .bind(id)
       .first<any>();
     if (!image || image.uid !== user.uid || image.post_id)
       throw new CommunityError("Unattached upload not found", 404);
     await env.DB.prepare(
-      "DELETE FROM community_images WHERE key=? AND uid=? AND post_id IS NULL",
+      `DELETE FROM community_images WHERE key=? AND uid=? AND post_id IS NULL`,
     )
       .bind(id, user.uid)
       .run();
@@ -839,13 +872,13 @@ export function registerCommunityRoutes(router: Router) {
     const unused =
       (
         await env.DB.prepare(
-          "SELECT key FROM community_images WHERE uid=? AND post_id IS NULL",
+          `SELECT key FROM community_images WHERE uid=? AND post_id IS NULL`,
         )
           .bind(user.uid)
           .all<any>()
       ).results || [];
     await env.DB.prepare(
-      "DELETE FROM community_images WHERE uid=? AND post_id IS NULL",
+      `DELETE FROM community_images WHERE uid=? AND post_id IS NULL`,
     )
       .bind(user.uid)
       .run();
@@ -884,7 +917,7 @@ export function registerCommunityRoutes(router: Router) {
     const rows =
       (
         await env.DB.prepare(
-          `SELECT r.*,cp.nickname,u.photo_url AS avatar_url,COALESCE(m.spoiler,0) AS spoiler FROM ratings r
+          `SELECT r.*,cp.nickname,cp.avatar_preset,cp.banner_preset,COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg',u.photo_url) AS avatar_url,COALESCE(m.spoiler,0) AS spoiler FROM ratings r
       LEFT JOIN community_profiles cp ON cp.uid=r.uid LEFT JOIN users u ON u.uid=r.uid LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
       WHERE r.game_key=? AND COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")}
       ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?`,
@@ -894,19 +927,26 @@ export function registerCommunityRoutes(router: Router) {
       ).results || [];
     return jsonResponse(
       page(
-        rows.map((r) => ({
-          id: r.id,
-          uid: r.uid,
-          nickname: safeName(r.nickname),
-          avatarUrl: publicUrl(r.avatar_url),
-          gameKey: r.game_key,
-          score: Number(r.score),
-          review: r.review,
-          spoiler: !!r.spoiler,
-          playtimeMinutes: Number(r.playtime_minutes),
-          dropped: !!r.dropped,
-          updatedAt: r.updated_at,
-        })),
+        rows.map((r) => {
+          const banner = profilePresetPath("banners", r.banner_preset);
+          return {
+            id: r.id,
+            uid: r.uid,
+            nickname: safeName(r.nickname),
+            avatarUrl: communityAvatar(request, r.avatar_url),
+            bannerUrl: banner ? new URL(banner, request.url).href : null,
+            avatarPreset: r.avatar_preset || null,
+            bannerPreset: r.banner_preset || null,
+            vipTier: r.vip_tier ? Number(r.vip_tier) : null,
+            gameKey: r.game_key,
+            score: Number(r.score),
+            review: r.review,
+            spoiler: !!r.spoiler,
+            playtimeMinutes: Number(r.playtime_minutes),
+            dropped: !!r.dropped,
+            updatedAt: r.updated_at,
+          };
+        }),
         limit,
         offset,
       ),
@@ -1002,18 +1042,22 @@ export function registerCommunityRoutes(router: Router) {
     const uid = await viewer(request, env),
       sort = ctx.url.searchParams.get("sort") || "players";
     const { limit, offset } = paging(ctx.url);
+    const classification = ctx.url.searchParams.get("classification") || "all";
+    if (!["all", "online", "hybrid", "offline", "unknown"].includes(classification))
+      throw new CommunityError("Invalid game classification");
+    queueMetadataRefresh(env, ctx.executionCtx);
     const query = text(ctx.url.searchParams.get("q"), 80);
     const search = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
     if (!["players", "hours", "completed", "score"].includes(sort))
       throw new CommunityError("Invalid ranking sort");
     const order =
       sort === "hours"
-        ? "totalMinutes DESC,players DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC"
+        ? "recordedMinutes DESC,players DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC"
         : sort === "completed"
-          ? "completedPlayers DESC,totalMinutes DESC,COALESCE(r.averageScore,0) DESC"
+          ? "completedPlayers DESC,recordedMinutes DESC,COALESCE(r.averageScore,0) DESC"
         : sort === "score"
-          ? "averageScore DESC,reviewCount DESC,totalMinutes DESC"
-          : "players DESC,totalMinutes DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC";
+          ? "averageScore DESC,reviewCount DESC,recordedMinutes DESC"
+          : "players DESC,recordedMinutes DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC";
     const rows =
       (
         await env.DB.prepare(
@@ -1034,7 +1078,7 @@ export function registerCommunityRoutes(router: Router) {
     ), libraries AS (
       SELECT l.game_key,MAX(l.title) AS title,MAX(l.steam_id) AS steamId,MAX(l.cover_url) AS coverUrl,
       COUNT(DISTINCT CASE WHEN l.playtime_minutes>0 OR l.status IN ('completed','playing') THEN l.uid END) AS players,
-      COUNT(DISTINCT CASE WHEN l.status='completed' THEN l.uid END) AS completedPlayers,SUM(l.playtime_minutes) AS totalMinutes
+      COUNT(DISTINCT CASE WHEN l.status='completed' THEN l.uid END) AS completedPlayers,SUM(l.playtime_minutes) AS totalMinutes,SUM(l.recorded_playtime_minutes) AS recordedMinutes
       FROM community_library l JOIN community_profiles cp ON cp.uid=l.uid WHERE cp.share_library=1 AND cp.suspended=0 AND ${visibleTo("l")} GROUP BY l.game_key
     ), reviews AS (
       SELECT r.game_key,MAX(r.game_title) AS title,MAX(r.cover_url) AS coverUrl,AVG(r.score) AS averageScore,COUNT(DISTINCT r.uid) AS reviewCount
@@ -1042,16 +1086,19 @@ export function registerCommunityRoutes(router: Router) {
       WHERE COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")} GROUP BY r.game_key
     ), game_keys AS (SELECT game_key FROM catalog UNION SELECT game_key FROM libraries UNION SELECT game_key FROM reviews)
     SELECT k.game_key AS gameKey,COALESCE(c.title,l.title,r.title) AS title,COALESCE(c.steamId,l.steamId) AS steamId,COALESCE(c.coverUrl,l.coverUrl,r.coverUrl) AS coverUrl,
-      c.bannerUrl AS bannerUrl,
-      COALESCE(l.players,0) AS players,COALESCE(l.completedPlayers,0) AS completedPlayers,COALESCE(l.totalMinutes,0) AS totalMinutes,r.averageScore,COALESCE(r.reviewCount,0) AS reviewCount
+      c.bannerUrl AS bannerUrl,COALESCE(gm.classification,'unknown') AS classification,
+      COALESCE(gm.source,'unknown') AS classificationSource,COALESCE(gm.confidence,0) AS classificationConfidence,
+      COALESCE(l.players,0) AS players,COALESCE(l.completedPlayers,0) AS completedPlayers,COALESCE(l.totalMinutes,0) AS totalMinutes,COALESCE(l.recordedMinutes,0) AS recordedMinutes,r.averageScore,COALESCE(r.reviewCount,0) AS reviewCount
     FROM game_keys k LEFT JOIN catalog c ON c.game_key=k.game_key LEFT JOIN libraries l ON l.game_key=k.game_key LEFT JOIN reviews r ON r.game_key=k.game_key
+    LEFT JOIN game_metadata gm ON gm.game_key=k.game_key
     WHERE COALESCE(c.title,l.title,r.title) LIKE ? ESCAPE '\\'
       AND LOWER(k.game_key) NOT IN ${IDLE_APP_KEYS}
       AND LOWER(TRIM(COALESCE(c.title,l.title,r.title,''))) NOT IN ${IDLE_APP_TITLES}
       ${sort === "score" ? "AND COALESCE(r.reviewCount,0)>=1" : ""}
+      ${classification === "offline" ? "AND COALESCE(gm.classification,'unknown') IN ('offline','hybrid')" : classification !== "all" ? "AND COALESCE(gm.classification,'unknown')=?" : ""}
     ORDER BY ${order},title COLLATE NOCASE,gameKey LIMIT ? OFFSET ?`,
         )
-          .bind(uid, uid, uid, uid, search, limit + 1, offset)
+          .bind(uid, uid, uid, uid, search, ...(classification !== "all" && classification !== "offline" ? [classification] : []), limit + 1, offset)
           .all<any>()
       ).results || [];
     return jsonResponse(
@@ -1066,15 +1113,38 @@ export function registerCommunityRoutes(router: Router) {
       ),
     );
   });
+  add("POST", "/admin/game-metadata/refresh", async (request, env, ctx) => {
+    await requireAdmin(request, env);
+    const rawLimit = Number(ctx.url.searchParams.get("limit") || 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(15, Math.max(1, Math.trunc(rawLimit))) : 10;
+    return jsonResponse({ refreshed: await refreshCatalogMetadata(env, limit) });
+  });
+  add("PUT", "/admin/game-metadata/:gameKey", async (request, env, ctx) => {
+    await requireAdmin(request, env);
+    const rawKey = key(ctx.params?.gameKey);
+    const gameKey = /^s_\d+$/.test(rawKey) ? rawKey.slice(2) : rawKey;
+    const body = await jsonBody(request);
+    if (!["online", "hybrid", "offline", "unknown"].includes(body.classification))
+      throw new CommunityError("Invalid game classification");
+    const game =
+      (await env.DB.prepare("SELECT title,steam_id FROM game_covers WHERE game_key=? OR game_key=?").bind(gameKey, `s_${gameKey}`).first<any>()) ||
+      (await env.DB.prepare("SELECT title,steam_id FROM community_library WHERE game_key=? LIMIT 1").bind(gameKey).first<any>()) ||
+      (await env.DB.prepare("SELECT game_title AS title,NULL AS steam_id FROM ratings WHERE game_key=? LIMIT 1").bind(gameKey).first<any>());
+    if (!game) throw new CommunityError("Game not found", 404);
+    await env.DB.prepare(`INSERT INTO game_metadata(game_key,title,steam_id,classification,source,confidence)
+      VALUES (?,?,?,?,'manual',1) ON CONFLICT(game_key) DO UPDATE SET
+      classification=excluded.classification,source='manual',confidence=1,updated_at=datetime('now')`)
+      .bind(gameKey, game.title, game.steam_id ?? (/^\d+$/.test(gameKey) ? Number(gameKey) : null), body.classification).run();
+    return jsonResponse({ success: true });
+  });
   add("PUT", "/blocks/:uid", async (request, env, ctx) => {
     const user = await requireUser(request, env);
     const id = text(ctx.params?.uid, 160, true);
     if (id === user.uid) throw new CommunityError("Cannot block yourself");
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO community_blocks(uid,blocked_uid) VALUES (?,?)",
-    )
-      .bind(user.uid, id)
-      .run();
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO community_blocks(uid,blocked_uid) VALUES (?,?)").bind(user.uid, id),
+      env.DB.prepare("DELETE FROM community_follows WHERE (uid=? AND followed_uid=?) OR (uid=? AND followed_uid=?)").bind(user.uid, id, id, user.uid),
+    ]);
     return jsonResponse({
       success: true,
     });

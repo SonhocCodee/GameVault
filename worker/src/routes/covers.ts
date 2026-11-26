@@ -1,7 +1,13 @@
 import type { RouteHandler, Env, CoverCachePayload, AuthUser } from '../types.ts';
 import { jsonResponse, errorResponse } from '../utils.ts';
-import { saveImageToCloud, ALLOWED_CONTENT_TYPES } from './images.ts';
+import {
+  saveImageToCloud,
+  ALLOWED_CONTENT_TYPES,
+  MAX_IMAGE_SIZE_BYTES,
+  hasValidImageSignature,
+} from './images.ts';
 import { authenticate, isAdminUser } from '../auth.ts';
+import { rateLimit, CommunityError } from '../community-common.ts';
 
 const STEAM_STATIC_CDN_BASE = 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps';
 const IGDB_API_URL = 'https://api.igdb.com/v4/games';
@@ -97,6 +103,127 @@ function normalizeImageKey(url?: string | null): string | null {
   if (idx === -1) return null;
   const key = url.slice(idx + '/api/images/'.length).split('?')[0].trim();
   return key || null;
+}
+
+function isPrivateOrLoopbackHost(rawHost: string): boolean {
+  const host = rawHost.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase();
+  if (!host) return true;
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.localdomain')
+  ) {
+    return true;
+  }
+
+  // IPv4 literal check
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4Match) {
+    const octets = ipv4Match.slice(1).map(Number);
+    if (octets.some((n) => n < 0 || n > 255)) return true;
+    const [a, b] = octets;
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+
+  // Numeric/hex IPv4 obfuscation (e.g. 2130706433 or 0x7f000001)
+  if (/^(0x[0-9a-f]+|\d+)$/i.test(host)) return true;
+
+  // IPv6 loopback, ULA, link-local, mapped IPv4
+  if (host.includes(':')) {
+    if (
+      host === '::' ||
+      host === '::1' ||
+      host.startsWith('fe80:') ||
+      host.startsWith('fc') ||
+      host.startsWith('fd') ||
+      host.includes('::ffff:')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validates external cover URLs against SSRF: HTTPS only, no embedded
+ * credentials, standard port only, and no loopback/private/metadata hosts.
+ */
+export function isAllowedExternalImageUrl(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string' || rawUrl.length > 2048) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.username || parsed.password) return false;
+  if (parsed.port && parsed.port !== '443') return false;
+  return !isPrivateOrLoopbackHost(parsed.hostname);
+}
+
+async function readBoundedResponseBytes(res: Response, maxBytes: number): Promise<Uint8Array | null> {
+  const lenHeader = res.headers.get('content-length');
+  if (lenHeader && Number(lenHeader) > maxBytes) {
+    return null;
+  }
+  if (!res.body) {
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength === 0 || buf.byteLength > maxBytes) return null;
+    return new Uint8Array(buf);
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (total === 0) return null;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+async function checkCoverRateLimit(
+  env: Env,
+  uid: string,
+  action: string,
+  max: number,
+  seconds: number
+): Promise<Response | null> {
+  try {
+    await rateLimit(env, uid, action, max, seconds);
+    return null;
+  } catch (err) {
+    if (err instanceof CommunityError) {
+      return errorResponse(err.message, err.status);
+    }
+    return null;
+  }
 }
 
 async function requireAdmin(
@@ -273,7 +400,7 @@ async function ingestExternalImage(
   keyPrefix: string,
   env: Env,
   kind: string,
-  options?: { rejectLandscape?: boolean }
+  options?: { rejectLandscape?: boolean; uploadedBy?: string }
 ): Promise<string | null> {
   if (!url) return null;
 
@@ -289,7 +416,7 @@ async function ingestExternalImage(
     }
   }
 
-  if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
+  if (!isAllowedExternalImageUrl(url)) return null;
 
   if (options?.rejectLandscape && /\/(?:library_hero|header|capsule_616x353)\b/i.test(url)) {
     return null;
@@ -315,15 +442,18 @@ async function ingestExternalImage(
     const ext = ALLOWED_CONTENT_TYPES[mime];
     if (!ext) return null;
 
-    const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength === 0) return null;
+    const bytes = await readBoundedResponseBytes(res, MAX_IMAGE_SIZE_BYTES);
+    if (!bytes || !hasValidImageSignature(bytes, mime)) return null;
 
-    if (options?.rejectLandscape && isLandscapeBytes(new Uint8Array(buf))) {
+    if (options?.rejectLandscape && isLandscapeBytes(bytes)) {
       return null;
     }
 
     const key = `${keyPrefix}_${Date.now()}.${ext}`;
-    const cloudUrl = await saveImageToCloud(key, buf, mime, env, { kind });
+    const cloudUrl = await saveImageToCloud(key, bytes, mime, env, {
+      kind,
+      uploadedBy: options?.uploadedBy,
+    });
     return cloudUrl;
   } catch (err) {
     console.warn(`[covers] Failed to ingest external image ${url}:`, err);
@@ -371,6 +501,14 @@ export const handleGetCover: RouteHandler = async (_request, env, ctx) => {
  * directly into the cloud so every user in the world receives the exact same, durable cloud URL.
  */
 export const handleCacheCover: RouteHandler = async (request, env) => {
+  const user = await authenticate(request, env);
+  if (!user) {
+    return errorResponse('Authentication required', 401);
+  }
+
+  const rateErr = await checkCoverRateLimit(env, user.uid, 'cover_cache', 60, 60);
+  if (rateErr) return rateErr;
+
   let body: CoverCachePayload;
   try {
     body = await request.json() as CoverCachePayload;
@@ -382,8 +520,14 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
     return errorResponse('gameKey is required', 400);
   }
 
+  for (const candidateUrl of [body.sourcePosterUrl, body.sourceBannerUrl]) {
+    if (candidateUrl && !normalizeImageKey(candidateUrl) && !isAllowedExternalImageUrl(candidateUrl)) {
+      return errorResponse('Invalid external image URL', 400);
+    }
+  }
+
   const gameKey = sanitizeGameKey(body.gameKey);
-  const title = (body.title || 'Unknown Game').trim();
+  const title = (body.title || 'Unknown Game').trim().slice(0, 200);
   const steamId = body.steamId && Number(body.steamId) > 0 ? Number(body.steamId) : null;
 
   // 1. Check if already cached in cloud
@@ -421,7 +565,7 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         `cover_${gameKey}_poster`,
         env,
         'cover_poster',
-        { rejectLandscape: true }
+        { rejectLandscape: true, uploadedBy: user.uid }
       );
     }
     // Fallback: smaller 600x900 if 2x failed
@@ -431,7 +575,7 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         `cover_${gameKey}_poster`,
         env,
         'cover_poster',
-        { rejectLandscape: true }
+        { rejectLandscape: true, uploadedBy: user.uid }
       );
     }
     // Fallback: IGDB (Twitch) canonical 2:3 poster if server Twitch credentials are configured
@@ -439,10 +583,15 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
       const igdb = await searchIgdbCandidates(env, title, steamId);
       for (const cand of igdb) {
         if (!finalCoverUrl && cand.posterUrl) {
-          finalCoverUrl = await ingestExternalImage(cand.posterUrl, `cover_${gameKey}_poster`, env, 'cover_poster', { rejectLandscape: true });
+          finalCoverUrl = await ingestExternalImage(cand.posterUrl, `cover_${gameKey}_poster`, env, 'cover_poster', {
+            rejectLandscape: true,
+            uploadedBy: user.uid,
+          });
         }
         if (!finalBannerUrl && cand.bannerUrl) {
-          finalBannerUrl = await ingestExternalImage(cand.bannerUrl, `cover_${gameKey}_banner`, env, 'cover_banner');
+          finalBannerUrl = await ingestExternalImage(cand.bannerUrl, `cover_${gameKey}_banner`, env, 'cover_banner', {
+            uploadedBy: user.uid,
+          });
         }
         if (finalCoverUrl) break;
       }
@@ -460,7 +609,8 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         sourceBanner,
         `cover_${gameKey}_banner`,
         env,
-        'cover_banner'
+        'cover_banner',
+        { uploadedBy: user.uid }
       );
     }
     // Fallback: header.jpg
@@ -469,7 +619,8 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
         `${STEAM_STATIC_CDN_BASE}/${steamId}/header.jpg`,
         `cover_${gameKey}_banner`,
         env,
-        'cover_banner'
+        'cover_banner',
+        { uploadedBy: user.uid }
       );
     }
     // Fallback: IGDB banner if Steam had none
@@ -477,7 +628,9 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
       const igdb = await searchIgdbCandidates(env, title, steamId);
       const igdbBanner = igdb.find((c) => c.bannerUrl)?.bannerUrl;
       if (igdbBanner) {
-        finalBannerUrl = await ingestExternalImage(igdbBanner, `cover_${gameKey}_banner`, env, 'cover_banner');
+        finalBannerUrl = await ingestExternalImage(igdbBanner, `cover_${gameKey}_banner`, env, 'cover_banner', {
+          uploadedBy: user.uid,
+        });
       }
     }
   }
@@ -485,16 +638,22 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
   // Only reuse poster as banner fallback; NEVER put a horizontal banner into the vertical poster slot
   if (!finalBannerUrl && finalCoverUrl) finalBannerUrl = finalCoverUrl;
 
-  // 4. Save into game_covers master catalog
+  // 4. Save into game_covers master catalog (never overwrite an already-cached cloud cover)
   if (finalCoverUrl || finalBannerUrl) {
     await env.DB.prepare(`
       INSERT INTO game_covers (game_key, title, steam_id, cover_url, banner_url, updated_at)
       VALUES (?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(game_key) DO UPDATE SET
-        title = excluded.title,
-        steam_id = COALESCE(excluded.steam_id, game_covers.steam_id),
-        cover_url = COALESCE(excluded.cover_url, game_covers.cover_url),
-        banner_url = COALESCE(excluded.banner_url, game_covers.banner_url),
+        title = COALESCE(NULLIF(game_covers.title, ''), excluded.title),
+        steam_id = COALESCE(game_covers.steam_id, excluded.steam_id),
+        cover_url = CASE
+          WHEN game_covers.cover_url LIKE '/api/images/%' THEN game_covers.cover_url
+          ELSE COALESCE(excluded.cover_url, game_covers.cover_url)
+        END,
+        banner_url = CASE
+          WHEN game_covers.banner_url LIKE '/api/images/%' THEN game_covers.banner_url
+          ELSE COALESCE(excluded.banner_url, game_covers.banner_url)
+        END,
         updated_at = datetime('now')
     `).bind(
       gameKey,
@@ -517,14 +676,22 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
 
 /**
  * POST /api/covers/upload
- * Allows desktop client to upload an optimized binary image directly to the cloud
- * (e.g. for custom covers or screenshots), updating the central catalog.
+ * Allows authenticated desktop client to upload an optimized binary image to the cloud
+ * when the catalog slot is not yet populated (only admins may replace existing catalog covers).
  */
 export const handleUploadCover: RouteHandler = async (request, env) => {
+  const user = await authenticate(request, env);
+  if (!user) {
+    return errorResponse('Authentication required', 401);
+  }
+
+  const rateErr = await checkCoverRateLimit(env, user.uid, 'cover_upload', 20, 300);
+  if (rateErr) return rateErr;
+
   const url = new URL(request.url);
   const gameKeyParam = url.searchParams.get('gameKey') || request.headers.get('X-Game-Key');
   const typeParam = url.searchParams.get('type') || request.headers.get('X-Cover-Type') || 'poster';
-  const titleParam = url.searchParams.get('title') || request.headers.get('X-Game-Title') || 'Unknown Game';
+  const titleParam = (url.searchParams.get('title') || request.headers.get('X-Game-Title') || 'Unknown Game').trim().slice(0, 200);
   const steamIdParam = url.searchParams.get('steamId') || request.headers.get('X-Steam-Id');
 
   if (!gameKeyParam) {
@@ -532,21 +699,49 @@ export const handleUploadCover: RouteHandler = async (request, env) => {
   }
 
   const gameKey = sanitizeGameKey(gameKeyParam);
+  if (!gameKey) {
+    return errorResponse('Invalid gameKey', 400);
+  }
   const type = typeParam === 'banner' ? 'banner' : 'poster';
-  const steamId = steamIdParam ? Number(steamIdParam) : null;
+  const steamId = steamIdParam && Number(steamIdParam) > 0 ? Number(steamIdParam) : null;
 
-  const rawContentType = request.headers.get('Content-Type') || 'image/jpeg';
+  // Prevent non-admin users from overwriting an existing shared catalog cover
+  const existing = await env.DB.prepare(
+    'SELECT cover_url, banner_url FROM game_covers WHERE game_key = ?'
+  ).bind(gameKey).first<any>();
+  const existingSlotUrl = type === 'poster' ? existing?.cover_url : existing?.banner_url;
+  if (existingSlotUrl && String(existingSlotUrl).startsWith('/api/images/') && !isAdminUser(user, env)) {
+    return errorResponse('Shared catalog cover already exists; admin access required to replace it', 403);
+  }
+
+  const rawContentType = request.headers.get('Content-Type') || '';
   const mime = rawContentType.split(';')[0].trim().toLowerCase();
-  const ext = ALLOWED_CONTENT_TYPES[mime] || 'jpg';
-  const validMime = ALLOWED_CONTENT_TYPES[mime] ? mime : 'image/jpeg';
+  const ext = ALLOWED_CONTENT_TYPES[mime];
+  if (!ext) {
+    return errorResponse('Unsupported image type. Allowed: image/png, image/jpeg, image/webp, image/gif', 415);
+  }
+
+  const contentLength = request.headers.get('Content-Length');
+  if (contentLength && Number(contentLength) > MAX_IMAGE_SIZE_BYTES) {
+    return errorResponse('Image exceeds maximum size of 10MB', 413);
+  }
 
   const buffer = await request.arrayBuffer();
   if (!buffer || buffer.byteLength === 0) {
     return errorResponse('Empty image payload', 400);
   }
+  if (buffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
+    return errorResponse('Image exceeds maximum size of 10MB', 413);
+  }
+  if (!hasValidImageSignature(new Uint8Array(buffer), mime)) {
+    return errorResponse('Invalid image file signature', 400);
+  }
 
   const key = `cover_${gameKey}_${type}_${Date.now()}.${ext}`;
-  const cloudUrl = await saveImageToCloud(key, buffer, validMime, env, { kind: `cover_${type}` });
+  const cloudUrl = await saveImageToCloud(key, buffer, mime, env, {
+    uploadedBy: user.uid,
+    kind: `cover_${type}`,
+  });
 
   // Update game_covers
   const coverUpdate = type === 'poster' ? cloudUrl : null;
@@ -1004,8 +1199,8 @@ async function checkSingleImageUrl(
       : { status: 'broken', httpStatus: 404, reason: 'Không tìm thấy trong D1 image_store' };
   }
 
-  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-    return { status: 'broken', reason: 'URL không hợp lệ' };
+  if (!isAllowedExternalImageUrl(trimmed)) {
+    return { status: 'broken', reason: 'URL không hợp lệ hoặc không được phép' };
   }
 
   try {

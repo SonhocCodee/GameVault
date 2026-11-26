@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { getDb, recalculatePlaytime } from './db.ts';
+import { getDb, recalculatePlaytime, setManualPlaytime } from './db.ts';
 import { extractTitleFromExe } from './importer.ts';
 import { ensureGameFolder, sanitizeTitleForFolder } from './media.ts';
 import { searchSteamCovers, detectSteamAppIdFromExe, resolveSteamAppId, CURATED_STEAM_APP_IDS, resolveWebCoversForGame } from './covers.ts';
@@ -977,37 +977,7 @@ export class PlaytimeTracker {
   }
 
   public updatePlaytimeManual(gameId: number, newMinutes: number): boolean {
-    if (typeof newMinutes !== 'number' || newMinutes < 0 || !Number.isFinite(newMinutes)) {
-      throw new Error('Invalid playtime minutes: must be a non-negative number');
-    }
-
-    const targetGame = this.db
-      .prepare('SELECT id, playtime_minutes FROM games WHERE id = ?')
-      .get(gameId) as any;
-
-    if (!targetGame) {
-      throw new Error(`Game with ID ${gameId} not found`);
-    }
-
-    const diff = newMinutes - targetGame.playtime_minutes;
-
-    this.db
-      .prepare(`
-        UPDATE games
-        SET playtime_minutes = ?, updated_at = datetime('now', 'localtime')
-        WHERE id = ?
-      `)
-      .run(newMinutes, gameId);
-
-    // Audit trail: record adjustment as a manual session log
-    this.db
-      .prepare(`
-        INSERT INTO sessions (game_id, start_time, end_time, duration_minutes, is_running, source)
-        VALUES (?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?, 0, 'manual')
-      `)
-      .run(gameId, diff);
-
-    return true;
+    return setManualPlaytime(gameId, newMinutes, this.db);
   }
 
   /**

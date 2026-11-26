@@ -166,6 +166,7 @@ export interface UserLibraryItem {
   bannerUrl?: string | null;
   status: GameLibraryStatus;
   playtimeMinutes: number;
+  recordedPlaytimeMinutes: number;
   lastPlayed?: string | null;
   completedAt?: string | null;
   userScore?: number | null;
@@ -184,6 +185,7 @@ export interface LibrarySyncStats {
   paused: number;
   dropped: number;
   totalPlaytimeMinutes: number;
+  recordedMinutes: number;
 }
 
 export interface CloudSessionItem {

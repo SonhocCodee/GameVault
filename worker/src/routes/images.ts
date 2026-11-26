@@ -10,7 +10,56 @@ export const ALLOWED_CONTENT_TYPES: Record<string, string> = {
   'image/gif': 'gif',
 };
 
-const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+/**
+ * Verifies magic-byte signatures for supported image types (PNG, JPEG, WebP, GIF)
+ * so non-image payloads cannot be uploaded or ingested with a spoofed Content-Type.
+ */
+export function hasValidImageSignature(bytes: Uint8Array, mime: string): boolean {
+  if (!bytes || bytes.length < 4) return false;
+  switch (mime) {
+    case 'image/png':
+      return (
+        bytes.length >= 8 &&
+        bytes[0] === 0x89 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x4e &&
+        bytes[3] === 0x47 &&
+        bytes[4] === 0x0d &&
+        bytes[5] === 0x0a &&
+        bytes[6] === 0x1a &&
+        bytes[7] === 0x0a
+      );
+    case 'image/jpeg':
+    case 'image/jpg':
+      return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    case 'image/gif':
+      return (
+        bytes.length >= 6 &&
+        bytes[0] === 0x47 &&
+        bytes[1] === 0x49 &&
+        bytes[2] === 0x46 &&
+        bytes[3] === 0x38 &&
+        (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+        bytes[5] === 0x61
+      );
+    case 'image/webp':
+      return (
+        bytes.length >= 12 &&
+        bytes[0] === 0x52 &&
+        bytes[1] === 0x49 &&
+        bytes[2] === 0x46 &&
+        bytes[3] === 0x46 &&
+        bytes[8] === 0x57 &&
+        bytes[9] === 0x45 &&
+        bytes[10] === 0x42 &&
+        bytes[11] === 0x50
+      );
+    default:
+      return false;
+  }
+}
 
 /**
  * Saves binary image to cloud storage:
@@ -157,6 +206,8 @@ export const handleImageGet: RouteHandler = async (_request, env, ctx) => {
   const headers = new Headers();
   headers.set('Content-Type', image.mime || 'application/octet-stream');
   headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
   if (image.etag) {
     headers.set('ETag', image.etag);
   }

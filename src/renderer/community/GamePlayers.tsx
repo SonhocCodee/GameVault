@@ -6,8 +6,8 @@ import type {
   Page,
   SharedLibraryGame,
 } from "../../shared/community.ts";
-import { communityError, minutesLabel } from "./client.ts";
-import { Avatar } from "./CommunityWidgets.tsx";
+import { communityError } from "./client.ts";
+import { Avatar, PlaytimeDisplay } from "./CommunityWidgets.tsx";
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   completed: { label: "Đã hoàn thành", cls: "gv-pill-emerald" },
@@ -75,7 +75,7 @@ export function GamePlayers({
         <div>
           <h3>Người chơi game này</h3>
           <p className="gv-muted">
-            Xếp theo tổng giờ chơi đã chia sẻ kèm cấu hình / FPS nếu có.
+            Xếp theo giờ app ghi nhận, kèm cấu hình / FPS nếu có. Giờ tự thêm không tính top.
           </p>
         </div>
         <div className="gv-actions">
@@ -106,7 +106,12 @@ export function GamePlayers({
           <div className="gv-notice">
             <span>
               Thư viện máy bạn:{" "}
-              <strong>{minutesLabel(localGame.playtimeMinutes)}</strong> ·{" "}
+              <strong>
+                <PlaytimeDisplay
+                  totalMinutes={localGame.playtimeMinutes}
+                  recordedMinutes={localGame.recordedPlaytimeMinutes}
+                />
+              </strong> ·{" "}
               {localGame.status === "completed"
                 ? "Đã hoàn thành"
                 : "Chưa hoàn thành"}
@@ -151,7 +156,11 @@ export function GamePlayers({
                         <span className={`gv-pill ${st.cls}`}>{st.label}</span>
                         {p.playtimeMinutes != null && (
                           <span className="gv-pill">
-                            {minutesLabel(p.playtimeMinutes)}
+                            <PlaytimeDisplay
+                              totalMinutes={p.playtimeMinutes}
+                              recordedMinutes={p.recordedPlaytimeMinutes}
+                              showRanked
+                            />
                           </span>
                         )}
                       </div>

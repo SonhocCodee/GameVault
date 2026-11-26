@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { DesktopCommunity } from '../community/DesktopCommunity.tsx';
-import type { PublicGame } from '../../shared/community.ts';
+import type { PublicGame, CommunitySearchRequest } from '../../shared/community.ts';
 import {
   Users,
   Trophy,
@@ -36,6 +36,8 @@ function formatPlaytimeMinutes(minutes: number): string {
 }
 
 interface CommunityViewProps {
+  searchRequest?: CommunitySearchRequest;
+  profileRequest?: number;
   initialGame?: PublicGame | null;
   onLocalGame?: (id: number) => void;
   onBack: () => void;
@@ -648,4 +650,4 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
   );
 };
 
-export const CommunityView: React.FC<CommunityViewProps> = ({ authStatus, initialGame, onLocalGame }) => <DesktopCommunity authStatus={authStatus} initialGame={initialGame} onLocalGame={onLocalGame} />;
+export const CommunityView: React.FC<CommunityViewProps> = ({ onBack, searchRequest, authStatus, initialGame, profileRequest, onLocalGame }) => <DesktopCommunity onBack={onBack} searchRequest={searchRequest} authStatus={authStatus} initialGame={initialGame} profileRequest={profileRequest} onLocalGame={onLocalGame} />;

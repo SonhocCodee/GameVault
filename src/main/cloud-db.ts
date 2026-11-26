@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import {
   getGameById,
   getGames,
@@ -182,6 +183,9 @@ export async function cacheCloudGameCover(payload: {
   sourcePosterUrl?: string | null;
   sourceBannerUrl?: string | null;
 }): Promise<CloudCoverResult | null> {
+  if (!getCurrentSession()) {
+    return null;
+  }
   try {
     const resp = await apiFetch(
       '/api/covers/cache',
@@ -189,7 +193,7 @@ export async function cacheCloudGameCover(payload: {
         method: 'POST',
         body: JSON.stringify(payload),
       },
-      false
+      true
     );
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -214,6 +218,9 @@ export async function uploadCloudGameCover(
   mimeType: string,
   meta?: { title?: string; steamId?: number }
 ): Promise<string | null> {
+  if (!getCurrentSession()) {
+    return null;
+  }
   try {
     const q = new URLSearchParams({
       gameKey,
@@ -233,7 +240,7 @@ export async function uploadCloudGameCover(
         },
         body: imageBuffer as any,
       },
-      false
+      true
     );
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -469,6 +476,8 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
   if (!session?.user?.uid) return { state: 'signed_out', synced: 0, pending: 0 };
   const uid = session.user.uid;
   const db = getDb();
+  const migrationKey = `review_scores_migrated:${uid}`;
+  const migrationDone = getSetting(migrationKey) === '1';
   db.exec(`CREATE TABLE IF NOT EXISTS local_review_sync (
     uid TEXT NOT NULL, game_id INTEGER NOT NULL, signature TEXT NOT NULL,
     PRIMARY KEY(uid,game_id))`);
@@ -483,6 +492,9 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
     const signature = JSON.stringify(data);
     return { game, data, signature, changed: signature !== stored?.signature && (data != null || stored != null) };
   }).filter(item => item.changed);
+  if (pending.length === 0 && migrationDone) {
+    return { state: 'synced', synced: 0, pending: 0, migrated: 0 };
+  }
   let synced = 0;
   let migrated = 0;
   const acknowledge = (item: typeof pending[number]) => {
@@ -492,15 +504,21 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
   };
   try {
     const rated = pending.filter(item => item.data != null);
-    for (let offset = 0; offset < Math.max(rated.length, 1); offset += 50) {
-      const chunk = rated.slice(offset, offset + 50);
-      const result = await communityRequest<{ success: boolean; synced: number; migrated?: number }>('/api/community/me/reviews/sync', 'POST', {
-        items: chunk.map(item => ({ ...item.data, updatedAt: new Date(item.game.updated_at.replace(' ', 'T')).toISOString() })),
-        ...(offset === 0 ? { includeStoredScores: true } : {}),
-      });
-      if (!result.success || result.synced < chunk.length) throw new Error('Server did not acknowledge all reviews');
-      chunk.forEach(acknowledge);
-      migrated += result.migrated || 0;
+    if (rated.length > 0 || !migrationDone) {
+      for (let offset = 0; offset < Math.max(rated.length, 1); offset += 50) {
+        const chunk = rated.slice(offset, offset + 50);
+        const includeStoredScores = offset === 0 && !migrationDone;
+        const result = await communityRequest<{ success: boolean; synced: number; migrated?: number }>('/api/community/me/reviews/sync', 'POST', {
+          items: chunk.map(item => ({ ...item.data, updatedAt: new Date(item.game.updated_at.replace(' ', 'T')).toISOString() })),
+          ...(includeStoredScores ? { includeStoredScores: true } : {}),
+        });
+        if (!result.success || result.synced < chunk.length) throw new Error('Server did not acknowledge all reviews');
+        if (includeStoredScores) {
+          setSetting(migrationKey, '1');
+        }
+        chunk.forEach(acknowledge);
+        migrated += result.migrated || 0;
+      }
     }
     for (const item of pending.filter(item => item.data == null)) {
       if (!await deleteMyReview(item.game.id)) throw new Error('Could not remove the cloud rating');
@@ -514,6 +532,10 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
 }
 
 export async function updateGameAndSyncReview(id: number, data: Partial<Game>): Promise<Game> {
+  // Renderer edits cannot mint app-recorded time; only internal sync carries it.
+  data = { ...data };
+  delete data.recorded_playtime_minutes;
+  delete data.manual_playtime_minutes;
   const game = updateGame(id, data);
   if (!('user_rating' in data || 'notes' in data || 'status' in data)) return game;
   let reviewSync = await syncLocalReviews();
@@ -537,6 +559,7 @@ function libraryItem(g: Game): UserLibraryItem {
     steamId: g.steam_id && g.steam_id > 0 ? g.steam_id : null,
     coverUrl: remoteUrl(g.cover_url), bannerUrl: remoteUrl(g.banner_url),
     status: g.status, playtimeMinutes: g.playtime_minutes || 0,
+    recordedPlaytimeMinutes: g.recorded_playtime_minutes ?? g.playtime_minutes ?? 0,
     lastPlayed: g.last_played_at || null, completedAt: g.completed_at || null,
     userScore: g.user_rating ?? null, userNotes: g.notes || null,
     isDeleted: false, clientUpdatedAt: toUtcIso(g.updated_at),
@@ -631,8 +654,29 @@ export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
 }
 
 const SYNC_EPOCH_SETTING_KEY = 'library_sync_epoch';
+const SYNC_HASH_SETTING_KEY = 'library_sync_hash';
+
+let inFlightLibrarySync: Promise<LibrarySyncResult> | null = null;
 
 export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promise<LibrarySyncResult> {
+  const syncMode = options?.mode === 'overwrite' ? 'overwrite' : 'merge';
+  if (syncMode !== 'overwrite' && inFlightLibrarySync) {
+    return inFlightLibrarySync;
+  }
+  const run = runSyncLibraryWithCloud(options);
+  if (syncMode !== 'overwrite') {
+    inFlightLibrarySync = run;
+  }
+  try {
+    return await run;
+  } finally {
+    if (inFlightLibrarySync === run) {
+      inFlightLibrarySync = null;
+    }
+  }
+}
+
+async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<LibrarySyncResult> {
   const db = getDb();
   const syncMode = options?.mode === 'overwrite' ? 'overwrite' : 'merge';
   const localSyncEpoch = Number(getSetting(SYNC_EPOCH_SETTING_KEY) || '0') || 0;
@@ -686,6 +730,7 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
       bannerUrl: isBannerHttp ? g.banner_url : null,
       status: g.status,
       playtimeMinutes: g.playtime_minutes || 0,
+      recordedPlaytimeMinutes: g.recorded_playtime_minutes ?? g.playtime_minutes ?? 0,
       lastPlayed: g.last_played_at || null,
       completedAt: g.completed_at || null,
       userScore: g.user_rating != null ? g.user_rating : null,
@@ -780,25 +825,59 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
     }
   }
 
-  const resp = await apiFetch(
-    '/api/library/sync',
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        mode: syncMode,
-        clientSyncEpoch: localSyncEpoch,
-        items,
-        sessions: sessionsPayload,
-      }),
-    },
-    true
-  );
+  const sessionUid = getCurrentSession()?.user?.uid || '';
+  const workerBase = getWorkerBaseUrl();
+  const hashItems = items.map((it) => ({
+    ...it,
+    clientUpdatedAt: it.isDeleted ? '' : it.clientUpdatedAt,
+  }));
+  const payloadFingerprint = sessionUid
+    ? crypto
+        .createHash('sha256')
+        .update(
+          JSON.stringify({
+            uid: sessionUid,
+            workerBase,
+            localSyncEpoch,
+            items: hashItems,
+            sessions: sessionsPayload,
+          })
+        )
+        .digest('hex')
+    : '';
+  const skipPostUpload =
+    syncMode !== 'overwrite' &&
+    Boolean(payloadFingerprint) &&
+    payloadFingerprint === (getSetting(SYNC_HASH_SETTING_KEY) || '');
 
-  if (!resp.ok) {
-    throw new Error(`Đồng bộ thư viện game thất bại: HTTP ${resp.status}`);
+  let result: LibrarySyncResponse;
+  let pushedCount = 0;
+
+  if (skipPostUpload) {
+    result = await getCloudLibrary();
+  } else {
+    const resp = await apiFetch(
+      '/api/library/sync',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          mode: syncMode,
+          clientSyncEpoch: localSyncEpoch,
+          items,
+          sessions: sessionsPayload,
+        }),
+      },
+      true
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Đồng bộ thư viện game thất bại: HTTP ${resp.status}`);
+    }
+
+    result = await resp.json();
+    pushedCount = items.length;
   }
 
-  const result: LibrarySyncResponse = await resp.json();
   const serverSyncEpoch = Number(result.syncEpoch) || 0;
   const isAuthoritativePull =
     Boolean(result.authoritativePull) ||
@@ -861,6 +940,7 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
         title: remote.title,
         status: remote.status,
         playtime_minutes: remote.playtimeMinutes,
+        recorded_playtime_minutes: remote.recordedPlaytimeMinutes ?? remote.playtimeMinutes,
         cover_url: validRemoteCover,
         banner_url: validRemoteBanner,
         steam_id: remote.steamId || -1,
@@ -879,6 +959,9 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
       const remoteMs = parseTimestampMs(remote.clientUpdatedAt);
       const localMs = parseTimestampMs(existing.updated_at);
       const remoteIsNewer = Number.isFinite(remoteMs) && Number.isFinite(localMs) && remoteMs > localMs;
+      const localRecorded = existing.recorded_playtime_minutes ?? existing.playtime_minutes ?? 0;
+      const remoteRecorded = Math.max(0, Math.min(remote.playtimeMinutes || 0,
+        remote.recordedPlaytimeMinutes ?? localRecorded));
 
       if (isAuthoritativePull) {
         if (remote.status !== existing.status) {
@@ -887,6 +970,11 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
         }
         if ((remote.playtimeMinutes || 0) !== (existing.playtime_minutes || 0)) {
           patch.playtime_minutes = remote.playtimeMinutes || 0;
+          patch.recorded_playtime_minutes = remoteRecorded;
+          needsUpdate = true;
+        }
+        if (remoteRecorded !== localRecorded) {
+          patch.recorded_playtime_minutes = remoteRecorded;
           needsUpdate = true;
         }
         if (validRemoteCover && validRemoteCover !== existing.cover_url) {
@@ -923,9 +1011,17 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
           needsUpdate = true;
         }
 
-        // Playtime rule: highest playtime wins
-        if (remote.playtimeMinutes > (existing.playtime_minutes || 0)) {
-          patch.playtime_minutes = remote.playtimeMinutes;
+        // Recorded progress is monotonic. Manual time is a separate component
+        // chosen by the latest edit, so removing manual hours survives sync.
+        const mergedRecorded = Math.max(localRecorded, remoteRecorded);
+        const localManual = Math.max(0, existing.playtime_minutes - localRecorded);
+        const remoteManual = Math.max(0, remote.playtimeMinutes - remoteRecorded);
+        const mergedTotal = remote.recordedPlaytimeMinutes === undefined
+          ? Math.max(existing.playtime_minutes, remote.playtimeMinutes)
+          : mergedRecorded + (remoteIsNewer ? remoteManual : localManual);
+        if (mergedTotal !== existing.playtime_minutes || mergedRecorded !== localRecorded) {
+          patch.playtime_minutes = mergedTotal;
+          patch.recorded_playtime_minutes = mergedRecorded;
           needsUpdate = true;
         }
 
@@ -996,6 +1092,14 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
     try {
       if (isAuthoritativePull) {
         db.prepare('DELETE FROM sessions').run();
+        // Cloud intentionally excludes manual audit rows. Recreate the local
+        // offset after replacing sessions so the next real session continues
+        // counting with exactly the restored total/recorded split.
+        db.prepare(`INSERT INTO sessions
+          (game_id, start_time, end_time, duration_minutes, is_running, source)
+          SELECT id, datetime('now', 'localtime'), datetime('now', 'localtime'),
+            manual_playtime_minutes, 0, 'manual'
+          FROM games WHERE manual_playtime_minutes > 0`).run();
       }
       const refreshedGames = getGames();
       const idByKey = new Map<string, number>();
@@ -1043,11 +1147,13 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
     }
   }
 
-  // 3. Post-sync auto-enrichment: resolve covers for any games that are still missing art
-  try {
-    await autoEnrichAllGameCovers(db);
-  } catch (err) {
-    console.warn('Post-sync autoEnrich warning:', err);
+  // 3. Post-sync auto-enrichment: only needed if we pulled new games missing covers
+  if (pulled > 0 && result.games.some((g) => !g.isDeleted && !g.coverUrl)) {
+    try {
+      await autoEnrichAllGameCovers(db);
+    } catch (err) {
+      console.warn('Post-sync autoEnrich warning:', err);
+    }
   }
 
   await syncLocalReviews();
@@ -1055,9 +1161,12 @@ export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promis
   if (serverSyncEpoch > 0) {
     setSetting(SYNC_EPOCH_SETTING_KEY, String(serverSyncEpoch));
   }
+  if (!skipPostUpload && !isAuthoritativePull && pulled === 0 && updated === 0 && payloadFingerprint) {
+    setSetting(SYNC_HASH_SETTING_KEY, payloadFingerprint);
+  }
 
   return {
-    pushed: items.length,
+    pushed: pushedCount,
     pulled,
     updated,
     completedCount: result.stats.completed,

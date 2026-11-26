@@ -1,7 +1,10 @@
 import type { CommunityAdapter } from "../../shared/community.ts";
+import { localProfilePresetUrl } from "./profile-presets.ts";
 
 export function qualifyCommunityUrl(base: string, url: string): string {
   if (!url) return "";
+  const preset = localProfilePresetUrl(url);
+  if (preset) return preset;
   if (url.startsWith("/")) return `${base.replace(/\/$/, "")}${url}`;
   try {
     const parsed = new URL(url);

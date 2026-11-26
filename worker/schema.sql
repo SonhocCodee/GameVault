@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS ratings (
 );
 
 -- 3. Community Picks Table (Monthly State)
+CREATE TABLE IF NOT EXISTS community_follows (
+    uid TEXT NOT NULL,
+    followed_uid TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (uid, followed_uid),
+    CHECK (uid <> followed_uid)
+);
+CREATE INDEX IF NOT EXISTS idx_community_followers ON community_follows(followed_uid, uid);
+
 CREATE TABLE IF NOT EXISTS community_picks (
     month TEXT PRIMARY KEY NOT NULL, -- Format: YYYY-MM
     state TEXT NOT NULL DEFAULT 'voting' CHECK(state IN ('voting', 'playing', 'done')),
@@ -64,6 +73,7 @@ CREATE TABLE IF NOT EXISTS user_library (
     banner_url TEXT,
     status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('playing', 'completed', 'paused', 'dropped', 'backlog')),
     playtime_minutes INTEGER NOT NULL DEFAULT 0,
+    recorded_playtime_minutes INTEGER NOT NULL DEFAULT 0,
     last_played TEXT,
     completed_at TEXT,
     user_score REAL,
@@ -104,17 +114,31 @@ CREATE INDEX IF NOT EXISTS idx_user_library_uid ON user_library(uid);
 CREATE INDEX IF NOT EXISTS idx_user_library_status ON user_library(uid, status);
 CREATE INDEX IF NOT EXISTS idx_user_library_updated ON user_library(uid, server_updated_at);
 CREATE INDEX IF NOT EXISTS idx_game_covers_key ON game_covers(game_key);
+CREATE TABLE IF NOT EXISTS game_metadata (
+    game_key TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    steam_id INTEGER,
+    classification TEXT NOT NULL DEFAULT 'unknown' CHECK(classification IN ('online','hybrid','offline','unknown')),
+    source TEXT NOT NULL DEFAULT 'unknown',
+    confidence REAL NOT NULL DEFAULT 0,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_game_metadata_classification ON game_metadata(classification);
 CREATE INDEX IF NOT EXISTS idx_image_store_key ON image_store(key);
 
 -- Public community tables (also available as a versioned migration).
 CREATE TABLE IF NOT EXISTS community_profiles (
  uid TEXT PRIMARY KEY, nickname TEXT NOT NULL, bio TEXT NOT NULL DEFAULT '',
- share_library INTEGER NOT NULL DEFAULT 0, suspended INTEGER NOT NULL DEFAULT 0,
+ share_library INTEGER NOT NULL DEFAULT 1, suspended INTEGER NOT NULL DEFAULT 0,
+ avatar_preset TEXT, banner_preset TEXT,
  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS community_library (
  uid TEXT NOT NULL, game_key TEXT NOT NULL, title TEXT NOT NULL, steam_id INTEGER,
  cover_url TEXT, status TEXT NOT NULL, playtime_minutes INTEGER NOT NULL DEFAULT 0,
+ recorded_playtime_minutes INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(uid, game_key)
 );
 CREATE INDEX IF NOT EXISTS idx_community_library_game ON community_library(game_key);

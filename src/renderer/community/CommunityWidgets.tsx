@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Camera,
+  CircleAlert,
   Flag,
   HelpCircle,
   MessageSquareText,
@@ -10,6 +11,64 @@ import {
   X,
 } from "lucide-react";
 import type { PostKind } from "../../shared/community.ts";
+import { localProfilePresetUrl } from "./profile-presets.ts";
+import { minutesLabel } from "./client.ts";
+
+export function playtimeBreakdown(
+  totalMinutes: number,
+  recordedMinutes?: number | null,
+) {
+  const total = Number.isFinite(totalMinutes) ? Math.max(0, totalMinutes) : 0;
+  const recorded =
+    typeof recordedMinutes === "number" && Number.isFinite(recordedMinutes)
+      ? Math.min(total, Math.max(0, recordedMinutes))
+      : total;
+  return { total, recorded, manual: Math.max(0, total - recorded) };
+}
+
+function detailedMinutesLabel(minutes: number): string {
+  const rounded = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
+  if (!hours) return `${remainder} phút`;
+  return `${hours.toLocaleString("vi-VN")} giờ${remainder ? ` ${remainder} phút` : ""}`;
+}
+
+export function PlaytimeDisplay({
+  totalMinutes,
+  recordedMinutes,
+  showRanked = false,
+  focusable = true,
+}: {
+  totalMinutes: number;
+  recordedMinutes?: number | null;
+  showRanked?: boolean;
+  focusable?: boolean;
+}) {
+  const time = playtimeBreakdown(totalMinutes, recordedMinutes);
+  const explanation = `Tổng giờ chơi: ${detailedMinutesLabel(time.total)}. App ghi nhận: ${detailedMinutesLabel(time.recorded)}. Tự thêm: ${detailedMinutesLabel(time.manual)}. Chỉ giờ app ghi nhận được tính vào bảng xếp hạng.`;
+  return (
+    <span className={`gv-playtime${showRanked ? " gv-playtime-ranked" : ""}`}>
+      <span className="gv-playtime-value">
+        {minutesLabel(showRanked ? time.recorded : time.total)}
+        {time.manual > 0 && (
+          <span
+            className="gv-playtime-warning"
+            role="img"
+            tabIndex={focusable ? 0 : undefined}
+            title={explanation}
+            aria-label={explanation}
+          >
+            <CircleAlert size={13} aria-hidden="true" />
+          </span>
+        )}
+      </span>
+      {showRanked && time.manual > 0 && (
+        <span className="gv-playtime-total">Tổng {minutesLabel(time.total)}</span>
+      )}
+    </span>
+  );
+}
 
 export function Avatar({
   name,
@@ -21,13 +80,14 @@ export function Avatar({
   size?: number;
 }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
   const label = (name || "P").trim();
   const initial = (label[0] || "P").toUpperCase();
   if (url && !failed) {
     return (
       <img
         className="gv-avatar"
-        src={url}
+        src={localProfilePresetUrl(url) || url}
         alt={label}
         width={size}
         height={size}
@@ -70,8 +130,25 @@ export function KindBadge({ kind }: { kind: PostKind }) {
   );
 }
 
+export type MetacriticTier = "high" | "mid" | "low" | "none";
+
+export function getMetacriticTier(score: number | null | undefined): MetacriticTier {
+  if (score == null || isNaN(score)) return "none";
+  if (score >= 7.5) return "high";
+  if (score >= 5.0) return "mid";
+  return "low";
+}
+
+export function getMetacriticVerdict(score: number | null | undefined, count = 0): string {
+  if (score == null || isNaN(score) || count === 0) return "Chưa có đánh giá";
+  if (score >= 8.5) return "Đánh giá xuất sắc";
+  if (score >= 7.5) return "Đa số tích cực";
+  if (score >= 5.0) return "Đánh giá hỗn hợp";
+  return "Đa số tiêu cực";
+}
+
 export function scoreTierClass(score: number): string {
-  if (score >= 8) return "gv-score-high";
+  if (score >= 7.5) return "gv-score-high";
   if (score >= 5) return "gv-score-mid";
   return "gv-score-low";
 }

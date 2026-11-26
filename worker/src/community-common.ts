@@ -155,12 +155,31 @@ export async function requireAdmin(request: Request, env: Env) {
     throw new CommunityError("Administrator access required", 403);
   return user;
 }
-export async function ensureProfile(env: Env, user: AuthUser) {
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO community_profiles(uid,nickname) VALUES (?,?)",
+export async function ensureProfile(env: Env, user: AuthUser): Promise<boolean> {
+  const existing = await env.DB.prepare(
+    "SELECT share_library, suspended FROM community_profiles WHERE uid=?",
+  )
+    .bind(user.uid)
+    .first<{ share_library: number; suspended: number }>();
+  if (existing && (existing.share_library === 1 || existing.suspended === 1)) {
+    return false;
+  }
+  const result = await env.DB.prepare(
+    "INSERT INTO community_profiles(uid,nickname,share_library) VALUES (?,?,1) ON CONFLICT(uid) DO UPDATE SET share_library=1 WHERE share_library=0 AND suspended=0",
   )
     .bind(user.uid, safeName(user.displayName))
     .run();
+  if (result.meta?.changes) {
+    await refreshSharedLibrary(env, user.uid);
+    return true;
+  }
+  return false;
+}
+
+export function communityAvatar(request: Request, value: unknown): string | null {
+  if (typeof value === "string" && /^\/community\/profile-presets\/avatars\/[a-z-]+\.svg$/.test(value))
+    return new URL(value, request.url).href;
+  return publicUrl(value);
 }
 export async function rateLimit(
   env: Env,
@@ -178,21 +197,37 @@ export async function rateLimit(
     .first<any>();
   if (!row)
     throw new CommunityError("Too many requests. Please wait and retry.", 429);
-  await env.DB.prepare("DELETE FROM community_rate_limits WHERE window<?")
-    .bind(Math.floor(Date.now() / 1000) - 172800)
-    .run();
+  if (Math.random() < 0.02) {
+    await env.DB.prepare("DELETE FROM community_rate_limits WHERE window<?")
+      .bind(Math.floor(Date.now() / 1000) - 172800)
+      .run();
+  }
 }
 export async function refreshSharedLibrary(env: Env, uid: string) {
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM community_library WHERE uid=?").bind(uid),
+    env.DB.prepare(`DELETE FROM community_library WHERE uid=? AND NOT EXISTS (
+      SELECT 1 FROM user_library l JOIN community_profiles p ON p.uid=l.uid
+      WHERE l.uid=community_library.uid AND l.is_deleted=0 AND p.share_library=1 AND p.suspended=0
+        AND CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END=community_library.game_key
+    )`).bind(uid),
     env.DB.prepare(
-      `INSERT INTO community_library(uid,game_key,title,steam_id,cover_url,status,playtime_minutes)
+      `INSERT INTO community_library(uid,game_key,title,steam_id,cover_url,status,playtime_minutes,recorded_playtime_minutes)
       SELECT l.uid,CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END,
         MAX(l.title),MAX(CASE WHEN l.steam_id>0 THEN l.steam_id ELSE NULL END),MAX(l.cover_url),
         CASE WHEN MAX(CASE WHEN l.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed' ELSE MAX(l.status) END,
-        MAX(l.playtime_minutes) FROM user_library l
+        MAX(l.playtime_minutes),MAX(l.recorded_playtime_minutes) FROM user_library l
       JOIN community_profiles p ON p.uid=l.uid WHERE l.uid=? AND l.is_deleted=0 AND p.share_library=1 AND p.suspended=0
-      GROUP BY l.uid,CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END`,
+      GROUP BY l.uid,CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END
+      ON CONFLICT(uid,game_key) DO UPDATE SET
+        title=excluded.title,steam_id=excluded.steam_id,cover_url=excluded.cover_url,
+        status=excluded.status,playtime_minutes=excluded.playtime_minutes,
+        recorded_playtime_minutes=excluded.recorded_playtime_minutes
+      WHERE community_library.title IS NOT excluded.title
+        OR community_library.steam_id IS NOT excluded.steam_id
+        OR community_library.cover_url IS NOT excluded.cover_url
+        OR community_library.status IS NOT excluded.status
+        OR community_library.playtime_minutes IS NOT excluded.playtime_minutes
+        OR community_library.recorded_playtime_minutes IS NOT excluded.recorded_playtime_minutes`,
     ).bind(uid),
   ]);
 }

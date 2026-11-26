@@ -39,6 +39,13 @@ describe('Milestone 2 Production Engines Integration Suite', () => {
   beforeEach(() => {
     tempDir = createTempDirectory('gv_m2_prod_test_');
     db = createTestDb(':memory:');
+    // This suite injects its own database instead of running production initDb.
+    // Mirror the production playtime columns without changing the shared legacy fixture.
+    db.exec(`
+      ALTER TABLE games ADD COLUMN manual_playtime_minutes REAL NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN recorded_playtime_minutes REAL
+        GENERATED ALWAYS AS (MAX(0, playtime_minutes - manual_playtime_minutes)) VIRTUAL;
+    `);
   });
 
   afterEach(() => {
@@ -331,8 +338,10 @@ describe('Milestone 2 Production Engines Integration Suite', () => {
       // Manual edit to 300 minutes (5 hours)
       tracker.manualEditPlaytime(gameId, 300);
 
-      const game = db.prepare('SELECT playtime_minutes FROM games WHERE id = ?').get(gameId);
+      const game = db.prepare('SELECT playtime_minutes, manual_playtime_minutes, recorded_playtime_minutes FROM games WHERE id = ?').get(gameId);
       assert.equal(game.playtime_minutes, 300);
+      assert.equal(game.manual_playtime_minutes, 240);
+      assert.equal(game.recorded_playtime_minutes, 60, 'manual edits must preserve recorded playtime');
 
       const manualSession = db.prepare('SELECT * FROM sessions WHERE game_id = ? AND source = ?').get(gameId, 'manual');
       assert.ok(manualSession);

@@ -48,11 +48,26 @@ export async function getHmacKey(secret: string): Promise<CryptoKey> {
   );
 }
 
+const KNOWN_INSECURE_SECRETS = new Set([
+  'gamevault-session-secret-key-production-32chars-min',
+  'changeme',
+  'secret',
+]);
+
+export function isValidSessionSecret(secret: unknown): secret is string {
+  if (typeof secret !== 'string') return false;
+  const trimmed = secret.trim();
+  return trimmed.length >= 32 && !KNOWN_INSECURE_SECRETS.has(trimmed);
+}
+
 export async function createSessionToken(
   payload: Omit<SessionPayload, 'iat' | 'exp'>,
   secret: string,
   expiresInSeconds: number = 7 * 86400
 ): Promise<{ token: string; expiresAt: number }> {
+  if (!isValidSessionSecret(secret)) {
+    throw new Error('SESSION_SECRET is missing or insecure');
+  }
   const now = Math.floor(Date.now() / 1000);
   const exp = now + expiresInSeconds;
   const fullPayload: SessionPayload = {
@@ -77,6 +92,7 @@ export async function createSessionToken(
 }
 
 export async function verifySessionToken(token: string, secret: string): Promise<SessionPayload | null> {
+  if (!isValidSessionSecret(secret)) return null;
   if (!token || typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length !== 3) return null;
@@ -140,8 +156,8 @@ export async function verifyGoogleIdToken(
 ): Promise<{ uid: string; email: string; displayName: string; photoUrl: string } | null> {
   if (!idToken || typeof idToken !== 'string') return null;
 
-  // Mock support for automated testing without internet connection
-  if (env.ALLOW_MOCK_AUTH === 'true' && idToken.startsWith('mock:')) {
+  // Mock support for automated testing only (never allowed in production)
+  if (env.ENVIRONMENT !== 'production' && env.ALLOW_MOCK_AUTH === 'true' && idToken.startsWith('mock:')) {
     const jsonStr = idToken.slice(5);
     try {
       const parsed = JSON.parse(jsonStr);
@@ -192,6 +208,10 @@ export async function verifyGoogleIdToken(
       return null;
     }
 
+    if (data.email && data.email_verified !== undefined && String(data.email_verified).toLowerCase() !== 'true') {
+      return null;
+    }
+
     return {
       uid: String(data.sub),
       email: String(data.email || ''),
@@ -204,6 +224,9 @@ export async function verifyGoogleIdToken(
 }
 
 export async function handleGoogleAuth(request: Request, env: Env): Promise<Response> {
+  if (!isValidSessionSecret(env.SESSION_SECRET)) {
+    return errorResponse('Authentication service misconfigured', 500);
+  }
   let body: any;
   try {
     body = await request.json();

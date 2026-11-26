@@ -13,7 +13,6 @@ import {
   X,
   ArrowLeft,
   BookmarkPlus,
-  Settings,
   Users,
   ChevronDown,
   LayoutGrid,
@@ -22,12 +21,14 @@ import {
   Loader2,
   Sparkles,
   FolderSync,
-  ShieldCheck,
 } from 'lucide-react';
 import type { AuthStatus, GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
+import { CommunitySearch } from '../community/CommunitySearch.tsx';
+import type { CommunitySearchRequest } from '../../shared/community.ts';
 
 export interface NavbarProps {
+  onCommunitySearch?: (request: CommunitySearchRequest) => void;
   onAuthChanged?: (status: AuthStatus) => void;
   currentView?: 'library' | 'detail' | 'community';
   isDetailView?: boolean;
@@ -50,6 +51,7 @@ export interface NavbarProps {
   onOpenSettingsModal?: () => void;
   onOpenAdminModal?: () => void;
   onOpenCommunity?: () => void;
+  onOpenProfile?: () => void;
   onEnrichCovers?: () => void | Promise<void>;
   libraryLayout?: 'grid' | 'timeline';
   onLibraryLayoutChange?: (layout: 'grid' | 'timeline') => void;
@@ -72,6 +74,7 @@ const SORT_OPTIONS: Array<{ id: string; label: string }> = [
 ];
 
 export const Navbar: React.FC<NavbarProps> = ({
+  onCommunitySearch,
   onAuthChanged,
   currentView,
   isDetailView = false,
@@ -94,6 +97,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettingsModal,
   onOpenAdminModal,
   onOpenCommunity,
+  onOpenProfile,
   onEnrichCovers,
   libraryLayout = 'grid',
   onLibraryLayoutChange,
@@ -154,9 +158,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-30 border-b border-[#2a2e3d] bg-[#0e1015]/95 backdrop-blur-md">
       {/* Top Main Navigation Row */}
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-3">
         {/* Left: Brand Logo + Primary View Switcher (Thư viện vs Cộng đồng) */}
-        <div className="flex items-center gap-5">
+          <div className="flex shrink-0 items-center gap-5">
           <button
             onClick={onBackToLibrary}
             className="flex items-center gap-3 text-left group cursor-pointer"
@@ -165,7 +169,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff2a44] to-[#990018] shadow-md shadow-[#ff2a44]/30 transition-transform group-hover:scale-105">
               <Gamepad2 className="h-5 w-5 text-white" />
             </div>
-            <div>
+              <div className="hidden xl:block">
               <div className="flex items-center gap-1.5">
                 <span className="text-lg font-black tracking-wider text-white">GAMEVAULT</span>
                 <span className="rounded bg-[#ff2a44]/20 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-[#ff2a44] border border-[#ff2a44]/30">
@@ -179,7 +183,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Primary View Switcher Tabs: Thư viện vs Cộng đồng */}
-          <nav className="flex items-center rounded-lg border border-[#2a2e3d] bg-[#161821] p-1">
+            <nav className="flex items-center whitespace-nowrap rounded-lg border border-[#2a2e3d] bg-[#161821] p-1">
             <button
               onClick={onBackToLibrary}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-all ${
@@ -228,20 +232,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
         ) : isCommunity ? (
-          <div className="flex items-center gap-3 flex-1 max-w-md">
-            {onBackToLibrary && (
-              <button
-                onClick={onBackToLibrary}
-                className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#161821] px-3 py-1.5 text-xs font-bold text-white transition-all hover:border-[#ff2a44] hover:bg-[#ff2a44]/15 hover:text-[#ff2a44]"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                <span>Quay lại Thư viện</span>
-              </button>
-            )}
-            <div className="flex items-center gap-1.5 text-xs text-[#8e95a5]">
-              <span>/</span>
-              <span className="font-semibold text-sky-400">Cộng đồng game thủ</span>
-            </div>
+            <div className="min-w-0 flex-1 basis-72">
+              <CommunitySearch onSearch={(request) => onCommunitySearch?.(request)} />
           </div>
         ) : (
           <div className="relative flex-1 max-w-md">
@@ -269,6 +261,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Section: Prominent Sync Button, Compact Tools Dropdown, Add Game, Settings, Auth */}
         <div className="flex items-center gap-2 shrink-0">
+            {!isCommunity && <>
           {/* Direct Prominent Sync Button */}
           <button
             onClick={() => onOpenSyncModal('library')}
@@ -397,8 +390,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <BookmarkPlus className="h-3.5 w-3.5" />
                     </div>
                     <div>
-                      <div className="font-semibold text-white group-hover:text-purple-400">Tìm game (Wishlist)</div>
-                      <div className="text-[10px] text-[#8e95a5]">Tìm Steam &amp; thêm vào Chờ chơi</div>
+                      <div className="font-semibold text-white group-hover:text-purple-400">Thêm game từ Steam</div>
+                      <div className="text-[10px] text-[#8e95a5]">Thêm game chờ chơi hoặc đã phá đảo</div>
                     </div>
                   </button>
                 )}
@@ -416,31 +409,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Thêm game</span>
           </button>
 
-          {/* Admin Covers Button */}
-          {onOpenAdminModal && (
-            <button
-              onClick={onOpenAdminModal}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:border-amber-400 hover:bg-amber-500/20 transition-all shrink-0"
-              title="Quản trị Bìa Game (Cloud Master Catalog)"
-            >
-              <ShieldCheck className="h-4 w-4" />
-            </button>
-          )}
-
-          {/* Settings Icon Button */}
-          {onOpenSettingsModal && (
-            <button
-              onClick={onOpenSettingsModal}
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2a2e3d] bg-[#161821] text-[#8e95a5] hover:border-[#ff2a44] hover:bg-[#1f2230] hover:text-white transition-all shrink-0"
-              title="Cài đặt hệ thống, phím tắt chụp màn hình và thư mục lưu trữ"
-            >
-              <Settings className="h-4 w-4" />
-            </button>
-          )}
+            </>}
 
           {/* Google login / avatar */}
           <div className="shrink-0">
-            <AuthBadge onOpenAdminModal={onOpenAdminModal} onChanged={onAuthChanged} />
+              <AuthBadge onOpenSettingsModal={onOpenSettingsModal} onOpenAdminModal={onOpenAdminModal} onChanged={onAuthChanged} onOpenProfile={onOpenProfile} />
           </div>
         </div>
       </div>

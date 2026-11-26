@@ -163,7 +163,7 @@ export default {
       });
     } catch (err: any) {
       console.error('[Worker Error]', err);
-      return errorResponse(err.message || 'Internal Server Error', 500);
+      return errorResponse('Internal Server Error', 500);
     }
   },
 };

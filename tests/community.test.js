@@ -42,6 +42,60 @@ const post = {
   body: "Great combat",
   spoiler: false,
 };
+
+test("follow is authenticated, idempotent, searchable and filters the feed", async () => {
+  const f = await fixture();
+  for (const uid of ["alice", "bob", "carol"]) {
+    await f.call("/me", "GET", undefined, uid);
+    await f.call("/me", "PUT", { nickname: uid === "bob" ? "Bob Player" : uid, bio: "" }, uid);
+  }
+  assert.equal((await f.call("/follows/bob", "PUT")).status, 401);
+  assert.equal((await f.call("/follows/alice", "PUT", undefined, "alice")).status, 400);
+  assert.equal((await f.call("/follows/missing", "PUT", undefined, "alice")).status, 404);
+  for (let i = 0; i < 2; i++) {
+    const r = await f.call("/follows/bob", "PUT", undefined, "alice");
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { isFollowing: true, followersCount: 1, followingCount: 0 });
+  }
+  const search = await (await f.call("/profiles?q=Bob", "GET", undefined, "alice")).json();
+  assert.equal(search.items.length, 1);
+  assert.equal(search.items[0].uid, "bob");
+  assert.equal(search.items[0].isFollowing, true);
+  assert.equal(JSON.stringify(search).includes("@example.com"), false);
+  assert.equal((await (await f.call("/profiles?q=%25")).json()).items.length, 0);
+  assert.equal((await (await f.call("/me", "GET", undefined, "alice")).json()).followingCount, 1);
+  assert.equal((await (await f.call("/profiles/bob", "GET", undefined, "alice")).json()).followersCount, 1);
+  assert.deepEqual((await (await f.call("/profiles?following=true", "GET", undefined, "alice")).json()).items.map(p => p.uid), ["bob"]);
+  assert.equal((await f.call("/profiles?following=true")).status, 401);
+  for (const uid of ["bob", "carol"]) await f.call("/posts", "POST", post, uid);
+  const feed = await (await f.call("/posts?following=true&q=Sekiro", "GET", undefined, "alice")).json();
+  assert.deepEqual(feed.items.map(p => p.uid), ["bob"]);
+  assert.equal((await (await f.call("/posts?q=Other")).json()).items.length, 0);
+  assert.equal((await f.call("/posts?following=true")).status, 401);
+  for (let i = 0; i < 2; i++) {
+    const r = await (await f.call("/follows/bob", "DELETE", undefined, "alice")).json();
+    assert.equal(r.isFollowing, false);
+    assert.equal(r.followersCount, 0);
+  }
+});
+
+test("blocks remove both follow directions and profile deletion cleans up follows", async () => {
+  const f = await fixture();
+  for (const uid of ["alice", "bob", "carol"]) await f.call("/me", "GET", undefined, uid);
+  await f.call("/follows/bob", "PUT", undefined, "alice");
+  await f.call("/follows/alice", "PUT", undefined, "bob");
+  await f.call("/blocks/bob", "PUT", undefined, "alice");
+  assert.equal(f.d1.sqlite.prepare("SELECT COUNT(*) AS n FROM community_follows").get().n, 0);
+  assert.equal((await f.call("/follows/bob", "PUT", undefined, "alice")).status, 404);
+  assert.equal((await f.call("/follows/alice", "PUT", undefined, "bob")).status, 404);
+  assert.equal((await (await f.call("/profiles?q=Player", "GET", undefined, "alice")).json()).items.some(p => p.uid === "bob"), false);
+  await f.call("/follows/carol", "PUT", undefined, "alice");
+  await f.call("/follows/alice", "PUT", undefined, "carol");
+  await f.call("/me", "DELETE", undefined, "alice");
+  assert.equal(f.d1.sqlite.prepare("SELECT COUNT(*) AS n FROM community_follows").get().n, 0);
+  f.d1.sqlite.prepare("UPDATE community_profiles SET suspended=1 WHERE uid='bob'").run();
+  assert.equal((await f.call("/follows/bob", "PUT", undefined, "carol")).status, 404);
+});
 const performance = {
   gameKey: "814380",
   title: "Sekiro",
@@ -71,18 +125,87 @@ test("public feed does not require login, and anonymous mutations fail", async (
   assert.equal((await f.call("/posts", "POST", post)).status, 401);
 });
 
-test("player rankings include all metrics, sort, paginate and respect sharing withdrawal", async () => {
+test("profile totals include idle apps, zero-hour completed games and games beyond the display limit", async () => {
+  const f = await fixture();
+  const insert = f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes,is_deleted) VALUES ('alice',?,?,?,?,?)");
+  for (let i = 0; i < 205; i++) insert.run(`game-${i}`, `Game ${i}`, "playing", 60, 0);
+  insert.run("431960", "Wallpaper Engine", "playing", 6000, 0);
+  insert.run("zero-completed", "Completed offline", "completed", 0, 0);
+  insert.run("backlog", "Unplayed", "backlog", 0, 0);
+  insert.run("deleted", "Deleted", "completed", 9999, 1);
+  const me = await (await f.call("/me", "GET", undefined, "alice")).json();
+  const profile = await (await f.call("/profiles/alice")).json();
+  for (const result of [me, profile]) {
+    assert.equal(result.shareLibrary, true);
+    assert.equal(result.totalGames, 208);
+    assert.equal(result.playedGames, 207);
+    assert.equal(result.completedGames, 1);
+    assert.equal(result.totalMinutes, 18300);
+  }
+  assert.equal(profile.games.length, 200);
+  assert.equal((await (await f.call("/players?sort=hours")).json()).items[0].totalMinutes, 18300);
+});
+
+test("profile presets store only catalogue IDs and propagate across public surfaces", async () => {
+  const f = await fixture();
+  f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes) VALUES ('alice','814380','Sekiro','completed',120)").run();
+  const before = f.d1.sqlite.prepare("SELECT COUNT(*) AS n FROM community_images").get().n;
+  for (const [avatar, banner] of [["gamepad", "aurora"], ["dice", "velocity"]]) {
+    assert.equal((await f.call("/me", "PUT", { nickname: "Alice", bio: "Hello", avatarPreset: avatar, bannerPreset: banner }, "alice")).status, 200);
+    const me = await (await f.call("/me", "GET", undefined, "alice")).json();
+    const profile = await (await f.call("/profiles/alice")).json();
+    assert.equal(me.avatarPreset, avatar);
+    assert.equal(me.bannerPreset, banner);
+    assert.equal(me.avatarUrl, `https://example.com/community/profile-presets/avatars/${avatar}.svg`);
+    assert.equal(profile.avatarUrl, me.avatarUrl);
+    assert.equal(profile.bannerUrl, `/community/profile-presets/banners/${banner}.svg`);
+    assert.equal((await (await f.call("/players")).json()).items[0].avatarUrl, me.avatarUrl);
+    assert.equal((await (await f.call("/games/814380/players")).json()).items[0].avatarUrl, me.avatarUrl);
+  }
+  await f.call("/posts", "POST", post, "alice");
+  assert.equal((await (await f.call("/posts")).json()).items[0].avatarUrl, "https://example.com/community/profile-presets/avatars/dice.svg");
+  await f.call("/uploads", "DELETE", undefined, "alice");
+  assert.equal(f.d1.sqlite.prepare("SELECT COUNT(*) AS n FROM community_images").get().n, before);
+  const saved = f.d1.sqlite.prepare("SELECT avatar_preset,banner_preset FROM community_profiles WHERE uid='alice'").get();
+  assert.equal(saved.avatar_preset, "dice");
+  assert.equal(saved.banner_preset, "velocity");
+  await f.call("/me", "PUT", { nickname: "Alice", bio: "Updated" }, "alice");
+  assert.equal((await (await f.call("/me", "GET", undefined, "alice")).json()).avatarPreset, "dice");
+  await f.call("/me", "PUT", { nickname: "Alice", avatarPreset: null, bannerPreset: null }, "alice");
+  const reset = await (await f.call("/me", "GET", undefined, "alice")).json();
+  assert.equal(reset.avatarPreset, null);
+  assert.equal(reset.bannerPreset, null);
+  assert.equal(reset.avatarUrl, null);
+});
+
+test("profile API rejects arbitrary images, upload keys and invalid preset IDs", async () => {
+  const f = await fixture();
+  for (const invalid of [
+    { avatarPreset: "unknown" }, { bannerPreset: "gamepad" }, { avatarPreset: "aurora" },
+    { avatarPreset: "https://example.com/image.png" }, { bannerPreset: "data:image/png;base64,AA" },
+    { avatarPreset: "../gamepad" }, { avatarPreset: {} }, { bannerPreset: 1 },
+    { avatarKey: "owned-image" }, { bannerKey: "owned-image" },
+    { avatarUrl: "https://example.com/image.png" }, { bannerUrl: "https://example.com/image.png" },
+  ]) {
+    assert.equal((await f.call("/me", "PUT", { nickname: "Alice", ...invalid }, "alice")).status, 400);
+    // Keep this validation test independent of the per-minute profile rate limit.
+    f.d1.sqlite.prepare("DELETE FROM community_rate_limits WHERE actor='alice'").run();
+  }
+  assert.equal(f.d1.sqlite.prepare("SELECT COUNT(*) AS n FROM community_images").get().n, 0);
+});
+
+test("player rankings include all metrics, sort, paginate and stay public", async () => {
   const f = await fixture();
   for (const [uid, game, status, minutes] of [
     ["alice", "814380", "completed", 120], ["alice", "292030", "completed", 60],
     ["bob", "814380", "playing", 1000], ["carol", "814380", "completed", 9999],
-  ]) f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes) VALUES (?,?,?,?,?)").run(uid, game, "Game", status, minutes);
+  ]) f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes,recorded_playtime_minutes) VALUES (?,?,?,?,?,?)").run(uid, game, "Game", status, minutes, minutes);
   for (const uid of ["alice", "bob"]) {
     assert.equal((await f.call("/me", "PUT", { nickname: uid, bio: "", shareLibrary: true }, uid)).status, 200);
   }
   const completed = await (await f.call("/players")).json();
   assert.deepEqual(completed.items.map(p => p.uid), ["alice", "bob"]);
-  assert.deepEqual(completed.items[0], { uid: "alice", nickname: "alice", totalGames: 2, completedGames: 2, totalMinutes: 180 });
+  assert.deepEqual(completed.items[0], { uid: "alice", nickname: "alice", totalGames: 2, completedGames: 2, totalMinutes: 180, recordedMinutes: 180 });
   const hours = await (await f.call("/players?sort=hours&limit=1")).json();
   assert.equal(hours.items[0].uid, "bob");
   assert.equal(hours.hasMore, true);
@@ -90,35 +213,34 @@ test("player rankings include all metrics, sort, paginate and respect sharing wi
   assert.equal((await f.call("/players?sort=__proto__")).status, 400);
   assert.equal((await f.call("/players?sort=invalid")).status, 400);
   await f.call("/me", "PUT", { nickname: "alice", bio: "", shareLibrary: false }, "alice");
-  assert.deepEqual((await (await f.call("/players")).json()).items.map(p => p.uid), ["bob"]);
+  assert.deepEqual((await (await f.call("/players")).json()).items.map(p => p.uid), ["alice", "bob"]);
+  assert.equal((await (await f.call("/me", "GET", undefined, "alice")).json()).shareLibrary, true);
 });
 
-test("game top players include completed libraries without FPS and report-only players without private hours", async () => {
+test("game top players include public libraries without FPS and keep hours public", async () => {
   const f = await fixture();
   for (const [uid, status, minutes] of [["alice", "completed", 120], ["bob", "playing", 240], ["carol", "completed", 9999]]) {
-    f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes) VALUES (?,'814380','Sekiro',?,?)").run(uid, status, minutes);
+    f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes,recorded_playtime_minutes) VALUES (?,'814380','Sekiro',?,?,?)").run(uid, status, minutes, minutes);
   }
   for (const uid of ["alice", "bob"]) await f.call("/me", "PUT", { nickname: uid, bio: "", shareLibrary: true }, uid);
   await f.call("/games/814380/performance", "POST", performance, "alice");
   await f.call("/games/814380/performance", "POST", performance, "carol");
   const all = await (await f.call("/games/814380/players")).json();
-  assert.deepEqual(all.items.map(p => p.uid), ["bob", "alice", "carol"]);
-  assert.equal(all.items[0].performance, null);
-  assert.equal(all.items[1].performance.fpsAverage, 60);
-  assert.equal(all.items[2].playtimeMinutes, null);
-  assert.equal(JSON.stringify(all).includes("9999"), false);
+  assert.deepEqual(all.items.map(p => p.uid), ["carol", "bob", "alice"]);
+  assert.equal(all.items[1].performance, null);
+  assert.equal(all.items[2].performance.fpsAverage, 60);
+  assert.equal(all.items[0].playtimeMinutes, 9999);
   assert.equal(JSON.stringify(all).includes("@example.com"), false);
   const completed = await (await f.call("/games/814380/players?status=completed")).json();
-  assert.deepEqual(completed.items.map(p => p.uid), ["alice", "carol"]);
+  assert.deepEqual(completed.items.map(p => p.uid), ["carol", "alice"]);
   assert.equal((await f.call("/games/814380/players?status=wrong")).status, 400);
   f.d1.sqlite.prepare("UPDATE community_performance SET hidden=1 WHERE uid='carol'").run();
-  assert.deepEqual((await (await f.call("/games/814380/players?status=completed")).json()).items.map(p => p.uid), ["alice"]);
+  assert.deepEqual((await (await f.call("/games/814380/players?status=completed")).json()).items.map(p => p.uid), ["carol", "alice"]);
   await f.call("/me", "PUT", { nickname: "alice", bio: "", shareLibrary: false }, "alice");
-  const reportOnly = (await (await f.call("/games/814380/players?status=completed")).json()).items[0];
-  assert.equal(reportOnly.uid, "alice");
-  assert.equal(reportOnly.playtimeMinutes, null);
+  const stillPublic = (await (await f.call("/games/814380/players?status=completed")).json()).items.find(p => p.uid === "alice");
+  assert.equal(stillPublic.playtimeMinutes, 120);
   await f.call("/games/814380/performance", "DELETE", undefined, "alice");
-  assert.equal((await (await f.call("/games/814380/players?status=completed")).json()).items.length, 0);
+  assert.equal((await (await f.call("/games/814380/players?status=completed")).json()).items.length, 2);
 });
 
 test("global and per-game player boards exclude blocked and suspended users", async () => {
@@ -259,7 +381,7 @@ test("public names and profiles do not leak email or private library notes", asy
   assert.deepEqual(profile.games, []);
   assert.ok(!JSON.stringify(profile).includes("PRIVATE"));
 });
-test("sharing and withdrawal control lifetime rankings independently of reviews", async () => {
+test("legacy sharing withdrawal cannot remove library statistics from rankings", async () => {
   const f = await fixture();
   for (const uid of ["alice", "bob"])
     f.d1.sqlite
@@ -290,7 +412,7 @@ test("sharing and withdrawal control lifetime rankings independently of reviews"
     "alice",
   );
   board = await (await f.call("/rankings")).json();
-  assert.equal(board.items[0].players, 1);
+  assert.equal(board.items[0].players, 2);
 });
 test("post ownership, numeric limits and duplicate likes are enforced", async () => {
   const f = await fixture();
@@ -708,6 +830,7 @@ test("Steam-key aliases do not double count one player in public statistics", as
 
 test("concurrent attachment of an upload fails atomically instead of creating an image-less success", async () => {
   const f = await fixture();
+  await f.call("/me", "GET", undefined, "alice");
   f.d1.sqlite
     .prepare(
       "INSERT INTO community_images(key,uid,mime,size) VALUES ('owned-image','alice','image/png',100)",

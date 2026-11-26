@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import type {
   CommunityAdapter,
+  CommunitySearchRequest,
   CommunityNotification,
   CommunityPost,
   GameRanking,
@@ -40,7 +41,6 @@ import type { AuthStatus } from "../../shared/types.ts";
 import {
   communityError,
   formatRelativeTime,
-  minutesLabel,
   qualifyCommunityUrl,
   shareUrl,
 } from "./client.ts";
@@ -50,10 +50,14 @@ import { PostComposer } from "./PostComposer.tsx";
 import { loadCommunityIdentity } from "./identity.ts";
 import { PlayerBoard } from "./PlayerBoard.tsx";
 import { ProfileActivity } from "./ProfileActivity.tsx";
-import { Avatar, ConfirmModal, scoreTierClass } from "./CommunityWidgets.tsx";
+import { ProfileEditor } from "./ProfileEditor.tsx";
+import { CommunitySearch } from "./CommunitySearch.tsx";
+import { FollowButton } from "./FollowButton.tsx";
+import { Avatar, ConfirmModal, PlaytimeDisplay, playtimeBreakdown, scoreTierClass } from "./CommunityWidgets.tsx";
 import "./community.css";
 
 type Tab =
+  | "search"
   | "feed"
   | "discover"
   | "players"
@@ -95,6 +99,8 @@ function initialRoute(): Route {
 }
 
 export function CommunityHub({
+  searchRequest,
+  onBackToLibrary,
   api,
   games = [],
   onAdd,
@@ -102,8 +108,11 @@ export function CommunityHub({
   embedded = false,
   shellAuth,
   initialGame,
+  profileRequest = 0,
   onLocalGame,
 }: {
+  searchRequest?: CommunitySearchRequest;
+  onBackToLibrary?: () => void;
   api: CommunityAdapter;
   games?: SharedLibraryGame[];
   onAdd?: (g: PublicGame) => Promise<void>;
@@ -111,9 +120,10 @@ export function CommunityHub({
   embedded?: boolean;
   shellAuth?: AuthStatus | null;
   initialGame?: PublicGame | null;
+  profileRequest?: number;
   onLocalGame?: (id: number) => void;
 }) {
-  const [tab, setTab] = useState<Tab>("feed");
+  const [tab, setTab] = useState<Tab>(profileRequest ? "profile" : "feed");
   const [route, setRoute] = useState<Route>(() =>
     initialGame ? { game: initialGame } : embedded ? {} : initialRoute(),
   );
@@ -132,6 +142,15 @@ export function CommunityHub({
 
   const [feed, setFeed] = useState<Page<CommunityPost>>(empty());
   const [saved, setSaved] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [postQuery, setPostQuery] = useState("");
+  const [searchVersion, setSearchVersion] = useState(0);
+  const [playerQuery, setPlayerQuery] = useState("");
+  const [followingOnly, setFollowingOnly] = useState(false);
+  const [people, setPeople] = useState<Page<PublicProfile>>(empty());
+  const [peopleLoading, setPeopleLoading] = useState(false);
+  const peopleSequence = useRef(0);
+  const feedSequence = useRef(0);
   const [kind, setKind] = useState("");
   const [loading, setLoading] = useState(false);
   const [composer, setComposer] = useState(false);
@@ -140,21 +159,26 @@ export function CommunityHub({
   const [query, setQuery] = useState("");
   const [gameQuery, setGameQuery] = useState("");
   const [sort, setSort] = useState("hours");
+  const [classification, setClassification] = useState<
+    "all" | "offline" | "online"
+  >("all");
   const [rankings, setRankings] = useState<Page<GameRanking>>(empty());
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
-  const [nickname, setNickname] = useState("");
-  const [bio, setBio] = useState("");
-  const [shareLibrary, setShareLibrary] = useState(false);
+  const [profileReviews, setProfileReviews] = useState<Page<CommunityPost>>(empty());
+  const [profileReviewsLoading, setProfileReviewsLoading] = useState(false);
   const [blocked, setBlocked] = useState<Array<{ uid: string; nickname: string }>>([]);
   const [notifications, setNotifications] = useState<Page<CommunityNotification>>(empty());
   const [reports, setReports] = useState<Page<ModerationReport>>(empty());
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [confirmSuspendId, setConfirmSuspendId] = useState<string | null>(null);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [profileSubTab, setProfileSubTab] = useState<"activity" | "games">("activity");
+  const [publicProfileSubTab, setPublicProfileSubTab] = useState<"activity" | "reviews" | "games">("activity");
 
   const rankingSequence = useRef(0);
+  const profileReviewsSequence = useRef(0);
   const identitySequence = useRef(0);
   const [identityUnavailable, setIdentityUnavailable] = useState(false);
   const [identityExpired, setIdentityExpired] = useState(false);
@@ -170,12 +194,6 @@ export function CommunityHub({
     setMe(identity.profile);
     setIdentityUnavailable(identity.state === "unavailable");
     setIdentityExpired(!!identity.expired);
-    if (identity.profile && identity.state === "ready") {
-      const p = identity.profile;
-      setNickname(p.nickname);
-      setBio(p.bio);
-      setShareLibrary(p.shareLibrary);
-    }
     setChecking(identity.state === "checking");
   }, [api, embedded, shellAuth]);
 
@@ -230,15 +248,19 @@ export function CommunityHub({
 
   const loadFeed = useCallback(
     async (more = false) => {
+      const ticket = ++feedSequence.current;
       setLoading(true);
+      if (!more) setFeed(empty());
       try {
         const params = new URLSearchParams({
           offset: String(more ? feed.nextOffset : 0),
         });
-        if (saved) params.set("saved", "true");
-        if (kind) params.set("kind", kind);
-        else if (!route.post && !route.profile) params.set("excludeKind", "review");
+        if (!route.profile && saved) params.set("saved", "true");
+        if (!route.profile && following) params.set("following", "true");
+        if (!route.profile && postQuery) params.set("q", postQuery);
+        if (!route.profile && kind) params.set("kind", kind);
         if (route.profile) params.set("uid", route.profile);
+        if (!route.post) params.set("excludeKind", "review");
         const next = route.post
           ? {
               items: [
@@ -250,6 +272,7 @@ export function CommunityHub({
               nextOffset: 1,
             }
           : await api.request<Page<CommunityPost>>(`/posts?${params}`);
+        if (ticket !== feedSequence.current) return;
         setFeed(
           more
             ? {
@@ -259,19 +282,48 @@ export function CommunityHub({
             : next,
         );
       } catch (e) {
+        if (ticket !== feedSequence.current) return;
         setError(communityError(e));
         setFeed(empty());
       } finally {
-        setLoading(false);
+        if (ticket === feedSequence.current) setLoading(false);
       }
     },
-    [api, saved, kind, route.post, route.profile, feed.nextOffset, feed.items],
+    [api, saved, following, postQuery, kind, route.post, route.profile, feed.nextOffset, feed.items],
   );
 
   useEffect(() => {
     if (!route.game && (tab === "feed" || route.post || route.profile))
       void loadFeed();
-  }, [api, saved, kind, route.post, route.profile, route.game, tab, me?.uid]);
+    return () => { feedSequence.current++; };
+  }, [api, saved, following, postQuery, searchVersion, kind, route.post, route.profile, route.game, tab, me?.uid]);
+
+  useEffect(() => {
+    if (!route.profile) {
+      setProfileReviews(empty());
+      setProfileReviewsLoading(false);
+      return;
+    }
+
+    const ticket = ++profileReviewsSequence.current;
+    setProfileReviews(empty());
+    setProfileReviewsLoading(true);
+    const params = new URLSearchParams({ uid: route.profile, kind: "review" });
+    void api
+      .request<Page<CommunityPost>>(`/posts?${params}`)
+      .then((next) => {
+        if (ticket === profileReviewsSequence.current) setProfileReviews(next);
+      })
+      .catch((e) => {
+        if (ticket === profileReviewsSequence.current) setError(communityError(e));
+      })
+      .finally(() => {
+        if (ticket === profileReviewsSequence.current) setProfileReviewsLoading(false);
+      });
+    return () => {
+      profileReviewsSequence.current++;
+    };
+  }, [api, route.profile]);
 
   const refreshPost = async (id: string) => {
     try {
@@ -290,13 +342,54 @@ export function CommunityHub({
     }
   };
 
+  const refreshProfileReview = async (id: string) => {
+    try {
+      const latest = await api.request<CommunityPost>(`/posts/${id}`);
+      setProfileReviews((previous) => ({
+        ...previous,
+        items: previous.items.map((post) => (post.id === id ? latest : post)),
+      }));
+    } catch (e) {
+      if (/not found/.test(String((e as Error).message))) {
+        setProfileReviews((previous) => ({
+          ...previous,
+          items: previous.items.filter((post) => post.id !== id),
+        }));
+      } else setError(communityError(e));
+    }
+  };
+
+  const loadMoreProfileReviews = async () => {
+    if (!route.profile || profileReviewsLoading || !profileReviews.hasMore) return;
+    const ticket = ++profileReviewsSequence.current;
+    setProfileReviewsLoading(true);
+    const params = new URLSearchParams({
+      uid: route.profile,
+      kind: "review",
+      offset: String(profileReviews.nextOffset),
+    });
+    try {
+      const next = await api.request<Page<CommunityPost>>(`/posts?${params}`);
+      if (ticket === profileReviewsSequence.current) {
+        setProfileReviews((previous) => ({
+          ...next,
+          items: [...previous.items, ...next.items],
+        }));
+      }
+    } catch (e) {
+      if (ticket === profileReviewsSequence.current) setError(communityError(e));
+    } finally {
+      if (ticket === profileReviewsSequence.current) setProfileReviewsLoading(false);
+    }
+  };
+
   const loadRankings = async (more = false) => {
     const ticket = ++rankingSequence.current;
     setLoading(true);
     setError("");
     try {
       const p = await api.request<Page<GameRanking>>(
-        `/rankings?sort=${sort}&q=${encodeURIComponent(gameQuery)}&offset=${more ? rankings.nextOffset : 0}`,
+        `/rankings?sort=${sort}&classification=${classification}&q=${encodeURIComponent(gameQuery)}&offset=${more ? rankings.nextOffset : 0}`,
       );
       if (ticket !== rankingSequence.current) return;
       setRankings(
@@ -325,23 +418,27 @@ export function CommunityHub({
     return () => {
       rankingSequence.current++;
     };
-  }, [api, tab, sort, gameQuery, route.game, route.profile, route.post, me?.uid]);
+  }, [api, tab, sort, classification, gameQuery, route.game, route.profile, route.post, me?.uid]);
 
   useEffect(() => {
     if (route.profile) {
+      let active = true;
+      setProfile(null);
       setLoading(true);
       void api
         .request<PublicProfile>(
           `/profiles/${encodeURIComponent(route.profile)}`,
         )
-        .then(setProfile)
+        .then((next) => { if (active) setProfile(next); })
         .catch((e) => {
+          if (!active) return;
           setProfile(null);
           setError(communityError(e));
         })
-        .finally(() => setLoading(false));
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
     }
-  }, [api, route.profile]);
+  }, [api, route.profile, me?.uid]);
 
   useEffect(() => {
     if (tab === "profile" && me)
@@ -406,38 +503,62 @@ export function CommunityHub({
     [notifications.items],
   );
 
-  const enableLibraryShare = async () => {
-    if (!me) {
-      await signIn();
-      return;
-    }
-    setLoading(true);
-    try {
-      await api.request("/me", "PUT", {
-        nickname: nickname || me.nickname || "Player",
-        bio: bio || me.bio || "",
-        shareLibrary: true,
-      });
-      setShareLibrary(true);
-      await loadMe();
-      await loadRankings();
-      showToast("Đã bật công khai giờ chơi & thành tích lên BXH!");
-    } catch (e) {
-      setError(communityError(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const switchTab = (t: Tab) => {
     setTab(t);
     navigate({});
     setNotice("");
-    setFeed(empty());
   };
 
   const onGame = (g: PublicGame) => navigate({ game: g });
   const onProfile = (uid: string) => navigate({ profile: uid });
+
+  useEffect(() => {
+    if (initialGame) navigate({ game: initialGame });
+    else switchTab(profileRequest ? "profile" : "feed");
+  }, [initialGame, profileRequest]);
+
+  const searchCommunity = (request: CommunitySearchRequest) => {
+    setSearchVersion((version) => version + 1);
+    setSaved(false);
+    setFollowing(false);
+    setError("");
+    if (request.scope === "posts") {
+      setPostQuery(request.query);
+      switchTab("feed");
+    } else {
+      setFollowingOnly(false);
+      setPlayerQuery(request.query);
+      switchTab("search");
+    }
+  };
+
+  useEffect(() => {
+    if (searchRequest) searchCommunity(searchRequest);
+  }, [searchRequest]);
+
+  const loadPeople = async (more = false) => {
+    const ticket = ++peopleSequence.current;
+    setPeopleLoading(true);
+    try {
+      const params = new URLSearchParams({ q: playerQuery, offset: String(more ? people.nextOffset : 0) });
+      if (followingOnly) params.set("following", "true");
+      const next = await api.request<Page<PublicProfile>>(`/profiles?${params}`);
+      if (ticket === peopleSequence.current) setPeople(more ? { ...next, items: [...people.items, ...next.items] } : next);
+    } catch (e) {
+      if (ticket === peopleSequence.current) setError(communityError(e));
+    } finally {
+      if (ticket === peopleSequence.current) setPeopleLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (tab === "search" && !route.profile) { setPeople(empty()); void loadPeople(); }
+    return () => { peopleSequence.current++; };
+  }, [api, tab, playerQuery, searchVersion, followingOnly, route.profile, me?.uid]);
+
+  const followControl = (person: PublicProfile, update: (next: PublicProfile) => void) => (
+    <FollowButton key={person.uid} api={api} profile={person} myUid={me?.uid} onSignIn={() => void signIn()}
+      onError={setError} onChanged={(next) => { update(next); void loadMe(); }} />
+  );
 
   const renderRankingCard = (g: GameRanking, rank: number, isPodium: boolean) => {
     const poster = g.coverUrl ? qualifyCommunityUrl(api.publicBase, g.coverUrl) : "";
@@ -492,6 +613,21 @@ export function CommunityHub({
           <div className="gv-game-row-info">
             <h3 className={`gv-game-row-title ${isPodium ? "is-lg" : ""}`}>{g.title}</h3>
             <div className="gv-actions" style={{ gap: 8 }}>
+              <span
+                className={`gv-pill ${
+                  g.classification === "online"
+                    ? "gv-pill-cyan"
+                    : g.classification === "offline" || g.classification === "hybrid"
+                      ? "gv-pill-emerald"
+                      : ""
+                }`}
+              >
+                {g.classification === "online"
+                  ? "Online"
+                  : g.classification === "offline" || g.classification === "hybrid"
+                    ? "Offline"
+                    : "Chưa phân loại"}
+              </span>
               <span className="gv-muted" style={{ fontSize: 12 }}>
                 {g.reviewCount > 0
                   ? `${g.reviewCount} lượt đánh giá`
@@ -504,9 +640,14 @@ export function CommunityHub({
         <div className="gv-game-row-right">
           <div className="gv-game-row-stats">
             <div className="gv-stat-mini">
-              <span className="gv-stat-mini-label">Giờ chơi</span>
+              <span className="gv-stat-mini-label">Giờ tính top</span>
               <span className="gv-stat-mini-value gv-text-emerald">
-                {minutesLabel(g.totalMinutes)}
+                <PlaytimeDisplay
+                  totalMinutes={g.totalMinutes}
+                  recordedMinutes={g.recordedMinutes}
+                  showRanked
+                  focusable={false}
+                />
               </span>
             </div>
             <div className="gv-stat-mini">
@@ -532,6 +673,10 @@ export function CommunityHub({
 
   return (
     <div className="gv-community">
+      {onBackToLibrary && <div className="gv-library-return"><button type="button" className="gv-link" onClick={onBackToLibrary}>
+        <ArrowLeft size={15} /> Quay lại thư viện
+      </button></div>}
+      {!embedded && <CommunitySearch onSearch={searchCommunity} />}
       {/* Header Shell */}
       <header className="gv-header-shell">
         <nav className="gv-nav-bar" aria-label="Khu vực cộng đồng">
@@ -575,9 +720,6 @@ export function CommunityHub({
             >
               <Avatar name={me.nickname} url={me.avatarUrl} size={26} />
               <span style={{ fontWeight: 700, fontSize: 13 }}>{me.nickname}</span>
-              {me.shareLibrary && (
-                <span className="gv-pill gv-pill-emerald">Đang chia sẻ</span>
-              )}
             </button>
           ) : !embedded ? (
             <button
@@ -679,6 +821,7 @@ export function CommunityHub({
                     />
                   </div>
                   <div className="gv-actions">
+                    {followControl(profile, setProfile)}
                     <button
                       type="button"
                       onClick={() =>
@@ -724,26 +867,29 @@ export function CommunityHub({
                 <div className="gv-stack-sm">
                   <div className="gv-actions" style={{ gap: 10 }}>
                     <h2 style={{ fontSize: 24 }}>{profile.nickname}</h2>
-                    {profile.shareLibrary && (
-                      <span className="gv-pill gv-pill-emerald">
-                        Công khai thư viện
-                      </span>
-                    )}
                   </div>
                   <p style={{ color: "#cbd5e1", fontSize: 14 }}>
                     {profile.bio || "Thành viên cộng đồng GameVault"}
                   </p>
                 </div>
 
+                <p className="gv-muted">{profile.followersCount ?? 0} người theo dõi · Đang theo dõi {profile.followingCount ?? 0}</p>
                 {profile.shareLibrary && (
                   <div className="gv-profile-stats-row">
                     <span className="gv-pill gv-pill-emerald">
                       <CheckCircle2 size={13} />
                       {profile.completedGames ?? 0} đã phá đảo
                     </span>
-                    <span className="gv-pill gv-pill-cyan">
+                    <span className="gv-pill">
+                      <Gamepad2 size={13} />
+                      {profile.playedGames ?? 0} game đã chơi
+                    </span>
+                    <span className="gv-pill gv-pill-cyan" title="Tổng thời gian tất cả game, kể cả game treo máy">
                       <Clock size={13} />
-                      {minutesLabel(profile.totalMinutes ?? 0)}
+                      <PlaytimeDisplay
+                        totalMinutes={profile.totalMinutes ?? 0}
+                        recordedMinutes={profile.recordedMinutes}
+                      />
                     </span>
                     <span className="gv-pill">
                       <Gamepad2 size={13} />
@@ -758,21 +904,28 @@ export function CommunityHub({
           <div className="gv-chip-row">
             <button
               type="button"
-              className={`gv-chip ${profileSubTab === "activity" ? "active" : ""}`}
-              onClick={() => setProfileSubTab("activity")}
+              className={`gv-chip ${publicProfileSubTab === "activity" ? "active" : ""}`}
+              onClick={() => setPublicProfileSubTab("activity")}
             >
               Bài viết ({feed.items.length})
             </button>
             <button
               type="button"
-              className={`gv-chip ${profileSubTab === "games" ? "active" : ""}`}
-              onClick={() => setProfileSubTab("games")}
+              className={`gv-chip ${publicProfileSubTab === "reviews" ? "active" : ""}`}
+              onClick={() => setPublicProfileSubTab("reviews")}
+            >
+              Đánh giá ({profileReviews.items.length})
+            </button>
+            <button
+              type="button"
+              className={`gv-chip ${publicProfileSubTab === "games" ? "active" : ""}`}
+              onClick={() => setPublicProfileSubTab("games")}
             >
               Thư viện game ({profile?.games?.length || 0})
             </button>
           </div>
 
-          {profileSubTab === "activity" ? (
+          {publicProfileSubTab === "activity" ? (
             <div className="gv-feed-grid">
               {feed.items.length === 0 ? (
                 <div className="gv-empty">
@@ -791,6 +944,45 @@ export function CommunityHub({
                     onToast={showToast}
                   />
                 ))
+              )}
+            </div>
+          ) : publicProfileSubTab === "reviews" ? (
+            <div className="gv-stack">
+              {profileReviewsLoading && (
+                <p className="gv-muted" role="status">
+                  Đang tải đánh giá…
+                </p>
+              )}
+              {!profileReviewsLoading && profileReviews.items.length === 0 && (
+                <div className="gv-empty">
+                  <p>Người chơi này chưa có đánh giá nào.</p>
+                </div>
+              )}
+              {profileReviews.items.length > 0 && (
+                <div className="gv-feed-grid">
+                  {profileReviews.items.map((post) => (
+                    <PostCard
+                      key={post.id}
+                      post={post}
+                      api={api}
+                      me={me}
+                      onChanged={() => void refreshProfileReview(post.id)}
+                      onGame={onGame}
+                      onProfile={onProfile}
+                      onToast={showToast}
+                    />
+                  ))}
+                </div>
+              )}
+              {profileReviews.hasMore && (
+                <button
+                  type="button"
+                  className="gv-pager"
+                  disabled={profileReviewsLoading}
+                  onClick={() => void loadMoreProfileReviews()}
+                >
+                  Xem thêm đánh giá
+                </button>
               )}
             </div>
           ) : profile?.shareLibrary ? (
@@ -830,7 +1022,11 @@ export function CommunityHub({
                           {g.title}
                         </strong>
                         <span className="gv-muted" style={{ fontSize: 12 }}>
-                          {minutesLabel(g.playtimeMinutes)} ·{" "}
+                          <PlaytimeDisplay
+                            totalMinutes={g.playtimeMinutes}
+                            recordedMinutes={g.recordedPlaytimeMinutes}
+                            focusable={false}
+                          /> ·{" "}
                           {g.status === "completed"
                             ? "Đã phá đảo"
                             : g.status === "playing"
@@ -857,9 +1053,25 @@ export function CommunityHub({
             </div>
           )}
         </section>
+      ) : tab === "search" ? (
+        <section className="gv-stack">
+          <div className="gv-top"><h2>{followingOnly ? "Người chơi bạn đang theo dõi" : playerQuery ? `Người chơi: ${playerQuery}` : "Tìm người chơi để theo dõi"}</h2></div>
+          {peopleLoading && <p role="status" className="gv-muted">Đang tìm người chơi…</p>}
+          {!peopleLoading && !people.items.length && <p className="gv-empty">Không tìm thấy người chơi phù hợp. Hãy thử biệt danh khác.</p>}
+          <div className="gv-stack-sm">{people.items.map((person) => <div key={person.uid} className="gv-player-search-row">
+            <button className="gv-player-search-identity" type="button" onClick={() => onProfile(person.uid)}>
+              <Avatar name={person.nickname} url={person.avatarUrl} size={40} />
+              <span><strong>{person.nickname}</strong><span className="gv-muted">{person.bio || "Thành viên GameVault"}</span></span>
+            </button>
+            {followControl(person, (next) => setPeople((current) => ({ ...current, items: current.items.map((p) => p.uid === next.uid ? next : p) })))}
+          </div>)}</div>
+          {people.hasMore && <button disabled={peopleLoading} onClick={() => void loadPeople(true)}>Xem thêm người chơi</button>}
+        </section>
       ) : tab === "feed" || route.post ? (
         /* TAB: BẢNG TIN (Kiểu mạng xã hội — chỉ bài đăng của người chơi, review nằm trong từng game) */
         <section className="gv-stack">
+          {!route.post && postQuery && <div className="gv-top"><h2>Bài viết về {postQuery}</h2>
+            <button type="button" onClick={() => setPostQuery("")}><X size={14} /> Xóa tìm kiếm</button></div>}
           {!route.post && (
             <>
               <div className="gv-fb-composer-bar">
@@ -918,17 +1130,21 @@ export function CommunityHub({
                 <div className="gv-chip-row">
                   <button
                     type="button"
-                    className={`gv-chip ${!saved ? "active" : ""}`}
-                    onClick={() => setSaved(false)}
+                    className={`gv-chip ${!saved && !following ? "active" : ""}`}
+                    onClick={() => { setSaved(false); setFollowing(false); }}
                   >
                     <Sparkles size={12} /> Mới nhất
                   </button>
                   <button
                     type="button"
                     className={`gv-chip ${saved ? "active" : ""}`}
-                    onClick={() => (me ? setSaved(true) : void signIn())}
+                    onClick={() => { if (!me) return void signIn(); setSaved(true); setFollowing(false); }}
                   >
                     <Bookmark size={12} /> Đã lưu
+                  </button>
+                  <button type="button" className={`gv-chip ${following ? "active" : ""}`}
+                    onClick={() => { if (!me) return void signIn(); setFollowing(true); setSaved(false); }}>
+                    <Users size={12} /> Đang theo dõi
                   </button>
                 </div>
 
@@ -991,11 +1207,10 @@ export function CommunityHub({
           {!loading && feed.items.length === 0 && (
             <div className="gv-empty">
               <h3>
-                {saved ? "Chưa có bài viết đã lưu" : "Chưa có bài viết nào"}
+                {postQuery ? "Không tìm thấy bài viết phù hợp" : following ? "Chưa có bài viết từ người bạn theo dõi" : saved ? "Chưa có bài viết đã lưu" : "Chưa có bài viết nào"}
               </h3>
               <p>
-                Hãy chọn một game từ thư viện hoặc Top game để chia sẻ khoảnh
-                khắc, cảm nhận đầu tiên!
+                {following ? "Tìm người chơi ở thanh trên rồi nhấn Theo dõi để xem bài mới của họ tại đây." : postQuery ? "Hãy thử tên game khác hoặc xóa tìm kiếm." : "Hãy chọn một game từ thư viện hoặc Top game để chia sẻ khoảnh khắc, cảm nhận đầu tiên!"}
               </p>
               <div className="gv-actions">
                 {me && (
@@ -1103,7 +1318,7 @@ export function CommunityHub({
 
             <div className="gv-chip-row">
               {[
-                ["hours", "Tổng giờ chơi"],
+                ["hours", "Giờ app ghi nhận"],
                 ["score", "Điểm đánh giá cao"],
                 ["completed", "Nhiều người phá đảo"],
                 ["players", "Nhiều người chơi"],
@@ -1118,23 +1333,27 @@ export function CommunityHub({
                 </button>
               ))}
             </div>
-          </div>
 
-          {me && !me.shareLibrary && (
-            <div className="gv-notice">
-              <span>
-                Thư viện của bạn đang ở chế độ riêng tư nên giờ chơi &amp; số game phá đảo chưa được tính vào Top game.
-              </span>
-              <button
-                type="button"
-                className="gv-primary"
-                disabled={loading}
-                onClick={() => void enableLibraryShare()}
-              >
-                Công khai giờ chơi lên BXH ngay
-              </button>
+            <div className="gv-chip-row" aria-label="Phân loại chế độ chơi">
+              {(
+                [
+                  ["all", "Tất cả"],
+                  ["offline", "Offline"],
+                  ["online", "Online"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  type="button"
+                  key={id}
+                  className={`gv-chip ${classification === id ? "active" : ""}`}
+                  aria-pressed={classification === id}
+                  onClick={() => setClassification(id)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
 
           {loading && rankings.items.length === 0 && (
             <p className="gv-muted" role="status">
@@ -1156,8 +1375,8 @@ export function CommunityHub({
               <p>
                 {sort === "score"
                   ? "Chưa có game nào được chấm điểm phù hợp bộ lọc."
-                  : gameQuery
-                    ? "Không tìm thấy game phù hợp. Hãy thử từ khóa khác."
+                  : gameQuery || classification !== "all"
+                    ? "Không tìm thấy game phù hợp với bộ lọc hiện tại."
                     : "Chưa có game nào trong danh sách."}
               </p>
             </div>
@@ -1240,32 +1459,39 @@ export function CommunityHub({
                 <div className="gv-stack-sm">
                   <div className="gv-actions" style={{ gap: 10 }}>
                     <h2 style={{ fontSize: 24 }}>{me.nickname}</h2>
-                    <span
-                      className={`gv-pill ${me.shareLibrary ? "gv-pill-emerald" : ""}`}
-                    >
-                      {me.shareLibrary ? "Đang công khai BXH" : "Thư viện riêng tư"}
-                    </span>
                   </div>
                   <p style={{ color: "#cbd5e1", fontSize: 14 }}>
                     {me.bio || "Chưa có giới thiệu. Bấm \"Chỉnh sửa hồ sơ\" để thêm mô tả cá nhân hoặc cấu hình PC của bạn."}
                   </p>
                 </div>
 
+                <div className="gv-actions">
+                  <span className="gv-muted">{me.followersCount ?? 0} người theo dõi</span>
+                  <button type="button" className="gv-link" onClick={() => { setFollowingOnly(true); setPlayerQuery(""); switchTab("search"); }}>
+                    Đang theo dõi {me.followingCount ?? 0}
+                  </button>
+                </div>
                 <div className="gv-profile-stats-row">
                   <span className="gv-pill gv-pill-emerald">
                     <CheckCircle2 size={13} />
-                    {me.completedGames ?? games.filter((g) => g.status === "completed").length} đã phá đảo
-                  </span>
-                  <span className="gv-pill gv-pill-cyan">
-                    <Clock size={13} />
-                    {minutesLabel(
-                      me.totalMinutes ??
-                        games.reduce((s, g) => s + (g.playtimeMinutes || 0), 0),
-                    )}
+                    {embedded ? games.filter((g) => g.status === "completed").length : me.completedGames ?? 0} đã phá đảo
                   </span>
                   <span className="gv-pill">
                     <Gamepad2 size={13} />
-                    {me.totalGames ?? games.length} game trong thư viện
+                    {embedded ? games.filter((g) => g.playtimeMinutes > 0 || ["playing", "completed", "paused", "dropped"].includes(g.status)).length : me.playedGames ?? 0} game đã chơi
+                  </span>
+                  <span className="gv-pill gv-pill-cyan" title="Tổng thời gian tất cả game, kể cả game treo máy">
+                    <Clock size={13} />
+                    <PlaytimeDisplay
+                      totalMinutes={embedded ? games.reduce((s, g) => s + (g.playtimeMinutes || 0), 0) : me.totalMinutes ?? 0}
+                      recordedMinutes={embedded
+                        ? games.reduce((s, g) => s + playtimeBreakdown(g.playtimeMinutes, g.recordedPlaytimeMinutes).recorded, 0)
+                        : me.recordedMinutes}
+                    />
+                  </span>
+                  <span className="gv-pill">
+                    <Gamepad2 size={13} />
+                    {embedded ? games.length : me.totalGames ?? 0} game trong thư viện
                   </span>
                 </div>
               </div>
@@ -1336,7 +1562,11 @@ export function CommunityHub({
                             {g.title}
                           </strong>
                           <span className="gv-muted" style={{ fontSize: 12 }}>
-                            {minutesLabel(g.playtimeMinutes)} ·{" "}
+                            <PlaytimeDisplay
+                              totalMinutes={g.playtimeMinutes}
+                              recordedMinutes={g.recordedPlaytimeMinutes}
+                              focusable={false}
+                            /> ·{" "}
                             {g.status === "completed"
                               ? "Đã phá đảo"
                               : g.status === "playing"
@@ -1358,13 +1588,14 @@ export function CommunityHub({
               </div>
             )}
 
-            {/* Edit Profile & Privacy Modal */}
+            {/* Edit profile and account settings */}
             {editProfileOpen && (
               <div
                 className="gv-modal-backdrop"
                 role="dialog"
                 aria-modal="true"
-                onClick={() => setEditProfileOpen(false)}
+                aria-labelledby="gv-edit-profile-title"
+                onClick={() => { if (!profileSaving) setEditProfileOpen(false); }}
               >
                 <div
                   className="gv-modal"
@@ -1373,85 +1604,30 @@ export function CommunityHub({
                   <div className="gv-modal-head">
                     <div className="gv-modal-title">
                       <Settings size={18} className="gv-text-cyan" />
-                      <h3>Chỉnh sửa hồ sơ &amp; Quyền riêng tư</h3>
+                      <h3 id="gv-edit-profile-title">Chỉnh sửa hồ sơ</h3>
                     </div>
                     <button
                       type="button"
                       className="gv-icon-btn"
-                      onClick={() => setEditProfileOpen(false)}
+                      disabled={profileSaving}
+                      onClick={() => { if (!profileSaving) setEditProfileOpen(false); }}
                       aria-label="Đóng"
                     >
                       <X size={16} />
                     </button>
                   </div>
 
-                  <form
-                    className="gv-stack"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      setLoading(true);
-                      void api
-                        .request("/me", "PUT", {
-                          nickname,
-                          bio,
-                          shareLibrary,
-                        })
-                        .then(() => {
-                          setEditProfileOpen(false);
-                          showToast("Đã cập nhật hồ sơ.");
-                          return loadMe();
-                        })
-                        .catch((e) => setError(communityError(e)))
-                        .finally(() => setLoading(false));
+                  <ProfileEditor
+                    api={api}
+                    me={me}
+                    onBusyChange={setProfileSaving}
+                    onCancel={() => setEditProfileOpen(false)}
+                    onSaved={async () => {
+                      await loadMe();
+                      setEditProfileOpen(false);
+                      showToast("Đã cập nhật hồ sơ.");
                     }}
-                  >
-                    <label>
-                      Biệt danh hiển thị
-                      <input
-                        required
-                        maxLength={60}
-                        value={nickname}
-                        onChange={(e) => setNickname(e.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Giới thiệu ngắn
-                      <textarea
-                        rows={3}
-                        maxLength={300}
-                        value={bio}
-                        onChange={(e) => setBio(e.target.value)}
-                        placeholder="Thể loại game yêu thích, cấu hình PC, gu chơi..."
-                      />
-                    </label>
-                    <label className="gv-check">
-                      <input
-                        type="checkbox"
-                        checked={shareLibrary}
-                        onChange={(e) => setShareLibrary(e.target.checked)}
-                      />
-                      Công khai thư viện, số game phá đảo và giờ chơi lên BXH.
-                    </label>
-                    <p className="gv-muted" style={{ fontSize: 12 }}>
-                      Email cá nhân, đường dẫn file trên máy và save game luôn
-                      được giữ riêng tư tuyệt đối.
-                    </p>
-                    <div className="gv-modal-actions">
-                      <button
-                        type="button"
-                        onClick={() => setEditProfileOpen(false)}
-                      >
-                        Đóng
-                      </button>
-                      <button
-                        type="submit"
-                        className="gv-primary"
-                        disabled={loading || identityUnavailable}
-                      >
-                        {loading ? "Đang lưu…" : "Lưu thay đổi"}
-                      </button>
-                    </div>
-                  </form>
+                  />
 
                   <div
                     className="gv-stack-sm"
@@ -1556,7 +1732,7 @@ export function CommunityHub({
         ) : (
           <div className="gv-empty">
             <h3>Đăng nhập để thiết lập hồ sơ cộng đồng</h3>
-            <p>Tạo biệt danh, chọn công khai BXH và xem lịch sử bài viết.</p>
+            <p>Tạo biệt danh, cập nhật ảnh hồ sơ và xem lịch sử bài viết.</p>
             <button
               type="button"
               className="gv-primary"

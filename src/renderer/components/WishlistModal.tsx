@@ -35,8 +35,8 @@ const handleSteamImgError = (e: React.SyntheticEvent<HTMLImageElement>, appId: n
 };
 
 /**
- * Wishlist ('Chờ chơi') entry point: search the live Steam catalogue and add
- * the picked game as a wishlist entry. Wishlist games carry only cover &
+ * Search the live Steam catalogue and add the picked game as a wishlist
+ * or self-declared completed entry. Wishlist games carry only cover &
  * banner URLs — no E:\Game media folder is created until the game actually
  * runs and GameVault auto-promotes it to 'Đang chơi'.
  */
@@ -52,39 +52,45 @@ export const WishlistModal: React.FC<WishlistModalProps> = ({ isOpen, onClose, o
   const [pendingAdd, setPendingAdd] = useState<PendingAddGame | null>(null);
   const [pendingError, setPendingError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestRef = useRef(0);
 
-  const runSearch = async (q: string) => {
+  const runSearch = async (q: string, requestId: number) => {
     const clean = q.trim();
-    if (!clean) {
-      setResults([]);
-      setSearched(false);
-      return;
-    }
-    setSearching(true);
-    setAddError(null);
     try {
       if (window.electronAPI?.searchWishlistGames) {
         const found = await window.electronAPI.searchWishlistGames(clean);
+        if (requestId !== searchRequestRef.current) return;
         setResults(found || []);
         setSearched(true);
       }
     } catch (err) {
+      if (requestId !== searchRequestRef.current) return;
       console.error('Wishlist search failed:', err);
       setResults([]);
       setSearched(true);
     } finally {
-      setSearching(false);
+      if (requestId === searchRequestRef.current) setSearching(false);
     }
   };
 
   // Debounced live search while typing
   useEffect(() => {
+    const requestId = ++searchRequestRef.current;
     if (!isOpen) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    setResults([]);
+    setSearched(false);
+    setAddError(null);
+    if (query.trim().length < 2) {
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
     debounceRef.current = setTimeout(() => {
-      runSearch(query);
+      runSearch(query, requestId);
     }, 450);
     return () => {
+      ++searchRequestRef.current;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query, isOpen]);
@@ -152,7 +158,7 @@ export const WishlistModal: React.FC<WishlistModalProps> = ({ isOpen, onClose, o
         <div className="flex items-center justify-between border-b border-[#2a2e3d] px-6 py-4">
           <h3 className="flex items-center gap-2 text-base font-bold text-white">
             <BookmarkPlus className="h-5 w-5 text-purple-400" />
-            <span>Thêm vào Chờ chơi (Wishlist)</span>
+            <span>Thêm game từ Steam</span>
           </h3>
           <button
             onClick={onClose}
@@ -182,7 +188,7 @@ export const WishlistModal: React.FC<WishlistModalProps> = ({ isOpen, onClose, o
             )}
           </div>
           <p className="text-[10px] text-[#8e95a5]">
-            Game trong wishlist chỉ có ảnh bìa &amp; banner — thư mục ảnh E:\Game sẽ tự tạo khi bạn bắt đầu chơi.
+            Thêm game muốn chơi hoặc đã phá đảo trước khi dùng GameVault. Game chưa cài vẫn thêm được vào thư viện.
           </p>
         </div>
 
@@ -208,14 +214,14 @@ export const WishlistModal: React.FC<WishlistModalProps> = ({ isOpen, onClose, o
             </div>
           )}
 
-          {!query.trim() ? (
+          {query.trim().length < 2 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-purple-400/30 bg-purple-400/10">
                 <BookmarkPlus className="h-7 w-7 text-purple-400" />
               </div>
-              <p className="text-sm font-bold text-white">Tìm game để thêm vào danh sách chờ</p>
+              <p className="text-sm font-bold text-white">Tìm game chờ chơi hoặc đã phá đảo</p>
               <p className="mt-1 max-w-sm text-xs text-[#8e95a5]">
-                Nhập tên game ở trên — kết quả lấy trực tiếp từ Steam.
+                Nhập ít nhất 2 ký tự — kết quả lấy trực tiếp từ Steam.
               </p>
             </div>
           ) : searching && results.length === 0 ? (

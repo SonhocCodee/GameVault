@@ -8,6 +8,10 @@ export interface Game {
   exe_name?: string | null;
   exe_path?: string | null;
   playtime_minutes: number;
+  /** App-recorded time, including the accepted pre-upgrade historical baseline. */
+  recorded_playtime_minutes?: number;
+  /** Post-upgrade manual additions; excluded from public playtime rankings. */
+  manual_playtime_minutes?: number;
   user_rating?: number | null; // Rating from 1 to 10
   status: GameStatus;
   cover_url?: string | null;
@@ -285,7 +289,7 @@ export interface AuthStatus {
 export interface CloudConfig {
   workerApiUrl?: string;
   oauthClientId: string;
-  oauthClientSecret: string;
+  oauthClientSecret?: string;
   firebaseApiKey?: string;
   firebaseProjectId?: string;
 }
@@ -338,6 +342,7 @@ export interface UserLibraryItem {
   bannerUrl?: string | null;
   status: GameStatus;
   playtimeMinutes: number;
+  recordedPlaytimeMinutes?: number;
   lastPlayed?: string | null;
   completedAt?: string | null;
   userScore?: number | null;
@@ -355,6 +360,7 @@ export interface LibrarySyncStats {
   paused: number;
   dropped: number;
   totalPlaytimeMinutes: number;
+  recordedMinutes?: number;
 }
 
 export interface CloudSessionItem {

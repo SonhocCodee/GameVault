@@ -118,6 +118,7 @@ import {
   loadAppSettings,
   saveAppSettings,
   maskSettingsSecrets,
+  MASK_SECRET,
   testStorageConnection,
   getF6ProcessStatus,
   toggleF6Process,
@@ -241,6 +242,26 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
   // Remove default classic menu bar (File / Edit / View / Window)
   mainWindow.removeMenu();
 
+  // Security: prevent renderer from navigating away or opening arbitrary in-app windows
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+    const allowedOrigin = devServerUrl ? new URL(devServerUrl).origin : null;
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol === 'file:' || (allowedOrigin && parsed.origin === allowedOrigin)) {
+        return;
+      }
+    } catch {}
+    event.preventDefault();
+  });
+
   // In development, keep F12 / Ctrl+Shift+I for DevTools and F5 / Ctrl+R for reload
   if (!app.isPackaged) {
     mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -320,7 +341,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('db:createGame', async (_event, game: Partial<Game>) => {
-    return createGame(game);
+    // The renderer may provide a personal total, never recorded-time credit.
+    return createGame({ ...game, recorded_playtime_minutes: 0 });
   });
 
   ipcMain.handle('db:updateGame', async (_event, id: number, data: Partial<Game>) => {
@@ -408,19 +430,35 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('covers:getGoogleConfig', async () => {
-    return getGoogleConfig();
+    const cfg = getGoogleConfig();
+    return {
+      apiKey: cfg.apiKey ? MASK_SECRET : undefined,
+      cseId: cfg.cseId,
+    };
   });
 
   ipcMain.handle('covers:setGoogleConfig', async (_event, apiKey: string, cseId: string) => {
-    return setGoogleConfig(apiKey, cseId);
+    const saved = setGoogleConfig(apiKey, cseId);
+    return {
+      apiKey: saved.apiKey ? MASK_SECRET : undefined,
+      cseId: saved.cseId,
+    };
   });
 
   ipcMain.handle('covers:getIgdbConfig', async () => {
-    return getIgdbConfig();
+    const cfg = getIgdbConfig();
+    return {
+      clientId: cfg.clientId,
+      clientSecret: cfg.clientSecret ? MASK_SECRET : undefined,
+    };
   });
 
   ipcMain.handle('covers:setIgdbConfig', async (_event, clientId: string, clientSecret: string) => {
-    return setIgdbConfig(clientId, clientSecret);
+    const saved = setIgdbConfig(clientId, clientSecret);
+    return {
+      clientId: saved.clientId,
+      clientSecret: saved.clientSecret ? MASK_SECRET : undefined,
+    };
   });
 
   // F6 Hotkey & Real-time Screenshot Sync

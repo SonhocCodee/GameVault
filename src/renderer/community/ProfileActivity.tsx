@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { MessageCircle, MessageSquareText, RefreshCw } from "lucide-react";
+import { MessageCircle, MessageSquareText, RefreshCw, Star } from "lucide-react";
 import type {
   CommentHistory,
   CommunityAdapter,
@@ -28,12 +28,19 @@ export function ProfileActivity({
   onPost: (id: string) => void;
   onToast?: (msg: string) => void;
 }) {
-  const [kind, setKind] = useState<"posts" | "comments">("posts");
+  const [kind, setKind] = useState<"posts" | "reviews" | "comments">("posts");
   const [posts, setPosts] = useState<Page<CommunityPost>>(empty);
+  const [reviews, setReviews] = useState<Page<CommunityPost>>(empty);
   const [comments, setComments] = useState<Page<CommentHistory>>(empty);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const sequence = useRef(0);
+  const loaded = useRef<Record<typeof kind, boolean>>({
+    posts: false,
+    reviews: false,
+    comments: false,
+  });
+  const source = useRef({ api, uid: me.uid });
 
   const load = async (more = false) => {
     const ticket = ++sequence.current;
@@ -45,7 +52,17 @@ export function ProfileActivity({
           `/posts?uid=${encodeURIComponent(me.uid)}&excludeKind=review&offset=${more ? posts.nextOffset : 0}`,
         );
         if (ticket !== sequence.current) return;
+        loaded.current.posts = true;
         setPosts((previous) =>
+          more ? { ...next, items: [...previous.items, ...next.items] } : next,
+        );
+      } else if (kind === "reviews") {
+        const next = await api.request<Page<CommunityPost>>(
+          `/posts?uid=${encodeURIComponent(me.uid)}&kind=review&offset=${more ? reviews.nextOffset : 0}`,
+        );
+        if (ticket !== sequence.current) return;
+        loaded.current.reviews = true;
+        setReviews((previous) =>
           more ? { ...next, items: [...previous.items, ...next.items] } : next,
         );
       } else {
@@ -53,6 +70,7 @@ export function ProfileActivity({
           `/me/comments?offset=${more ? comments.nextOffset : 0}`,
         );
         if (ticket !== sequence.current) return;
+        loaded.current.comments = true;
         setComments((previous) =>
           more ? { ...next, items: [...previous.items, ...next.items] } : next,
         );
@@ -65,15 +83,27 @@ export function ProfileActivity({
   };
 
   useEffect(() => {
-    setPosts(empty());
-    setComments(empty());
+    if (source.current.api !== api || source.current.uid !== me.uid) {
+      source.current = { api, uid: me.uid };
+      loaded.current = { posts: false, reviews: false, comments: false };
+      setPosts(empty());
+      setReviews(empty());
+      setComments(empty());
+    }
+    if (loaded.current[kind]) {
+      setBusy(false);
+      setError("");
+      return () => {
+        sequence.current++;
+      };
+    }
     void load();
     return () => {
       sequence.current++;
     };
   }, [api, me.uid, kind]);
 
-  const current = kind === "posts" ? posts : comments;
+  const current = kind === "posts" ? posts : kind === "reviews" ? reviews : comments;
 
   return (
     <section aria-label="Lịch sử hoạt động" className="gv-stack">
@@ -89,6 +119,7 @@ export function ProfileActivity({
         <button
           type="button"
           className={`gv-chip ${kind === "posts" ? "active" : ""}`}
+          aria-pressed={kind === "posts"}
           onClick={() => setKind("posts")}
         >
           <MessageSquareText size={13} />
@@ -96,7 +127,17 @@ export function ProfileActivity({
         </button>
         <button
           type="button"
+          className={`gv-chip ${kind === "reviews" ? "active" : ""}`}
+          aria-pressed={kind === "reviews"}
+          onClick={() => setKind("reviews")}
+        >
+          <Star size={13} />
+          Đánh giá của tôi
+        </button>
+        <button
+          type="button"
           className={`gv-chip ${kind === "comments" ? "active" : ""}`}
+          aria-pressed={kind === "comments"}
           onClick={() => setKind("comments")}
         >
           <MessageCircle size={13} />
@@ -104,31 +145,40 @@ export function ProfileActivity({
         </button>
       </div>
 
-      {error && (
-        <p className="gv-error" role="alert">
-          {error}{" "}
-          <button disabled={busy} onClick={() => void load()}>
-            Thử lại
-          </button>
-        </p>
-      )}
-      {busy && (
-        <p className="gv-muted" role="status">
-          Đang tải lịch sử…
-        </p>
-      )}
-      {!busy && !error && !current.items.length && (
-        <div className="gv-empty">
-          <p>
-            {kind === "posts"
-              ? "Bạn chưa đăng bài viết nào."
-              : "Bạn chưa có bình luận nào."}
+      <div className="gv-profile-activity-content" aria-busy={busy}>
+        {error && (
+          <p className="gv-error" role="alert">
+            {error}{" "}
+            <button disabled={busy} onClick={() => void load()}>
+              Thử lại
+            </button>
           </p>
-        </div>
-      )}
+        )}
+        {busy && !current.items.length && (
+          <div className="gv-empty">
+            <p role="status">
+              {kind === "reviews"
+                ? "Đang tải đánh giá…"
+                : kind === "comments"
+                  ? "Đang tải bình luận…"
+                  : "Đang tải bài viết…"}
+            </p>
+          </div>
+        )}
+        {!busy && !error && !current.items.length && (
+          <div className="gv-empty">
+            <p>
+              {kind === "posts"
+                ? "Bạn chưa đăng bài viết nào."
+                : kind === "reviews"
+                  ? "Bạn chưa có đánh giá nào."
+                  : "Bạn chưa có bình luận nào."}
+            </p>
+          </div>
+        )}
 
-      {kind === "posts"
-        ? posts.items.map((post) => (
+        {(kind === "posts" || kind === "reviews") &&
+          (kind === "posts" ? posts.items : reviews.items).map((post) => (
             <PostCard
               key={post.id}
               post={post}
@@ -140,8 +190,10 @@ export function ProfileActivity({
               onProfile={onProfile}
               onToast={onToast}
             />
-          ))
-        : comments.items.map((comment) => (
+          ))}
+
+        {kind === "comments" &&
+          comments.items.map((comment) => (
             <article key={comment.id} className="gv-card-subtle gv-stack-sm">
               <div className="gv-top">
                 <strong>{comment.gameTitle}</strong>
@@ -167,16 +219,17 @@ export function ProfileActivity({
             </article>
           ))}
 
-      {current.hasMore && (
-        <button
-          type="button"
-          className="gv-pager"
-          disabled={busy}
-          onClick={() => void load(true)}
-        >
-          Xem thêm {kind === "posts" ? "bài viết" : "bình luận"}
-        </button>
-      )}
+        {current.hasMore && (
+          <button
+            type="button"
+            className="gv-pager"
+            disabled={busy}
+            onClick={() => void load(true)}
+          >
+            Xem thêm {kind === "posts" ? "bài viết" : kind === "reviews" ? "đánh giá" : "bình luận"}
+          </button>
+        )}
+      </div>
     </section>
   );
 }

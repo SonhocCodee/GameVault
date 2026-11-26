@@ -86,13 +86,28 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
       const req = new Request(url, init);
       return worker.fetch(req, env);
     };
-    configureCloudDb({ workerApiUrl: 'http://localhost', fetchImpl });
+    configureAuth({
+      config: { workerApiUrl: 'http://localhost', oauthClientId: 'test-cid' },
+      userDataDir: tmpUserDataDir,
+    });
+    configureCloudDb({ workerApiUrl: 'http://localhost', fetchImpl, userDataDir: tmpUserDataDir });
+    persistSession(
+      {
+        sessionToken: aliceToken,
+        expiresAt: Date.now() + 3600 * 1000,
+        user: { uid: aliceUid, email: 'alice@gamevault.test', displayName: 'Alice', photoUrl: '' },
+        google: { accessToken: '', refreshToken: '', expiresAt: 0, scope: '' },
+        updatedAt: new Date().toISOString(),
+      },
+      { userDataDir: tmpUserDataDir }
+    );
   });
 
   afterEach(() => {
     closeDb();
+    clearSession({ userDataDir: tmpUserDataDir });
     configureCloudDb({ fetchImpl: undefined, workerApiUrl: undefined, userDataDir: undefined });
-    configureAuth({ userDataDir: undefined });
+    configureAuth({ userDataDir: undefined, config: undefined });
     try {
       if (tmpUserDataDir) fs.rmSync(tmpUserDataDir, { recursive: true, force: true });
     } catch {}
@@ -122,7 +137,7 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
       const res = await worker.fetch(
         new Request('http://localhost/api/covers/cache', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeader(aliceToken) },
           body: JSON.stringify(payload),
         }),
         env
@@ -149,7 +164,7 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
         await worker.fetch(
           new Request('http://localhost/api/covers/cache', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeader(aliceToken) },
             body: JSON.stringify({
               gameKey: 't_elden_ring',
               title: 'Elden Ring',
@@ -177,7 +192,7 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
         await worker.fetch(
           new Request('http://localhost/api/covers/cache', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeader(bobToken) },
             body: JSON.stringify({
               gameKey: 't_elden_ring',
               title: 'Elden Ring',
@@ -198,6 +213,7 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
           method: 'POST',
           headers: {
             'Content-Type': 'image/png',
+            ...authHeader(aliceToken),
           },
           body: samplePngBuffer,
         }),
@@ -226,7 +242,7 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
       const res = await worker.fetch(
         new Request('http://localhost/api/covers/cache', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeader(aliceToken) },
           body: JSON.stringify({
             gameKey: 't_hades2',
             title: 'Hades II',
@@ -715,7 +731,7 @@ describe('Central Cloud Game Covers & Image Persistence Architecture', () => {
       const res = await worker.fetch(
         new Request('http://localhost/api/covers/cache', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeader(aliceToken) },
           body: JSON.stringify({
             gameKey: '9999991',
             title: 'Landscape Test Game',

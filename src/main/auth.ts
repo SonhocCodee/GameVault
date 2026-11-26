@@ -4,6 +4,12 @@ import path from 'node:path';
 import fs from 'node:fs';
 import electronModule from 'electron';
 import type { AuthStatus, CloudConfig, UserProfile } from '../shared/types.js';
+import {
+  isSecureEncryptionAvailable,
+  encryptSecretString,
+  decryptSecretString,
+  writePrivateFileAtomic,
+} from './secure-storage.ts';
 
 // Electron runtime helpers (shell.openExternal for the system browser); safe
 // fallbacks keep the module importable under plain node test runs.
@@ -60,6 +66,9 @@ function getUserDataDir(options?: AuthOptions): string {
 // Config (cloud-config.json, bundled with the app, with built-in zero-config fallback)
 // ==========================================
 
+// Public Desktop OAuth (PKCE) configuration. Note: for Google Installed/Desktop
+// apps, client ID/secret are public client identifiers — never treat them as
+// confidential server secrets; real authorization relies on PKCE + Worker JWTs.
 export const BUILTIN_CLOUD_CONFIG: CloudConfig = {
   oauthClientId: String.fromCharCode(
     55, 55, 50, 55, 53, 50, 55, 52, 50, 52, 52, 55, 45, 97, 117, 112, 48, 55,
@@ -96,10 +105,10 @@ export function loadCloudConfig(options: AuthOptions = {}): CloudConfig | null {
     try {
       if (!fs.existsSync(candidate)) continue;
       const parsed = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
-      if (parsed?.oauthClientId && parsed?.oauthClientSecret) {
+      if (parsed?.oauthClientId) {
         return {
           oauthClientId: String(parsed.oauthClientId),
-          oauthClientSecret: String(parsed.oauthClientSecret),
+          oauthClientSecret: parsed.oauthClientSecret ? String(parsed.oauthClientSecret) : undefined,
           workerApiUrl: parsed.workerApiUrl ? String(parsed.workerApiUrl).replace(/\/+$/, '') : undefined,
           firebaseApiKey: parsed.firebaseApiKey ? String(parsed.firebaseApiKey) : undefined,
           firebaseProjectId: parsed.firebaseProjectId ? String(parsed.firebaseProjectId) : undefined,
@@ -153,12 +162,22 @@ export function loadSession(options?: AuthOptions): AuthSession | null {
   try {
     const file = sessionPath(options);
     if (!fs.existsSync(file)) return null;
-    const session = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    if (session?.sessionToken && session?.user?.uid) {
-      return session as AuthSession;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    let session = raw;
+    let needsUpgrade = false;
+    if (raw?.encrypted === true && typeof raw?.payload === 'string') {
+      const decrypted = decryptSecretString(raw.payload);
+      if (!decrypted) return null;
+      session = JSON.parse(decrypted);
+    } else if (isSecureEncryptionAvailable()) {
+      needsUpgrade = true;
     }
-    if (session?.firebase?.idToken && session?.firebase?.localId) {
-      return {
+
+    let normalized: AuthSession | null = null;
+    if (session?.sessionToken && session?.user?.uid) {
+      normalized = session as AuthSession;
+    } else if (session?.firebase?.idToken && session?.firebase?.localId) {
+      normalized = {
         sessionToken: session.sessionToken || session.firebase.idToken,
         expiresAt: session.expiresAt || session.firebase.expiresAt || Date.now() + 3600 * 1000,
         user: session.user || {
@@ -177,7 +196,16 @@ export function loadSession(options?: AuthOptions): AuthSession | null {
         updatedAt: session.updatedAt || new Date().toISOString(),
       };
     }
-    return null;
+
+    if (normalized && needsUpgrade) {
+      try {
+        persistSession(normalized, options);
+      } catch {
+        // best-effort migration
+      }
+    }
+
+    return normalized;
   } catch {
     return null;
   }
@@ -185,10 +213,18 @@ export function loadSession(options?: AuthOptions): AuthSession | null {
 
 export function persistSession(session: AuthSession, options?: AuthOptions): void {
   const file = sessionPath(options);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(session, null, 2), 'utf-8');
-  fs.renameSync(tmp, file);
+  const serialized = JSON.stringify(session);
+  if (isSecureEncryptionAvailable()) {
+    const envelope = {
+      version: 2,
+      encrypted: true,
+      payload: encryptSecretString(serialized),
+      updatedAt: session.updatedAt || new Date().toISOString(),
+    };
+    writePrivateFileAtomic(file, JSON.stringify(envelope, null, 2));
+    return;
+  }
+  writePrivateFileAtomic(file, JSON.stringify(session, null, 2));
 }
 
 export function clearSession(options?: AuthOptions): void {
@@ -243,17 +279,20 @@ export async function exchangeCodeForTokens(
   verifier: string,
   fetchImpl: FetchLike = defaultFetch()
 ): Promise<GoogleTokens> {
+  const params: Record<string, string> = {
+    code,
+    client_id: config.oauthClientId,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code',
+    code_verifier: verifier,
+  };
+  if (config.oauthClientSecret) {
+    params.client_secret = config.oauthClientSecret;
+  }
   const resp = await fetchImpl(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: config.oauthClientId,
-      client_secret: config.oauthClientSecret,
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
-      code_verifier: verifier,
-    }).toString(),
+    body: new URLSearchParams(params).toString(),
   });
   const data = await resp.json();
   if (!resp.ok || !data?.access_token) {
@@ -273,15 +312,18 @@ export async function refreshGoogleTokens(
   refreshToken: string,
   fetchImpl: FetchLike = defaultFetch()
 ): Promise<{ accessToken: string; expiresAt: number; idToken?: string }> {
+  const params: Record<string, string> = {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: config.oauthClientId,
+  };
+  if (config.oauthClientSecret) {
+    params.client_secret = config.oauthClientSecret;
+  }
   const resp = await fetchImpl(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: config.oauthClientId,
-      client_secret: config.oauthClientSecret,
-    }).toString(),
+    body: new URLSearchParams(params).toString(),
   });
   const data = await resp.json();
   if (!resp.ok || !data?.access_token) {

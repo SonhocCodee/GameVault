@@ -5,6 +5,14 @@ import type { Game } from '../shared/types.ts';
 // Steam CDN asset path that still serves NEW games (the legacy /steam/apps/
 // path 404s for post-2023 appids — verified on 1903340 Clair Obscur)
 const STEAM_HEADER_CDN_BASE = 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps';
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const SEARCH_CACHE_MAX_ENTRIES = 64;
+const searchFetchIds = new WeakMap<NonNullable<LiveResolveOptions['fetchImpl']>, number>();
+let nextSearchFetchId = 0;
+const searchCache = new Map<string, {
+  expiresAt: number;
+  pending: Promise<WishlistSearchResult[]>;
+}>();
 
 export interface WishlistSearchResult {
   appId: number;
@@ -37,14 +45,53 @@ const STATUS_LABELS: Record<string, string> = {
  */
 export async function searchWishlistGames(
   query: string,
-  opts: { limit?: number } = {}
+  opts: LiveResolveOptions & { limit?: number } = {}
 ): Promise<WishlistSearchResult[]> {
-  const results = await searchSteamApps(query, { limit: opts.limit ?? 24 });
-  return results.map((r) => ({
-    appId: r.appid,
-    name: r.name,
-    headerUrl: `${STEAM_HEADER_CDN_BASE}/${r.appid}/header.jpg`,
-  }));
+  const clean = (query || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const limit = Number.isFinite(opts.limit) ? Math.max(0, Math.floor(opts.limit!)) : 24;
+  if (clean.length < 2 || limit === 0) return [];
+
+  const fetchImpl = opts.fetchImpl || fetch;
+  let fetchId = searchFetchIds.get(fetchImpl);
+  if (fetchId === undefined) {
+    fetchId = ++nextSearchFetchId;
+    searchFetchIds.set(fetchImpl, fetchId);
+  }
+  const key = JSON.stringify([clean, limit, opts.cacheDir || '', fetchId]);
+  const now = Date.now();
+  for (const [cachedKey, cached] of searchCache) {
+    if (cached.expiresAt <= now) searchCache.delete(cachedKey);
+  }
+
+  let entry = searchCache.get(key);
+  if (entry) {
+    // Refresh insertion order so the bounded cache evicts the least recently used query.
+    searchCache.delete(key);
+    searchCache.set(key, entry);
+  } else {
+    // Search only returns metadata/CDN URLs. Cover resolution and cloud publishing
+    // remain in addWishlistGame, after the user explicitly confirms the add.
+    const pending = searchSteamApps(clean, { ...opts, fetchImpl, limit }).then((results) =>
+      results.map((r) => ({
+        appId: r.appid,
+        name: r.name,
+        headerUrl: `${STEAM_HEADER_CDN_BASE}/${r.appid}/header.jpg`,
+      }))
+    );
+    entry = { expiresAt: now + SEARCH_CACHE_TTL_MS, pending };
+    searchCache.set(key, entry);
+    while (searchCache.size > SEARCH_CACHE_MAX_ENTRIES) {
+      searchCache.delete(searchCache.keys().next().value!);
+    }
+  }
+
+  try {
+    // Do not let one caller mutate results reused by another renderer request.
+    return (await entry.pending).map((result) => ({ ...result }));
+  } catch (err) {
+    if (searchCache.get(key) === entry) searchCache.delete(key);
+    throw err;
+  }
 }
 
 /**
@@ -81,9 +128,10 @@ export async function addWishlistGame(
 
   const steamId = typeof payload.steamId === 'number' && payload.steamId > 0 ? payload.steamId : undefined;
 
-  // Optional personal rating (1-10) & review from the add-game dialog
+  // Completed games may carry an optional rating/review; backlog entries do not.
   const rawRating = Number(payload.user_rating);
   const userRating =
+    status === 'completed' &&
     payload.user_rating !== null &&
     payload.user_rating !== undefined &&
     Number.isFinite(rawRating) &&
@@ -92,7 +140,9 @@ export async function addWishlistGame(
       ? rawRating
       : null;
   const notes =
-    typeof payload.notes === 'string' && payload.notes.trim() ? payload.notes.trim() : null;
+    status === 'completed' && typeof payload.notes === 'string' && payload.notes.trim()
+      ? payload.notes.trim()
+      : null;
 
   // Resolve cover art from the store entry (poster 2:3 + hero banner 16:9)
   let coverUrl: string | null = null;
@@ -114,6 +164,7 @@ export async function addWishlistGame(
     media_folder: null,
     user_rating: userRating,
     notes,
+    completed_at: null,
   });
 
   // Keep the detected AppID when the live search found one

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { AuthStatus, Game, TrackerStatus, WishlistSearchResult } from '../shared/types.js';
-import type { PublicGame } from '../shared/community.ts';
+import type { PublicGame, CommunitySearchRequest } from '../shared/community.ts';
 import { Navbar } from './components/Navbar.js';
 import { GameCard } from './components/GameCard.js';
 import { GameDetail } from './components/GameDetail.js';
@@ -67,8 +67,10 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [firstRunOpen, setFirstRunOpen] = useState<boolean>(false);
   const [view, setView] = useState<'library' | 'detail' | 'community'>('library');
+  const [communitySearch, setCommunitySearch] = useState<CommunitySearchRequest>();
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
   const [communityGame, setCommunityGame] = useState<PublicGame | null>(null);
+  const [profileRequest, setProfileRequest] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -155,7 +157,10 @@ export default function App() {
     fetchGames();
   }, [fetchGames]);
 
-  // Auto-sync library with Cloudflare D1 on launch if logged in
+  const fetchGamesRef = useRef(fetchGames);
+  fetchGamesRef.current = fetchGames;
+
+  // Auto-sync library with Cloudflare D1 once on launch if logged in
   useEffect(() => {
     const autoSync = async () => {
       try {
@@ -164,7 +169,7 @@ export default function App() {
           if (auth.loggedIn) {
             const res = await window.electronAPI.syncLibrary();
             if (res && (res.pulled > 0 || res.updated > 0)) {
-              fetchGames();
+              fetchGamesRef.current();
             }
           }
         }
@@ -173,7 +178,7 @@ export default function App() {
       }
     };
     autoSync();
-  }, [fetchGames]);
+  }, []);
 
   // One-time setup wizard: first launch asks where screenshots & media live
   const [firstRunPaths, setFirstRunPaths] = useState({
@@ -243,6 +248,7 @@ export default function App() {
 
     setExternalSearching(true);
     setExternalError(null);
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         const [ext, allLibrary] = await Promise.all([
@@ -253,6 +259,7 @@ export default function App() {
             ? window.electronAPI.getGames({})
             : Promise.resolve([] as Game[]),
         ]);
+        if (cancelled) return;
         const libNorm = new Set((allLibrary as Game[]).map((g) => normTitle(g.title)));
         const libSteamIds = new Set(
           (allLibrary as Game[])
@@ -265,15 +272,19 @@ export default function App() {
           )
         );
       } catch (err) {
+        if (cancelled) return;
         console.error('External search failed:', err);
         setExternalResults([]);
         setExternalError('Không tìm được game trên Steam (mạng lỗi hoặc bị chặn).');
       } finally {
-        setExternalSearching(false);
+        if (!cancelled) setExternalSearching(false);
       }
     }, 500);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [searchQuery, view]);
 
   // Periodic Tracker status polling (every 5 seconds)
@@ -621,6 +632,7 @@ export default function App() {
     <div className="min-h-screen bg-[#0e1015] text-[#f1f3f7]">
       {/* Top Navbar */}
       <Navbar
+        onCommunitySearch={setCommunitySearch}
         onAuthChanged={setAuthStatus}
         currentView={view}
         isDetailView={view === 'detail'}
@@ -649,7 +661,16 @@ export default function App() {
         onOpenAdminModal={() => setAdminCoversModalOpen(true)}
         onEnrichCovers={handleEnrichCovers}
         onOpenCommunity={() => {
+          setCommunitySearch(undefined);
+          setProfileRequest(0);
           setCommunityGame(null);
+          setView('community');
+          window.scrollTo({ top: 0 });
+        }}
+        onOpenProfile={() => {
+          setCommunitySearch(undefined);
+          setCommunityGame(null);
+          setProfileRequest((request) => request + 1);
           setView('community');
           window.scrollTo({ top: 0 });
         }}
@@ -658,7 +679,7 @@ export default function App() {
       {/* Main View Router */}
       <main className="mx-auto max-w-7xl">
         {view === 'community' ? (
-          <CommunityView onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
+          <CommunityView searchRequest={communitySearch} onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} profileRequest={profileRequest} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
         ) : view === 'detail' && selectedGameId !== null ? (
           <GameDetail
             gameId={selectedGameId}
@@ -666,7 +687,9 @@ export default function App() {
             onGameUpdated={handleGameUpdated}
             onShowToast={showToast}
             onOpenCommunity={(game) => {
+              setProfileRequest(0);
               setCommunityGame(game);
+              setCommunitySearch(undefined);
               setView('community');
               window.scrollTo({ top: 0 });
             }}

@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BookmarkPlus,
+  CheckCircle2,
+  Clock,
   Cpu,
+  Crown,
+  Eye,
   ExternalLink,
   Flag,
   Gauge,
@@ -11,10 +15,13 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  ShieldAlert,
+  Sparkles,
   Star,
   Trash2,
   Users,
   X,
+  XCircle,
 } from "lucide-react";
 import type {
   CommunityAdapter,
@@ -42,6 +49,8 @@ import { PostComposer } from "./PostComposer.tsx";
 import {
   Avatar,
   ConfirmModal,
+  getMetacriticTier,
+  getMetacriticVerdict,
   ReportModal,
   scoreTierClass,
 } from "./CommunityWidgets.tsx";
@@ -137,7 +146,7 @@ export function GameHub({
       api.request<Page<PerformanceReport>>(`${base}/performance`),
       api.request<Page<CommunityReview>>(`${base}/reviews`),
       api.request<Page<CommunityPost>>(
-        `/posts?gameKey=${encodeURIComponent(game.gameKey)}`,
+        `/posts?gameKey=${encodeURIComponent(game.gameKey)}&excludeKind=review`,
       ),
     ]);
     if (results[0].status === "fulfilled") setRequirements(results[0].value);
@@ -340,55 +349,100 @@ export function GameHub({
           </div>
         )}
 
-        <div className="gv-stack">
+        <div className="gv-stack" style={{ justifyContent: "space-between" }}>
           <div>
-            <h1>{activeGame.title}</h1>
-            <div className="gv-actions" style={{ marginTop: 10, gap: 8 }}>
-              {reviewStats && (
-                <span className={`gv-score-pill ${scoreTierClass(reviewStats.avg)}`}>
-                  <Star size={14} />
-                  {reviewStats.avg.toFixed(1)}/10 ({reviewStats.count} đánh giá)
-                </span>
-              )}
+            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>{activeGame.title}</h1>
+
+            {/* Compact Community Rating Showcase */}
+            <div
+              className="gv-meta-rating-card"
+              role="button"
+              tabIndex={0}
+              onClick={() => setHubTab("reviews")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setHubTab("reviews");
+                }
+              }}
+              title="Nhấn để xem chi tiết các đánh giá cộng đồng"
+            >
+              <div className="gv-meta-score-box-wrap">
+                <div
+                  className={`gv-meta-score-badge gv-meta-${getMetacriticTier(reviewStats?.avg)}`}
+                >
+                  {reviewStats && reviewStats.count > 0
+                    ? reviewStats.avg.toFixed(1)
+                    : "--"}
+                </div>
+                <div className="gv-meta-score-details">
+                  <div className="gv-meta-score-headline">
+                    <span
+                      className={`gv-meta-verdict gv-meta-text-${getMetacriticTier(reviewStats?.avg)}`}
+                    >
+                      {getMetacriticVerdict(reviewStats?.avg, reviewStats?.count ?? 0)}
+                    </span>
+                  </div>
+                  <div className="gv-meta-stats-row">
+                    <span className="gv-meta-count">
+                      <strong>{reviewStats?.count ?? 0}</strong> đánh giá
+                    </span>
+                    {reviewStats && reviewStats.dropCount > 0 && (
+                      <>
+                        <span className="gv-meta-sep">·</span>
+                        <span className="gv-meta-drop">
+                          {reviewStats.dropCount} bỏ dở
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {perfStats && (
-                <span className="gv-pill gv-pill-emerald">
-                  <Gauge size={12} />
-                  TB {perfStats.avg.toFixed(0)} FPS ({perfStats.count} cấu hình thật)
-                </span>
-              )}
-              {localGame && (
-                <span className="gv-pill gv-pill-cyan">
-                  Máy bạn: {minutesLabel(localGame.playtimeMinutes)} ·{" "}
-                  {localGame.status === "completed"
-                    ? "Đã phá đảo"
-                    : localGame.status === "playing"
-                      ? "Đang chơi"
-                      : "Chưa phá đảo"}
-                </span>
+                <div
+                  className="gv-meta-perf-box"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setHubTab("specs");
+                  }}
+                  title="Nhấn để xem chi tiết cấu hình & FPS"
+                >
+                  <div className="gv-meta-perf-icon">
+                    <Gauge size={18} />
+                  </div>
+                  <div>
+                    <div className="gv-meta-perf-label">Hiệu năng cộng đồng</div>
+                    <div className="gv-meta-perf-value">
+                      TB <strong>{perfStats.avg.toFixed(0)} FPS</strong>
+                      <span className="gv-meta-sub"> ({perfStats.count} benchmark)</span>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </div>
 
           {requirements?.description && (
-            <p style={{ color: "#d4d8e4", fontSize: 14 }}>
+            <p style={{ color: "#d4d8e4", fontSize: 14, margin: "4px 0 8px 0", lineHeight: 1.5 }}>
               {requirements.description}
             </p>
           )}
 
-          <div className="gv-actions" style={{ gap: 8 }}>
+          <div className="gv-actions" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {requirements?.genres?.map((g) => (
               <span key={g} className="gv-pill">
                 {g}
               </span>
             ))}
             {!!requirements?.developers?.length && (
-              <span className="gv-muted">
-                · Phát triển: {requirements.developers.join(", ")}
+              <span className="gv-muted" style={{ fontSize: 13 }}>
+                · Phát triển: <strong style={{ color: "#cbd5e1" }}>{requirements.developers.join(", ")}</strong>
               </span>
             )}
             {requirements?.releaseDate && (
-              <span className="gv-muted">
-                · Phát hành: {requirements.releaseDate}
+              <span className="gv-muted" style={{ fontSize: 13 }}>
+                · Phát hành: <strong style={{ color: "#cbd5e1" }}>{requirements.releaseDate}</strong>
               </span>
             )}
             {requirements?.sourceUrl && (
@@ -397,6 +451,7 @@ export function GameHub({
                 href={requirements.sourceUrl}
                 target="_blank"
                 rel="noreferrer"
+                style={{ marginLeft: 4 }}
               >
                 Steam Store <ExternalLink size={11} />
               </a>
@@ -984,6 +1039,7 @@ export function GameHub({
                   key={r.id}
                   review={r}
                   me={me}
+                  publicBase={api.publicBase}
                   onProfile={onProfile}
                   onEdit={
                     me?.uid === r.uid ? () => setReviewFormOpen(true) : undefined
@@ -1096,7 +1152,7 @@ export function GameHub({
               onClick={() =>
                 void api
                   .request<Page<CommunityPost>>(
-                    `/posts?gameKey=${encodeURIComponent(game.gameKey)}&offset=${posts.nextOffset}`,
+                    `/posts?gameKey=${encodeURIComponent(game.gameKey)}&excludeKind=review&offset=${posts.nextOffset}`,
                   )
                   .then((p) =>
                     setPosts({
@@ -1184,76 +1240,145 @@ export function GameHub({
 function ReviewItem({
   review,
   me,
+  publicBase,
   onProfile,
   onEdit,
   onReport,
 }: {
   review: CommunityReview;
   me: PublicProfile | null;
+  publicBase?: string;
   onProfile: (uid: string) => void;
   onEdit?: () => void;
   onReport: () => void;
 }) {
   const [revealed, setRevealed] = useState(false);
+  const isVip = Boolean(review.vipTier && review.vipTier > 0);
+  const vipTier = review.vipTier || (isVip ? 1 : 0);
+
+  const bannerRaw = review.bannerUrl || (me?.uid === review.uid ? me?.bannerUrl : null);
+  const banner = bannerRaw ? qualifyCommunityUrl(publicBase || "", bannerRaw) : "";
 
   return (
-    <article className="gv-card-subtle gv-stack-sm">
-      <div className="gv-top">
-        <div className="gv-actions" style={{ gap: 10 }}>
-          <Avatar name={review.nickname} url={review.avatarUrl} size={32} />
-          <div>
-            <div className="gv-actions" style={{ gap: 8 }}>
-              <button
-                type="button"
-                className="gv-link"
-                style={{ color: "#f1f3f7", padding: 0 }}
-                onClick={() => onProfile(review.uid)}
-              >
-                {review.nickname}
-              </button>
-              <span className={`gv-score-pill ${scoreTierClass(review.score)}`}>
-                <Star size={12} />
-                {review.score}/10
-              </span>
-              {review.playtimeMinutes > 0 && (
-                <span className="gv-pill">
-                  {minutesLabel(review.playtimeMinutes)}
+    <article className={`gv-review-card ${isVip ? `is-vip vip-tier-${vipTier}` : ""}`}>
+      {/* Full-card Banner Backdrop */}
+      {banner ? (
+        <img
+          className="gv-review-backdrop"
+          src={banner}
+          alt=""
+          loading="lazy"
+        />
+      ) : (
+        <div className="gv-review-backdrop-fallback" />
+      )}
+      <div className="gv-review-backdrop-fade" />
+
+      <div className="gv-review-inner">
+        <div className="gv-review-header">
+          <div className="gv-review-author">
+            <div
+              className={`gv-review-avatar-frame ${isVip ? `vip-frame-tier-${vipTier}` : ""}`}
+              onClick={() => onProfile(review.uid)}
+              role="button"
+              tabIndex={0}
+              title={review.nickname}
+            >
+              <Avatar name={review.nickname} url={review.avatarUrl} size={42} />
+              {isVip && (
+                <span className="gv-vip-crown-badge">
+                  <Crown size={10} />
                 </span>
               )}
-              {review.dropped && (
-                <span className="gv-pill gv-pill-accent">Đã bỏ game</span>
-              )}
             </div>
-            <span className="gv-muted" style={{ fontSize: 11 }}>
-              {formatRelativeTime(review.updatedAt)}
-            </span>
+
+            <div className="gv-review-user-info">
+              <div className="gv-review-name-row">
+                <button
+                  type="button"
+                  className="gv-review-user-name"
+                  onClick={() => onProfile(review.uid)}
+                >
+                  {review.nickname}
+                </button>
+
+                {isVip && (
+                  <span className="gv-vip-pill">
+                    <Sparkles size={9} /> VIP
+                  </span>
+                )}
+
+                <span className={`gv-review-score-capsule ${scoreTierClass(review.score)}`}>
+                  <Star size={12} fill="currentColor" />
+                  {review.score.toFixed(review.score % 1 === 0 ? 0 : 1)}/10
+                </span>
+
+                {review.dropped && (
+                  <span className="gv-review-status-pill gv-pill-dropped">
+                    <XCircle size={11} /> Đã bỏ game
+                  </span>
+                )}
+              </div>
+
+              <div className="gv-review-meta-row">
+                {review.playtimeMinutes > 0 && (
+                  <span className="gv-review-meta-item">
+                    <Clock size={11} />
+                    {minutesLabel(review.playtimeMinutes)}
+                  </span>
+                )}
+                {review.playtimeMinutes > 0 && <span className="gv-review-meta-dot">·</span>}
+                <span className="gv-review-meta-item">
+                  {formatRelativeTime(review.updatedAt)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="gv-review-top-actions">
+            {onEdit && (
+              <button
+                type="button"
+                className="gv-review-btn-action"
+                onClick={onEdit}
+                title="Sửa đánh giá"
+              >
+                <Pencil size={11} /> Sửa
+              </button>
+            )}
+            {me?.uid !== review.uid && (
+              <button
+                type="button"
+                className="gv-review-btn-action"
+                onClick={onReport}
+                title="Báo cáo đánh giá"
+              >
+                <Flag size={11} /> Báo cáo
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="gv-actions">
-          {onEdit && (
-            <button type="button" className="gv-link" onClick={onEdit}>
-              <Pencil size={12} /> Sửa
-            </button>
-          )}
-          {me?.uid !== review.uid && (
-            <button type="button" className="gv-link" onClick={onReport}>
-              <Flag size={12} /> Báo cáo
-            </button>
+        <div className="gv-review-content">
+          {review.spoiler && !revealed ? (
+            <div className="gv-review-spoiler-box">
+              <div className="gv-review-spoiler-text">
+                <ShieldAlert size={15} />
+                <span>Đánh giá này có tiết lộ nội dung game (Spoiler).</span>
+              </div>
+              <button
+                type="button"
+                className="gv-review-btn-reveal"
+                onClick={() => setRevealed(true)}
+              >
+                <Eye size={12} /> Xem nội dung
+              </button>
+            </div>
+          ) : (
+            <p className="gv-review-text">{review.review}</p>
           )}
         </div>
       </div>
-
-      {review.spoiler && !revealed ? (
-        <div className="gv-spoiler-box">
-          <span>Đánh giá này có tiết lộ nội dung game.</span>
-          <button type="button" onClick={() => setRevealed(true)}>
-            Xem đánh giá
-          </button>
-        </div>
-      ) : (
-        <p className="gv-post-body">{review.review}</p>
-      )}
     </article>
   );
 }

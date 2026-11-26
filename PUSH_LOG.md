@@ -4,7 +4,29 @@ File này lưu tóm tắt mỗi lượt đẩy code (`git push`) để đồng b
 Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 > **Quy ước:**
-> - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->`.
+> - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
+
+## [2026-11-26 19:34] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Security Hardening & Clean Packaging**:
+  - Thêm `src/main/secure-storage.ts`, `.agents/rules/security-hardening.md`, `.agents/rules/release-packaging.md`.
+  - Cập nhật `scripts/build.js`, `scripts/ensure-config.js`, `wrangler.toml`, `worker/src/auth.ts`, `src/main/auth.ts`, `src/main/settings.ts`, `src/main/main.ts` để mã hóa secret local, khóa quyền Worker và đóng gói sạch.
+- **Public Profiles, Images, Follows & Community**:
+  - Thêm `worker/migrations/0005_public_profiles_and_images.sql`, `0006_user_follows.sql`, `worker/src/routes/follows.ts`, `worker/src/routes/images.ts`.
+  - Thêm `CommunitySearch.tsx`, `FollowButton.tsx`, `ProfileEditor.tsx`, `profile-presets.ts`, `scripts/generate-profile-presets.mjs`, `public/`.
+- **Game Classification & Playtime Provenance**:
+  - Thêm `worker/migrations/0007_game_classification.sql`, `0008_playtime_provenance.sql`, `worker/src/game-metadata.ts`, `HANDOFF_GAME_CLASSIFICATION.md`.
+  - Cập nhật `src/main/tracker.ts`, `src/main/db.ts`, `src/main/cloud-db.ts`, `src/main/covers.ts`, `src/main/wishlist.ts` và các component UI liên quan.
+- **Status Worker & Tests**:
+  - Thêm `status-worker/` và các bộ test mới: `tests/security.test.js`, `tests/game-metadata.test.js`, `tests/playtime-provenance.test.js`, `tests/playtime-provenance-local.test.js`.
+
+### Kiểm tra (Verify)
+- Chưa chạy lại build/test trong lượt đẩy này (được yêu cầu push trực tiếp).
+
+### Bàn giao / Tiếp theo cho máy kia
+- Sau khi `git pull`, chạy `npm run build` và `npm test` trong `GameVault/` để xác nhận đồng bộ.
+- Kiểm tra `HANDOFF_GAME_CLASSIFICATION.md` và các migration mới (`0005`–`0008`) nếu cần chạy trên D1 remote.`.
 > - Đọc mục gần nhất sau khi `git pull` hoặc khi bắt đầu phiên làm việc mới.
 > - Cập nhật file này và commit trước mỗi lần `git push`.
 
@@ -25,6 +47,28 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 ---
 
 <!-- LATEST_FIRST -->
+
+## [2026-11-26 19:34] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Security Hardening & Clean Packaging**:
+  - Thêm `src/main/secure-storage.ts`, `.agents/rules/security-hardening.md`, `.agents/rules/release-packaging.md`.
+  - Cập nhật `scripts/build.js`, `scripts/ensure-config.js`, `wrangler.toml`, `worker/src/auth.ts`, `src/main/auth.ts`, `src/main/settings.ts`, `src/main/main.ts` để mã hóa secret local, khóa quyền Worker và đóng gói sạch.
+- **Public Profiles, Images, Follows & Community**:
+  - Thêm `worker/migrations/0005_public_profiles_and_images.sql`, `0006_user_follows.sql`, `worker/src/routes/follows.ts`, `worker/src/routes/images.ts`.
+  - Thêm `CommunitySearch.tsx`, `FollowButton.tsx`, `ProfileEditor.tsx`, `profile-presets.ts`, `scripts/generate-profile-presets.mjs`, `public/`.
+- **Game Classification & Playtime Provenance**:
+  - Thêm `worker/migrations/0007_game_classification.sql`, `0008_playtime_provenance.sql`, `worker/src/game-metadata.ts`, `HANDOFF_GAME_CLASSIFICATION.md`.
+  - Cập nhật `src/main/tracker.ts`, `src/main/db.ts`, `src/main/cloud-db.ts`, `src/main/covers.ts`, `src/main/wishlist.ts` và các component UI liên quan.
+- **Status Worker & Tests**:
+  - Thêm `status-worker/` và các bộ test mới: `tests/security.test.js`, `tests/game-metadata.test.js`, `tests/playtime-provenance.test.js`, `tests/playtime-provenance-local.test.js`.
+
+### Kiểm tra (Verify)
+- Chưa chạy lại build/test trong lượt đẩy này (được yêu cầu push trực tiếp).
+
+### Bàn giao / Tiếp theo cho máy kia
+- Sau khi `git pull`, chạy `npm run build` và `npm test` trong `GameVault/` để xác nhận đồng bộ.
+- Kiểm tra `HANDOFF_GAME_CLASSIFICATION.md` và các migration mới (`0005`–`0008`) nếu cần chạy trên D1 remote.
 
 ## [2026-11-26 13:49] — Máy: DESKTOP-BU4IIOC — Branch: main
 

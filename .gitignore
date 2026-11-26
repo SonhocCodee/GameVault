@@ -35,7 +35,15 @@ lerna-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.dev.vars
+.dev.vars.*
 cloud-config.json
+
+# Packaging / Installer outputs
+release/
+dist-installer/
+*.exe
+*.blockmap
 
 # OS generated files
 .DS_Store

@@ -1,3 +1,8 @@
+export interface CommunitySearchRequest {
+  scope: "posts" | "players";
+  query: string;
+  sequence: number;
+}
 export interface PublicGame {
   gameKey: string;
   title: string;
@@ -10,18 +15,28 @@ export interface PublicProfile {
   bio: string;
   avatarUrl?: string | null;
   bannerUrl?: string | null;
+  avatarPreset?: string | null;
+  bannerPreset?: string | null;
+  defaultAvatarUrl?: string | null;
+  defaultBannerUrl?: string | null;
   shareLibrary: boolean;
   suspended?: boolean;
   isAdmin?: boolean;
   blocked?: boolean;
+  isFollowing?: boolean;
+  followersCount?: number;
+  followingCount?: number;
   totalGames?: number;
   completedGames?: number;
+  playedGames?: number;
   totalMinutes?: number;
+  recordedMinutes?: number;
   games?: SharedLibraryGame[];
 }
 export interface SharedLibraryGame extends PublicGame {
   status: string;
   playtimeMinutes: number;
+  recordedPlaytimeMinutes?: number;
   bannerUrl?: string | null;
   localGameId?: number;
 }
@@ -32,6 +47,7 @@ export interface PlayerRanking {
   bio?: string;
   bannerUrl?: string | null;
   totalMinutes: number;
+  recordedMinutes?: number;
   completedGames: number;
   totalGames: number;
   topGames?: SharedLibraryGame[];
@@ -42,6 +58,7 @@ export interface GamePlayer {
   avatarUrl?: string | null;
   status: string;
   playtimeMinutes: number | null;
+  recordedPlaytimeMinutes?: number | null;
   performance: PerformanceReport | null;
 }
 export type PostKind =
@@ -87,6 +104,10 @@ export interface CommunityReview {
   uid: string;
   nickname: string;
   avatarUrl?: string | null;
+  bannerUrl?: string | null;
+  avatarPreset?: string | null;
+  bannerPreset?: string | null;
+  vipTier?: number | null;
   gameKey: string;
   score: number;
   review: string;
@@ -133,9 +154,13 @@ export interface SteamRequirements extends PublicGame {
 }
 export interface GameRanking extends PublicGame {
   bannerUrl?: string | null;
+  classification: "online" | "hybrid" | "offline" | "unknown";
+  classificationSource?: string;
+  classificationConfidence?: number;
   players: number;
   completedPlayers: number;
   totalMinutes: number;
+  recordedMinutes?: number;
   averageScore: number | null;
   reviewCount: number;
 }
