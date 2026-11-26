@@ -26,6 +26,21 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 11:18] — Máy: CNTT-PM6 — Branch: main
+- **Tóm tắt:** Hoàn thiện và đẩy toàn bộ tính năng Cộng đồng (`/community/` web & Desktop), chia sẻ hiệu năng/cấu hình game, đồng bộ `completed_at` lên Cloud (`0002_completed_at.sql`), nhận diện game qua Discord Detectable (`discord-detectable.ts`), và cải thiện độ bền vững lưu trữ cover trên Worker.
+- **Thay đổi chính:**
+  - `community-web/`, `src/renderer/community/`, `src/shared/community.ts`, `src/renderer/components/CommunityView.tsx`, `Navbar.tsx`, `AuthBadge.tsx`, `GameDetail.tsx`, `App.tsx`: Xây dựng giao diện Cộng đồng cho cả Desktop và Web công khai (`/community/`), bài viết gắn game, ảnh nén, spoiler, thích/bình luận/lưu bài, bảng xếp hạng, khám phá game và báo cáo hiệu năng.
+  - `worker/src/routes/community.ts`, `worker/src/routes/discovery.ts`, `worker/src/community-common.ts`, `worker/schema.sql`, `worker/migrations/0001_community.sql`, `worker/migrations/0002_completed_at.sql`: Thêm API cộng đồng, discovery/Steam requirements, đồng bộ `completed_at` (`library.ts`, `src/main/cloud-db.ts`), và siết kiểm tra cover persistence (`covers.ts`, `images.ts`, `reviews.ts`, `leaderboard.ts`, `users.ts`).
+  - `src/main/discord-detectable.ts`, `src/main/game-settings.ts`, `src/main/performance-context.ts`, `src/main/tracker.ts`, `src/main/db.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/types.ts`: Thêm nhận diện game từ danh sách Discord detectable, đọc cấu hình/hiệu năng máy & game.
+  - `tests/`: Bổ sung `community.test.js`, `community-identity.test.js`, `game-settings.test.js`, `worker-cover-persistence.test.js` và cập nhật `cloud-db.test.js`, `library-sync.test.js`, `tracker.test.js`, `worker-backend.test.js`.
+  - Tài liệu: `PRODUCT.md`, `DEPLOYMENT_HANDOFF.md`, `COMMUNITY_*.md`, `scripts/community-preview.js`, `wrangler.toml`, `package.json`, `.gitignore`.
+- **Kiểm tra:**
+  - `npm run build` (Electron main/preload + Vite renderer): Pass.
+  - `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+  - `npm test`: **472/476 tests pass** (`96 suites`, `0 fail`, `4 skipped`).
+  - `npm run build:community`: Thất bại do lỗi khóa file Windows `EPERM` khi xóa `worker/admin-assets/community/assets/index-BPwW_uM4.css`.
+- **Bàn giao / Tiếp theo:** `0001_community.sql` và Worker đã được deploy lên production trước đó; lưu ý kiểm tra/chạy migration `0002_completed_at.sql` lên D1 (`game-vault-d1`) và deploy Worker mới nhất để đồng bộ `completed_at` lên Cloud.
+
 ## [2026-11-26 10:57] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Thiết kế lại tab **Tất cả** trong thư viện: hàng đầu giữ **Game chơi gần đây**, phân cách rõ với phần dưới hiển thị **Tất cả game** dạng lưới đầy đủ kèm ô tìm kiếm, lọc trạng thái và sắp xếp (mặc định A - Z).
 - **Thay đổi chính:**

@@ -24,10 +24,11 @@ import {
   FolderSync,
   ShieldCheck,
 } from 'lucide-react';
-import type { GameStatus, TrackerStatus } from '../../shared/types.js';
+import type { AuthStatus, GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
 
 export interface NavbarProps {
+  onAuthChanged?: (status: AuthStatus) => void;
   currentView?: 'library' | 'detail' | 'community';
   isDetailView?: boolean;
   selectedGameTitle?: string;
@@ -71,6 +72,7 @@ const SORT_OPTIONS: Array<{ id: string; label: string }> = [
 ];
 
 export const Navbar: React.FC<NavbarProps> = ({
+  onAuthChanged,
   currentView,
   isDetailView = false,
   selectedGameTitle,
@@ -438,7 +440,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Google login / avatar */}
           <div className="shrink-0">
-            <AuthBadge onOpenAdminModal={onOpenAdminModal} />
+            <AuthBadge onOpenAdminModal={onOpenAdminModal} onChanged={onAuthChanged} />
           </div>
         </div>
       </div>

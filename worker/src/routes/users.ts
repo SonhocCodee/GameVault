@@ -1,8 +1,10 @@
 import type { RouteHandler, UserProfile, HardwareProfile } from '../types.ts';
 import { authenticate } from '../auth.ts';
 import { jsonResponse, errorResponse } from '../utils.ts';
+import { safeName } from '../community-common.ts';
 
-export const handleGetUser: RouteHandler = async (_request, env, ctx) => {
+export const handleGetUser: RouteHandler = async (request, env, ctx) => {
+  const requestingUser = await authenticate(request, env);
   const uid = ctx.params?.uid;
   if (!uid) {
     return errorResponse('Missing uid in path', 400);
@@ -23,8 +25,8 @@ export const handleGetUser: RouteHandler = async (_request, env, ctx) => {
 
   const profile: UserProfile = {
     uid: row.uid,
-    email: row.email || '',
-    displayName: row.displayName || '',
+    email: requestingUser?.uid === uid ? row.email || '' : '',
+    displayName: safeName(row.displayName),
     photoUrl: row.photoUrl || '',
     gpu: row.gpu || '',
     cpu: row.cpu || '',

@@ -20,6 +20,7 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "game-vault-d1"
+migrations_dir = "worker/migrations"
 database_id = "2f252069-15b0-4957-a6d2-c31be05f7344"
 
 # Cloudflare R2 Images Bucket Binding (Enable if you activate R2 in Cloudflare dashboard)

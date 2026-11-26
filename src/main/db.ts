@@ -134,9 +134,9 @@ export function getDb(): DatabaseSync {
  */
 export function getDbDir(): string {
   if (currentDbPath && currentDbPath !== ':memory:') {
-    return path.dirname(currentDbPath);
+    return path.resolve(path.dirname(currentDbPath));
   }
-  return path.dirname(getDefaultDbPath());
+  return path.resolve(path.dirname(getDefaultDbPath()));
 }
 
 /**
@@ -281,10 +281,10 @@ function createTables(db: DatabaseSync): void {
   `);
 
   try {
-    dbInstance.exec('ALTER TABLE deleted_games ADD COLUMN steam_id INTEGER DEFAULT NULL');
+    db.exec('ALTER TABLE deleted_games ADD COLUMN steam_id INTEGER DEFAULT NULL');
   } catch {}
   try {
-    dbInstance.exec('ALTER TABLE deleted_games ADD COLUMN game_key TEXT DEFAULT NULL');
+    db.exec('ALTER TABLE deleted_games ADD COLUMN game_key TEXT DEFAULT NULL');
   } catch {}
 }
 
@@ -959,7 +959,7 @@ export function updateSaveBackupRow(
   const db = getDb();
   const existing = getSaveBackupById(id);
   if (!existing) return null;
-  const note = patch.note !== undefined ? patch.note : existing.note;
+  const note = patch.note !== undefined ? patch.note : existing.note ?? null;
   const trigger = patch.trigger !== undefined ? patch.trigger : existing.trigger;
   db.prepare('UPDATE save_backups SET note = ?, trigger = ? WHERE id = ?').run(note, trigger, id);
   return getSaveBackupById(id);
@@ -1104,6 +1104,7 @@ interface MergeRow {
   fps_avg: number | null;
   fps_samples: number | null;
   fps_1pct_low: number | null;
+  hasPerformanceContext: boolean;
 }
 
 /**
@@ -1131,12 +1132,16 @@ export function mergeFragmentedSessions(
   }
   const hasFps = columns.some((c) => c.name === 'fps_avg');
   const fpsSelect = hasFps ? ', fps_avg, fps_samples, fps_1pct_low' : '';
+  const hasContextTable = !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='performance_session_context'").get();
+  const contextSelect = hasContextTable
+    ? ', EXISTS(SELECT 1 FROM performance_session_context c WHERE c.session_id=sessions.id AND c.game_id=sessions.game_id) AS has_context'
+    : ', 0 AS has_context';
 
   let rows: any[] = [];
   try {
     rows = db
       .prepare(
-        `SELECT id, game_id, pid, start_time, end_time, is_running, last_poll${fpsSelect}
+        `SELECT id, game_id, pid, start_time, end_time, is_running, last_poll${fpsSelect}${contextSelect}
          FROM sessions WHERE source = 'tracker' ORDER BY game_id, start_time, id`
       )
       .all() as any[];
@@ -1165,6 +1170,7 @@ export function mergeFragmentedSessions(
       fps_avg: hasFps && r.fps_avg != null ? Number(r.fps_avg) : null,
       fps_samples: hasFps && r.fps_samples != null ? Number(r.fps_samples) : null,
       fps_1pct_low: hasFps && r.fps_1pct_low != null ? Number(r.fps_1pct_low) : null,
+      hasPerformanceContext: !!r.has_context,
     });
   }
 
@@ -1229,6 +1235,12 @@ export function mergeFragmentedSessions(
   };
 
   for (const row of parsed) {
+    // Modern benchmark sessions are immutable measurement units. Legacy churn
+    // repair must not merge or bridge across their hardware/graphics context.
+    if (row.hasPerformanceContext) {
+      flushChain();
+      continue;
+    }
     if (
       chain.length > 0 &&
       (row.game_id !== chain[0].game_id ||

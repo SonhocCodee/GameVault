@@ -1,0 +1,179 @@
+export interface PublicGame {
+  gameKey: string;
+  title: string;
+  steamId?: number | null;
+  coverUrl?: string | null;
+}
+export interface PublicProfile {
+  uid: string;
+  nickname: string;
+  bio: string;
+  shareLibrary: boolean;
+  suspended?: boolean;
+  isAdmin?: boolean;
+  blocked?: boolean;
+  games?: SharedLibraryGame[];
+}
+export interface SharedLibraryGame extends PublicGame {
+  status: string;
+  playtimeMinutes: number;
+  localGameId?: number;
+}
+export interface PlayerRanking {
+  uid: string;
+  nickname: string;
+  totalMinutes: number;
+  completedGames: number;
+  totalGames: number;
+}
+export interface GamePlayer {
+  uid: string;
+  nickname: string;
+  status: string;
+  playtimeMinutes: number | null;
+  performance: PerformanceReport | null;
+}
+export type PostKind =
+  "photo" | "thought" | "question" | "completed" | "review";
+export interface CommunityPost extends PublicGame {
+  id: string;
+  uid: string;
+  nickname: string;
+  kind: PostKind;
+  body: string;
+  spoiler: boolean;
+  edited: boolean;
+  createdAt: string;
+  images: string[];
+  likes: number;
+  comments: number;
+  liked: boolean;
+  saved: boolean;
+}
+export interface CommunityComment {
+  id: string;
+  postId: string;
+  uid: string;
+  nickname: string;
+  body: string;
+  createdAt: string;
+}
+export interface CommentHistory {
+  id: string;
+  postId: string;
+  body: string;
+  createdAt: string;
+  gameTitle: string;
+  spoiler: boolean;
+}
+export interface CommunityReview {
+  id: string;
+  uid: string;
+  nickname: string;
+  gameKey: string;
+  score: number;
+  review: string;
+  spoiler: boolean;
+  playtimeMinutes: number;
+  dropped: boolean;
+  updatedAt: string;
+}
+export interface GraphicsContext {
+  width: number | null;
+  height: number | null;
+  preset: string;
+  upscaling: string;
+  frameGeneration: string;
+  rayTracing: string;
+  source: "manual" | "config";
+}
+export interface PerformanceReport extends PublicGame {
+  id?: string;
+  uid?: string;
+  nickname?: string;
+  completionStatus: "completed";
+  cpu: string;
+  gpu: string;
+  ramGb: number;
+  fpsAverage: number;
+  fpsLow?: number | null;
+  samples: number;
+  graphics: GraphicsContext;
+  source: "presentmon" | "manual";
+  measuredAt: string;
+  notes?: string;
+}
+export interface SteamRequirements extends PublicGame {
+  description?: string | null;
+  genres?: string[];
+  developers?: string[];
+  releaseDate?: string | null;
+  minimum: string | null;
+  recommended: string | null;
+  sourceUrl: string | null;
+  fetchedAt: string;
+  available: boolean;
+}
+export interface GameRanking extends PublicGame {
+  players: number;
+  completedPlayers: number;
+  totalMinutes: number;
+  averageScore: number | null;
+  reviewCount: number;
+}
+export interface Page<T> {
+  items: T[];
+  hasMore: boolean;
+  nextOffset: number;
+}
+export interface CommunityNotification {
+  id: string;
+  postId: string;
+  kind: "like" | "comment";
+  nickname: string;
+  read: boolean;
+  createdAt: string;
+}
+export interface ModerationReport {
+  id: string;
+  targetType: string;
+  targetId: string;
+  reason: string;
+  status: string;
+  createdAt: string;
+  targetBody?: string;
+}
+export type CommunityRequest = <T>(
+  path: string,
+  method?: string,
+  body?: unknown,
+) => Promise<T>;
+export interface CommunityAdapter {
+  request: CommunityRequest;
+  upload: (file: File) => Promise<{
+    key: string;
+  }>;
+  publicBase: string;
+  signIn: () => Promise<void>;
+}
+export interface ConfigCandidate {
+  path: string;
+  adapter: string;
+  name: string;
+  size: number;
+  graphics: Partial<GraphicsContext>;
+}
+export interface PerformancePreview {
+  game: PublicGame & {
+    status: string;
+  };
+  context: GraphicsContext;
+  reports: Array<
+    PerformanceReport & {
+      sessionId: number;
+      snapshotAvailable: boolean;
+    }
+  >;
+  candidates: ConfigCandidate[];
+  supported: boolean;
+}

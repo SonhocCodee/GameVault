@@ -21,7 +21,11 @@ import {
 } from './db.js';
 import { importAMDDatabase } from './importer.js';
 import { syncScreenshots } from './sync-screenshots.js';
-import { getTracker, manualEditPlaytime } from './tracker.js';
+import { getTracker, manualEditPlaytime, cleanupNonGameEntries } from './tracker.js';
+import { initDiscordDetectable } from './discord-detectable.js';
+import { communityRequest, communityUploadImage } from './cloud-db.js';
+import { capturePerformanceContext, getPerformancePreview, prepareMeasuredReport, saveGameGraphics } from './performance-context.js';
+import { detectGameConfigs, exportGameSettings, registerManualConfig } from './game-settings.js';
 import { getFpsMonitor } from './fps-monitor.js';
 import { getHardwareInfo } from './hardware.js';
 import {
@@ -70,6 +74,8 @@ import {
 } from './drive.js';
 import {
   submitReview,
+  syncLocalReviews,
+  updateGameAndSyncReview,
   deleteMyReview,
   getGameReviews,
   getLeaderboard,
@@ -287,6 +293,23 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
 
 // Register all IPC handlers
 function registerIpcHandlers(): void {
+  ipcMain.handle('community:request', (_event, path, method, body) => communityRequest(path, method, body));
+  ipcMain.handle('community:uploadImage', (_event, bytes, mime) => communityUploadImage(bytes, mime));
+  ipcMain.handle('community:baseUrl', () => getWorkerBaseUrl());
+  ipcMain.handle('performance:preview', (_event, gameId) => getPerformancePreview(gameId));
+  ipcMain.handle('performance:saveGraphics', (_event, gameId, graphics) => saveGameGraphics(gameId, graphics));
+  ipcMain.handle('performance:prepareReport', (_event, gameId, sessionId) => prepareMeasuredReport(gameId, sessionId));
+  ipcMain.handle('gameSettings:choose', async (_event, gameId) => {
+    const chosen = await dialog.showOpenDialog({ title: 'Choose a game configuration file', properties: ['openFile'], filters: [{ name: 'Game configuration', extensions: ['ini','cfg','json','xml','settings'] }] });
+    if (!chosen.canceled && chosen.filePaths[0]) registerManualConfig(gameId, chosen.filePaths[0]);
+    return detectGameConfigs(gameId);
+  });
+  ipcMain.handle('gameSettings:export', async (_event, gameId, selectedPaths) => {
+    const game = getGameById(gameId); if (!game) throw new Error('Game not found');
+    const output = await dialog.showSaveDialog({ title: 'Export game settings', defaultPath: `${game.title.replace(/[^a-zA-Z0-9_-]/g,'_')}-settings.zip`, filters: [{ name: 'ZIP archive', extensions: ['zip'] }] });
+    if (output.canceled || !output.filePath) return null;
+    return exportGameSettings(gameId, selectedPaths, output.filePath);
+  });
   // Database Operations
   ipcMain.handle('db:getGames', async (_event, filter?: GameFilter) => {
     return getGames(filter);
@@ -301,7 +324,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('db:updateGame', async (_event, id: number, data: Partial<Game>) => {
-    return updateGame(id, data);
+    return updateGameAndSyncReview(id, data);
   });
 
   ipcMain.handle('db:deleteGame', async (_event, id: number) => {
@@ -748,6 +771,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('community:syncLibrary', async () => {
     return syncLibraryWithCloud();
   });
+  ipcMain.handle('community:syncReviews', async () => syncLocalReviews());
   ipcMain.handle('community:getCloudLibrary', async () => {
     return getCloudLibrary();
   });
@@ -912,6 +936,16 @@ app.whenReady().then(() => {
   // Initialize Database
   initDb();
 
+  // Purge legacy non-game utilities (e.g. mRemoteNG, Antigravity, Cursor) stored before filters existed
+  try {
+    const purged = cleanupNonGameEntries();
+    if (purged > 0) {
+      console.log(`[main] Purged ${purged} legacy non-game entries from local database`);
+    }
+  } catch (err) {
+    console.warn('[main] Legacy non-game cleanup failed:', err);
+  }
+
   // One-time playtime recalculation: the union of session intervals repairs
   // totals frozen by the old MAX(stored, AMD PlayTotal) logic — imported
   // sessions were never credited while a manual edit sat above AMD's counter
@@ -1014,11 +1048,12 @@ app.whenReady().then(() => {
   const fpsMonitor = getFpsMonitor();
   fpsMonitor.recoverOrphans();
   tracker.onSessionStarted = (info) => {
-    fpsMonitor.startCapture({
+    const started = fpsMonitor.startCapture({
       sessionId: info.sessionId,
       exeName: info.processName,
       processId: info.pid,
     });
+    if (started) capturePerformanceContext(info.sessionId, info.gameId).catch((error) => console.warn('[performance] Snapshot failed:', error));
   };
   tracker.onSessionClosed = (result) => {
     fpsMonitor.finishCapture(result).catch(() => {});
@@ -1032,6 +1067,7 @@ app.whenReady().then(() => {
     }
   };
   tracker.start((appSettings.pollIntervalSeconds || 5) * 1000);
+  initDiscordDetectable();
 
   // Máy NVIDIA không có PresentMon bundle như AMD — tự tải bản chính thức
   // (GitHub GameTechDev/PresentMon) một lần nếu chưa có, cache vào bin/

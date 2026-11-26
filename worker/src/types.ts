@@ -167,6 +167,7 @@ export interface UserLibraryItem {
   status: GameLibraryStatus;
   playtimeMinutes: number;
   lastPlayed?: string | null;
+  completedAt?: string | null;
   userScore?: number | null;
   userNotes?: string | null;
   isDeleted?: boolean;

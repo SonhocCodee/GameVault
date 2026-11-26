@@ -6,6 +6,7 @@ import { getDb, recalculatePlaytime } from './db.ts';
 import { extractTitleFromExe } from './importer.ts';
 import { ensureGameFolder, sanitizeTitleForFolder } from './media.ts';
 import { searchSteamCovers, detectSteamAppIdFromExe, resolveSteamAppId, CURATED_STEAM_APP_IDS, resolveWebCoversForGame } from './covers.ts';
+import { matchDiscordDetectableGame } from './discord-detectable.ts';
 import type { TrackerStatus, Game } from '../shared/types.js';
 
 // Native Win32 API binding via koffi for zero-impact polling (0.0001ms / 0.000004% CPU)
@@ -309,7 +310,12 @@ export function isLikelyGame(
     } catch {}
   }
 
-  // 7. Positive check: Matches curated Steam dictionary or resolved Steam AppID
+  // 7. Positive check: Matches Discord's detectable games database (with subpath/generic-exe disambiguation)
+  if (matchDiscordDetectableGame(foregroundExe, exePath, cleanTitle)) {
+    return true;
+  }
+
+  // 8. Positive check: Matches curated Steam dictionary or resolved Steam AppID
   if (cleanTitle) {
     const key = cleanTitle.toLowerCase().trim();
     if (CURATED_STEAM_APP_IDS[key]) {
@@ -626,7 +632,9 @@ export class PlaytimeTracker {
       if (!foregroundExe || !foregroundExe.toLowerCase().endsWith('.exe')) {
         return null;
       }
-      const cleanTitle = extractTitleFromExe(exePath || foregroundExe);
+      const extractedTitle = extractTitleFromExe(exePath || foregroundExe);
+      const discordMatch = matchDiscordDetectableGame(foregroundExe, exePath, extractedTitle);
+      const cleanTitle = discordMatch?.title || extractedTitle;
       if (!cleanTitle || cleanTitle.toLowerCase() === 'unknown game') {
         return null;
       }
@@ -683,13 +691,16 @@ export class PlaytimeTracker {
 
       const mediaFolder = sanitizeTitleForFolder(cleanTitle);
 
-      // Detect steam appid if available from exe directory
+      // Detect steam appid if available from exe directory, falling back to Discord SKU
       let detectedSteamId = -1;
       if (exePath) {
         try {
           const id = detectSteamAppIdFromExe(exePath);
           if (id) detectedSteamId = id;
         } catch {}
+      }
+      if (detectedSteamId <= 0 && discordMatch?.steamId) {
+        detectedSteamId = discordMatch.steamId;
       }
 
       const insertRes = this.db
@@ -717,7 +728,7 @@ export class PlaytimeTracker {
           id: newId,
           title: cleanTitle,
           steam_id: detectedSteamId > 0 ? detectedSteamId : undefined,
-          exe_path: info.exePath,
+          exe_path: exePath || undefined,
         }).then((covers) => {
           const poster = covers.poster;
           const banner = covers.banner;
@@ -1207,4 +1218,72 @@ export function getTracker(): PlaytimeTracker {
 
 export function manualEditPlaytime(gameId: number, newTotalMinutes: number): boolean {
   return getTracker().manualEditPlaytime(gameId, newTotalMinutes);
+}
+
+/**
+ * Removes previously-registered non-game utilities/launchers/IDEs (e.g. mRemoteNG,
+ * Antigravity, Cursor, PuTTY, Riot Client) from the local games table and records
+ * tombstones in `deleted_games` so cloud sync removes them and never resurrects them.
+ */
+export function cleanupNonGameEntries(customDb?: DatabaseSync): number {
+  const db = customDb || getDb();
+  let removed = 0;
+
+  try {
+    const rows = db
+      .prepare('SELECT id, title, exe_name, steam_id FROM games')
+      .all() as Array<{ id: number; title: string; exe_name: string | null; steam_id: number | null }>;
+
+    const cols = db.prepare('PRAGMA table_info(deleted_games)').all() as Array<{ name: string }>;
+    const hasExtendedTombstone =
+      cols.some((c) => c.name === 'steam_id') && cols.some((c) => c.name === 'game_key');
+
+    const insertTombstone = hasExtendedTombstone
+      ? db.prepare(`
+          INSERT INTO deleted_games (title, exe_name, steam_id, game_key)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(title) DO UPDATE SET
+            exe_name = COALESCE(excluded.exe_name, deleted_games.exe_name),
+            steam_id = COALESCE(excluded.steam_id, deleted_games.steam_id),
+            game_key = COALESCE(excluded.game_key, deleted_games.game_key),
+            deleted_at = datetime('now', 'localtime')
+        `)
+      : db.prepare(`
+          INSERT INTO deleted_games (title, exe_name)
+          VALUES (?, ?)
+          ON CONFLICT(title) DO UPDATE SET
+            exe_name = COALESCE(excluded.exe_name, deleted_games.exe_name),
+            deleted_at = datetime('now', 'localtime')
+        `);
+    const deleteStmt = db.prepare('DELETE FROM games WHERE id = ?');
+
+    for (const row of rows) {
+      const title = String(row.title || '').trim();
+      const exeName = String(row.exe_name || '').trim();
+      const isNonGameTitle = title.length > 0 && NON_GAME_TITLE_REGEX.test(title);
+      const isNonGameExe = exeName.length > 0 && KNOWN_LAUNCHER_OR_CLIENT_REGEX.test(exeName);
+
+      if (!isNonGameTitle && !isNonGameExe) continue;
+
+      if (title) {
+        if (hasExtendedTombstone) {
+          const steamId = typeof row.steam_id === 'number' && row.steam_id > 0 ? row.steam_id : null;
+          const slug = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const gameKey = steamId ? `s_${steamId}` : `t_${slug}`;
+          insertTombstone.run(title, row.exe_name || null, steamId, gameKey);
+        } else {
+          insertTombstone.run(title, row.exe_name || null);
+        }
+      }
+
+      const result = deleteStmt.run(row.id);
+      if (result.changes > 0) {
+        removed++;
+      }
+    }
+  } catch (err) {
+    console.warn('[tracker] cleanupNonGameEntries failed:', err);
+  }
+
+  return removed;
 }

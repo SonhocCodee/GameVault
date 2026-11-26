@@ -15,7 +15,8 @@ const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 /**
  * Saves binary image to cloud storage:
  * - Writes to Cloudflare R2 bucket if configured.
- * - Also stores in D1 image_store table for durability and fallback when R2 is not bound.
+ * - Stores in D1 image_store when R2 is not bound.
+ * Returns a URL only after the storage write succeeds.
  */
 export async function saveImageToCloud(
   key: string,
@@ -37,13 +38,14 @@ export async function saveImageToCloud(
     });
   } else if (env.DB) {
     // Only store in D1 image_store fallback when IMAGES_BUCKET is not bound
-    try {
-      await env.DB.prepare(
-        "INSERT OR REPLACE INTO image_store (key, mime_type, data, uploaded_at) VALUES (?, ?, ?, datetime('now'))"
-      ).bind(key, mime, binary).run();
-    } catch (err) {
-      console.warn('[images] Failed to write image to D1 fallback:', err);
+    const result = await env.DB.prepare(
+      "INSERT OR REPLACE INTO image_store (key, mime_type, data, uploaded_at) VALUES (?, ?, ?, datetime('now'))"
+    ).bind(key, mime, binary).run();
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to save image to cloud storage');
     }
+  } else {
+    throw new Error('Cloud storage is not enabled on this worker');
   }
 
   return `/api/images/${key}`;

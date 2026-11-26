@@ -8,6 +8,7 @@ import type {
 } from '../types.ts';
 import { authenticate } from '../auth.ts';
 import { jsonResponse, errorResponse } from '../utils.ts';
+import { refreshSharedLibrary } from '../community-common.ts';
 
 const VALID_STATUSES = new Set<GameLibraryStatus>([
   'playing',
@@ -27,6 +28,7 @@ function mapRowToItem(row: any): UserLibraryItem {
     status: VALID_STATUSES.has(row.status) ? row.status : 'backlog',
     playtimeMinutes: Number(row.playtime_minutes) || 0,
     lastPlayed: row.last_played || null,
+    completedAt: row.completed_at || null,
     userScore: row.user_score != null ? Number(row.user_score) : null,
     userNotes: row.user_notes || null,
     isDeleted: Boolean(row.is_deleted),
@@ -89,7 +91,7 @@ async function fetchUserLibraryResponse(env: Env, uid: string): Promise<LibraryS
            COALESCE(gc.cover_url, ul.cover_url) AS cover_url,
            COALESCE(gc.banner_url, ul.banner_url) AS banner_url,
            gc.updated_at AS master_cover_updated_at,
-           ul.status, ul.playtime_minutes, ul.last_played, ul.user_score, ul.user_notes,
+           ul.status, ul.playtime_minutes, ul.last_played, ul.completed_at, ul.user_score, ul.user_notes,
            ul.is_deleted, ul.client_updated_at, ul.server_updated_at
     FROM user_library ul
     LEFT JOIN game_covers gc ON gc.game_key = LOWER(ul.game_key)
@@ -138,9 +140,9 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
   const upsertStmt = env.DB.prepare(`
     INSERT INTO user_library (
       uid, game_key, title, steam_id, cover_url, banner_url, status,
-      playtime_minutes, last_played, user_score, user_notes, is_deleted,
+      playtime_minutes, last_played, completed_at, user_score, user_notes, is_deleted,
       client_updated_at, server_updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(uid, game_key) DO UPDATE SET
       title = excluded.title,
       steam_id = COALESCE(excluded.steam_id, user_library.steam_id),
@@ -167,12 +169,18 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
         WHEN excluded.last_played IS NOT NULL AND (user_library.last_played IS NULL OR excluded.last_played > user_library.last_played)
         THEN excluded.last_played ELSE user_library.last_played
       END,
+      completed_at = CASE
+        WHEN excluded.completed_at IS NOT NULL AND (
+          user_library.completed_at IS NULL OR excluded.client_updated_at >= user_library.client_updated_at
+        ) THEN excluded.completed_at
+        ELSE user_library.completed_at
+      END,
       user_score = CASE
-        WHEN excluded.user_score IS NOT NULL AND excluded.client_updated_at >= user_library.client_updated_at
+        WHEN excluded.client_updated_at >= user_library.client_updated_at
         THEN excluded.user_score ELSE COALESCE(user_library.user_score, excluded.user_score)
       END,
       user_notes = CASE
-        WHEN excluded.user_notes IS NOT NULL AND excluded.client_updated_at >= user_library.client_updated_at
+        WHEN excluded.client_updated_at >= user_library.client_updated_at
         THEN excluded.user_notes ELSE COALESCE(user_library.user_notes, excluded.user_notes)
       END,
       is_deleted = excluded.is_deleted,
@@ -193,6 +201,7 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
     const status: GameLibraryStatus = VALID_STATUSES.has(item.status) ? item.status : 'backlog';
     const playtimeMinutes = Math.max(0, Math.floor(Number(item.playtimeMinutes) || 0));
     const lastPlayed = typeof item.lastPlayed === 'string' && item.lastPlayed.trim() ? item.lastPlayed.trim() : null;
+    const completedAt = typeof item.completedAt === 'string' && item.completedAt.trim() ? item.completedAt.trim() : null;
     const userScore = item.userScore != null && !isNaN(Number(item.userScore)) ? Number(item.userScore) : null;
     const userNotes = typeof item.userNotes === 'string' ? item.userNotes : null;
     const isDeleted = item.isDeleted ? 1 : 0;
@@ -211,6 +220,7 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
         status,
         playtimeMinutes,
         lastPlayed,
+        completedAt,
         userScore,
         userNotes,
         isDeleted,
@@ -219,5 +229,6 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
       .run();
   }
 
+  await refreshSharedLibrary(env, user.uid);
   return jsonResponse(await fetchUserLibraryResponse(env, user.uid));
 };

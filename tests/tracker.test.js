@@ -4,7 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createTestDb, createTempDirectory, cleanupTempDirectory } from './test-helpers.js';
-import { PlaytimeTracker, recoverStaleSessions, isLikelyGame } from '../src/main/tracker.ts';
+import { PlaytimeTracker, recoverStaleSessions, isLikelyGame, cleanupNonGameEntries } from '../src/main/tracker.ts';
+import {
+  compactDiscordApplications,
+  setDiscordDetectableEntries,
+  clearDiscordDetectableIndex,
+  matchDiscordDetectableGame,
+  configureDiscordDetectable,
+  syncDiscordDetectableCache,
+} from '../src/main/discord-detectable.ts';
 
 describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
   let db;
@@ -16,6 +24,8 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
   });
 
   afterEach(() => {
+    clearDiscordDetectableIndex();
+    configureDiscordDetectable({ cachePath: null, fetchImpl: null });
     if (db) {
       try { db.close(); } catch {}
     }
@@ -529,6 +539,128 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
         .get(gameId);
       assert.equal(row.is_running, 0);
       assert.equal(row.duration_minutes, 6); // ~5.5 min rounded -> 6 min, NOT 245 min!
+    });
+  });
+
+  describe('Discord Detectable Game Matcher', () => {
+    it('compacts Windows non-launcher games and skips non-game apps', () => {
+      const compacted = compactDiscordApplications([
+        {
+          id: '1',
+          name: 'Overwatch',
+          executables: [
+            { os: 'win32', is_launcher: false, name: 'overwatch.exe' },
+            { os: 'win32', is_launcher: true, name: 'Overwatch Launcher.exe' },
+            { os: 'darwin', is_launcher: false, name: 'overwatch.app' },
+          ],
+          third_party_skus: [{ distributor: 'steam', id: '2357570' }],
+        },
+        {
+          id: '2',
+          name: 'Spotify',
+          executables: [{ os: 'win32', is_launcher: false, name: 'spotify.exe' }],
+        },
+        {
+          id: '3',
+          name: 'Launcher Only App',
+          executables: [{ os: 'win32', is_launcher: true, name: 'launcher.exe' }],
+        },
+      ]);
+
+      assert.equal(compacted.length, 1);
+      assert.equal(compacted[0].name, 'Overwatch');
+      assert.equal(compacted[0].steamId, 2357570);
+      assert.deepEqual(compacted[0].exes, ['overwatch.exe']);
+    });
+
+    it('matches unique and subpath executables in arbitrary folders', () => {
+      setDiscordDetectableEntries([
+        { id: '1', name: 'Overwatch', steamId: 2357570, exes: ['overwatch.exe'] },
+        { id: '2', name: 'World of Warcraft', exes: ['_retail_/wow-64.exe'] },
+      ]);
+
+      assert.equal(isLikelyGame('overwatch.exe', 'F:\\RandomFolder\\OW\\overwatch.exe', db), true);
+      const owMatch = matchDiscordDetectableGame('overwatch.exe', 'F:\\RandomFolder\\OW\\overwatch.exe');
+      assert.equal(owMatch?.title, 'Overwatch');
+      assert.equal(owMatch?.steamId, 2357570);
+
+      assert.equal(isLikelyGame('wow-64.exe', 'D:\\Blizzard\\WoW\\_retail_\\wow-64.exe', db), true);
+      assert.equal(isLikelyGame('wow-64.exe', 'D:\\Other\\wow-64.exe', db), false);
+    });
+
+    it('requires parent folder or title disambiguation for generic exe names like game.exe', () => {
+      setDiscordDetectableEntries([
+        { id: '10', name: 'Awesome Indie RPG', exes: ['game.exe'] },
+        { id: '11', name: 'Another Puzzle', exes: ['game.exe'] },
+      ]);
+
+      // Unrelated folder must NOT match generic game.exe
+      assert.equal(isLikelyGame('game.exe', 'F:\\Misc\\SomeUtility\\game.exe', db), false);
+      // Matching parent folder disambiguates cleanly
+      assert.equal(isLikelyGame('game.exe', 'F:\\Misc\\Awesome Indie RPG\\game.exe', db), true);
+      const match = matchDiscordDetectableGame('game.exe', 'F:\\Misc\\Awesome Indie RPG\\game.exe');
+      assert.equal(match?.title, 'Awesome Indie RPG');
+      assert.equal(match?.confidence, 'disambiguated');
+    });
+
+    it('still blocks IDE and system/non-game directories even if present in Discord list', () => {
+      setDiscordDetectableEntries([
+        { id: '99', name: 'Cursor', exes: ['cursor.exe'] },
+      ]);
+
+      assert.equal(
+        isLikelyGame('Cursor.exe', 'C:\\Users\\User\\AppData\\Local\\Programs\\cursor\\Cursor.exe', db),
+        false
+      );
+    });
+
+    it('syncs and persists compacted cache from Discord API to disk', async () => {
+      const cacheFile = path.join(tempDir, 'discord-cache.json');
+      configureDiscordDetectable({
+        cachePath: cacheFile,
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify([
+              {
+                id: '555',
+                name: 'Balatro',
+                executables: [{ os: 'win32', is_launcher: false, name: 'balatro.exe' }],
+                third_party_skus: [{ distributor: 'steam', id: '2379780' }],
+              },
+            ]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          ),
+      });
+
+      const ok = await syncDiscordDetectableCache({ force: true });
+      assert.equal(ok, true);
+      assert.equal(fs.existsSync(cacheFile), true);
+      assert.equal(isLikelyGame('balatro.exe', 'D:\\Portable\\Balatro\\balatro.exe', db), true);
+    });
+  });
+
+  describe('Legacy Non-Game DB Cleanup', () => {
+    it('purges previously stored non-game utilities and writes tombstones without touching real games', () => {
+      db.prepare(`
+        INSERT INTO games (title, exe_name, exe_path, status, playtime_minutes)
+        VALUES
+          ('m Remote NG', 'mRemoteNG.exe', 'C:\\Program Files (x86)\\mRemoteNG\\mRemoteNG.exe', 'playing', 847),
+          ('Antigravity-x64', 'Antigravity.exe', 'C:\\Users\\User\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe', 'playing', 120),
+          ('VALORANT', 'VALORANT-Win64-Shipping.exe', 'C:\\Riot Games\\VALORANT\\live\\ShooterGame\\Binaries\\Win64\\VALORANT-Win64-Shipping.exe', 'playing', 2652)
+      `).run();
+
+      const removed = cleanupNonGameEntries(db);
+      assert.equal(removed, 2);
+
+      const remaining = db.prepare('SELECT title FROM games').all();
+      assert.deepEqual(remaining.map((r) => r.title), ['VALORANT']);
+
+      const tombstones = db.prepare('SELECT title, exe_name FROM deleted_games ORDER BY title').all();
+      assert.equal(tombstones.length, 2);
+      assert.equal(tombstones[0].title, 'Antigravity-x64');
+      assert.equal(tombstones[0].exe_name, 'Antigravity.exe');
+      assert.equal(tombstones[1].title, 'm Remote NG');
+      assert.equal(tombstones[1].exe_name, 'mRemoteNG.exe');
     });
   });
 });

@@ -55,6 +55,14 @@ import type {
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
+  communityRequest: (path, method, body) => ipcRenderer.invoke('community:request', path, method, body),
+  communityUploadImage: (bytes, mime) => ipcRenderer.invoke('community:uploadImage', bytes, mime),
+  getCommunityBaseUrl: () => ipcRenderer.invoke('community:baseUrl'),
+  getPerformancePreview: (gameId) => ipcRenderer.invoke('performance:preview', gameId),
+  saveGameGraphics: (gameId, graphics) => ipcRenderer.invoke('performance:saveGraphics', gameId, graphics),
+  prepareMeasuredReport: (gameId, sessionId) => ipcRenderer.invoke('performance:prepareReport', gameId, sessionId),
+  chooseGameConfig: (gameId) => ipcRenderer.invoke('gameSettings:choose', gameId),
+  exportGameSettings: (gameId, selectedPaths) => ipcRenderer.invoke('gameSettings:export', gameId, selectedPaths),
   // Database Operations
   getGames: (filter?: GameFilter): Promise<Game[]> => {
     return ipcRenderer.invoke('db:getGames', filter);
@@ -279,6 +287,7 @@ const electronAPI: ElectronAPI = {
   unvotePick: (): Promise<CommunityPick> => {
     return ipcRenderer.invoke('community:unvotePick');
   },
+  syncReviews: () => ipcRenderer.invoke('community:syncReviews'),
   syncLibrary: (): Promise<LibrarySyncResult> => {
     return ipcRenderer.invoke('community:syncLibrary');
   },

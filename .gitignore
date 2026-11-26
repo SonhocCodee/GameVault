@@ -47,3 +47,7 @@ bloodborne_*.png
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Local browser review and isolated preview artifacts
+.impeccable/review/
+.wrangler/

@@ -1,6 +1,8 @@
 import { Router } from './router.ts';
 import { corsHeaders, errorResponse } from './utils.ts';
 import type { Env, RouteContext } from './types.ts';
+import { registerCommunityRoutes } from './routes/community.ts';
+import { registerDiscoveryRoutes } from './routes/discovery.ts';
 
 // Routes
 import { handleHealth } from './routes/health.ts';
@@ -29,6 +31,8 @@ import {
 } from './routes/covers.ts';
 
 export const router = new Router();
+registerCommunityRoutes(router);
+registerDiscoveryRoutes(router);
 
 // Health checks
 router.get('/health', handleHealth);
@@ -83,6 +87,13 @@ router.delete('/api/admin/covers/:gameKey', handleAdminDeleteCover);
 async function serveAdminAsset(request: Request, env: Env, url: URL): Promise<Response | null> {
   if (!env.ASSETS || (request.method !== 'GET' && request.method !== 'HEAD')) {
     return null;
+  }
+
+  if (url.pathname === '/community') return Response.redirect(`${url.origin}/community/${url.search}`, 302);
+  if (url.pathname.startsWith('/community/')) {
+    const subPath = url.pathname.slice('/community/'.length);
+    const assetPath = /\.[a-zA-Z0-9]+$/.test(subPath) ? `/community/${subPath}` : '/community/index.html';
+    return env.ASSETS.fetch(new Request(new URL(assetPath + url.search, url.origin), { method: request.method, headers: request.headers }));
   }
 
   // Redirect /admin -> /admin/ so relative or base paths stay consistent

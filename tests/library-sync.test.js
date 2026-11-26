@@ -133,6 +133,7 @@ describe('Multi-Device Game Library Sync Suite (Cloudflare D1 + Worker)', () => 
             title: 'Bloodborne',
             status: 'completed',
             playtimeMinutes: 3600,
+            completedAt: '2026-10-25T19:58:12',
             coverUrl: 'https://cdn/bloodborne.jpg',
             clientUpdatedAt: '2026-01-01T00:00:00Z',
           },
@@ -195,6 +196,7 @@ describe('Multi-Device Game Library Sync Suite (Cloudflare D1 + Worker)', () => 
       assert.ok(bloodborne);
       assert.equal(bloodborne.status, 'completed', 'Completed status must be preserved');
       assert.equal(bloodborne.playtimeMinutes, 3600, 'Playtime must never decrease');
+      assert.equal(bloodborne.completedAt, '2026-10-25T19:58:12', 'completedAt must be preserved when subsequent sync omits it');
     });
 
     test('tombstoned deletion removes game from active library', async () => {

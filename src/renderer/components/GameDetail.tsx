@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { PerformancePanel } from '../community/PerformancePanel.tsx';
+import { ScreenshotShare } from '../community/ScreenshotShare.tsx';
+import { gameToPublic } from '../community/DesktopCommunity.tsx';
+import type { PublicGame } from '../../shared/community.ts';
 import {
   ArrowLeft,
   Clock,
@@ -36,7 +40,7 @@ export interface GameDetailProps {
   gameId: number;
   onBack: () => void;
   onGameUpdated: (updatedGame: Game) => void;
-  onOpenCommunity?: () => void;
+  onOpenCommunity?: (game: PublicGame) => void;
   onShowToast?: (msg: string) => void;
 }
 
@@ -97,6 +101,22 @@ export const GameDetail: React.FC<GameDetailProps> = ({
   // Notes state
   const [notesText, setNotesText] = useState<string>('');
   const [notesSaved, setNotesSaved] = useState<boolean>(false);
+  const [reviewSyncMessage, setReviewSyncMessage] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
+  const showReviewSync = (updated: Game) => {
+    if (updated.user_rating == null) {
+      setReviewSyncMessage(updated.reviewSync?.state === 'synced'
+        ? 'Đã lưu trên máy và máy chủ. Chấm điểm từ 1 đến 10 để đăng cảm nhận và tham gia Top game.'
+        : 'Đã lưu trên máy. Chấm điểm từ 1 đến 10 để đăng cảm nhận; mở Cộng đồng để đồng bộ lại khi có mạng.');
+      return;
+    }
+    const result = updated.reviewSync;
+    setReviewSyncMessage(result?.state === 'synced'
+      ? 'Đã lưu trên máy và máy chủ.'
+      : result?.state === 'signed_out'
+        ? 'Đã lưu trên máy. Đăng nhập để đồng bộ đánh giá lên máy chủ.'
+        : 'Đã lưu trên máy; chưa gửi được lên máy chủ. Mở Cộng đồng để đồng bộ lại.');
+  };
 
   // Status & Rating state
   const [status, setStatus] = useState<GameStatus>('playing');
@@ -221,6 +241,7 @@ window.addEventListener('keydown', handleKeyDown);
     try {
       if (window.electronAPI?.updateGame) {
         const updated = await window.electronAPI.updateGame(game.id, { user_rating: finalRating });
+        showReviewSync(updated);
         setGame(updated);
         onGameUpdated(updated);
       }
@@ -285,9 +306,11 @@ const handleCompletedDateChange = async (dateStr: string) => {
 // Save Review / Notes
   const handleSaveNotes = async () => {
     if (!game) return;
+    setSavingNotes(true);
     try {
       if (window.electronAPI?.updateGame) {
         const updated = await window.electronAPI.updateGame(game.id, { notes: notesText });
+        showReviewSync(updated);
         setGame(updated);
         onGameUpdated(updated);
         setNotesSaved(true);
@@ -295,7 +318,8 @@ const handleCompletedDateChange = async (dateStr: string) => {
       }
     } catch (err) {
       console.error('Failed to save notes:', err);
-    }
+      setReviewSyncMessage('Không lưu được cảm nhận. Hãy thử lại.');
+    } finally { setSavingNotes(false); }
   };
 // Manual Playtime Save
   const handleSaveManualPlaytime = async () => {
@@ -707,12 +731,12 @@ const filteredMedia = useMemo(() => {
 
               {onOpenCommunity && (
                 <button
-                  onClick={onOpenCommunity}
+                  onClick={() => onOpenCommunity(gameToPublic(game))}
                   className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-400/40 bg-sky-600/10 px-3 py-2 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-600 hover:text-white"
-                  title="Bảng xếp hạng + review cộng đồng (kèm cấu hình máy & FPS)"
+                  title="Thông tin game, Top người chơi, giờ chơi và cấu hình của người đã hoàn thành"
                 >
                   <Users className="h-3.5 w-3.5" />
-                  Review cộng đồng
+                  Top người chơi & cấu hình
                 </button>
               )}
             </div>
@@ -744,16 +768,18 @@ const filteredMedia = useMemo(() => {
 
             <div className="flex items-center justify-between pt-3 border-t border-[#2a2e3d] mt-4">
               <span className="text-[11px] text-[#8e95a5]">
-                Dữ liệu được lưu trữ vĩnh viễn trong SQLite nội bộ.
+                Điểm và cảm nhận được lưu trên máy và đồng bộ công khai khi đăng nhập. Cần chấm điểm để tham gia Top game.
               </span>
               <button
                 onClick={handleSaveNotes}
+                disabled={savingNotes}
                 className="flex items-center gap-1.5 rounded-lg bg-[#ff2a44] px-4 py-2 text-xs font-bold text-white shadow hover:brightness-110 transition-all"
               >
                 <Save className="h-3.5 w-3.5" />
-                <span>Lưu cảm nhận</span>
+                <span>{savingNotes ? 'Đang lưu…' : 'Lưu cảm nhận'}</span>
               </button>
             </div>
+            {reviewSyncMessage && <p role="status" className="mt-3 text-xs text-[#adb4c4]">{reviewSyncMessage}</p>}
           </div>
         </div>
 
@@ -931,6 +957,8 @@ const filteredMedia = useMemo(() => {
         </div>
 
         {/* Save Vault Section — backup / restore save game */}
+        <ScreenshotShare game={game} media={mediaItems} />
+        <PerformancePanel gameId={game.id} status={game.status} />
         <SaveVaultSection gameId={game.id} />
 
         {/* Performance & Historic Sessions Section */}

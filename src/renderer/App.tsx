@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { Game, TrackerStatus, WishlistSearchResult } from '../shared/types.js';
+import type { AuthStatus, Game, TrackerStatus, WishlistSearchResult } from '../shared/types.js';
+import type { PublicGame } from '../shared/community.ts';
 import { Navbar } from './components/Navbar.js';
 import { GameCard } from './components/GameCard.js';
 import { GameDetail } from './components/GameDetail.js';
@@ -61,11 +62,13 @@ const handleSteamImgError = (e: React.SyntheticEvent<HTMLImageElement>, appId: n
 };
 
 export default function App() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [firstRunOpen, setFirstRunOpen] = useState<boolean>(false);
   const [view, setView] = useState<'library' | 'detail' | 'community'>('library');
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
+  const [communityGame, setCommunityGame] = useState<PublicGame | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -618,6 +621,7 @@ export default function App() {
     <div className="min-h-screen bg-[#0e1015] text-[#f1f3f7]">
       {/* Top Navbar */}
       <Navbar
+        onAuthChanged={setAuthStatus}
         currentView={view}
         isDetailView={view === 'detail'}
         selectedGameTitle={selectedGame?.title}
@@ -645,6 +649,7 @@ export default function App() {
         onOpenAdminModal={() => setAdminCoversModalOpen(true)}
         onEnrichCovers={handleEnrichCovers}
         onOpenCommunity={() => {
+          setCommunityGame(null);
           setView('community');
           window.scrollTo({ top: 0 });
         }}
@@ -653,14 +658,15 @@ export default function App() {
       {/* Main View Router */}
       <main className="mx-auto max-w-7xl">
         {view === 'community' ? (
-          <CommunityView onBack={() => setView('library')} />
+          <CommunityView onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
         ) : view === 'detail' && selectedGameId !== null ? (
           <GameDetail
             gameId={selectedGameId}
             onBack={handleBackToLibrary}
             onGameUpdated={handleGameUpdated}
             onShowToast={showToast}
-            onOpenCommunity={() => {
+            onOpenCommunity={(game) => {
+              setCommunityGame(game);
               setView('community');
               window.scrollTo({ top: 0 });
             }}

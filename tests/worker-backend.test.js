@@ -36,7 +36,9 @@ describe('Worker Backend & D1 Database Test Suite', () => {
       assert.equal(res.status, 200);
       const data = await res.json();
       assert.equal(data.uid, aliceUid);
-      assert.equal(data.email, 'alice@gamevault.test');
+      assert.equal(data.email, '', 'public profile responses must not expose email');
+      const ownResponse = await worker.fetch(new Request('http://localhost/api/users/' + aliceUid, { headers: authHeader(aliceToken) }), env);
+      assert.equal((await ownResponse.json()).email, 'alice@gamevault.test');
       assert.equal(data.displayName, 'Alice');
     });
 
@@ -446,15 +448,15 @@ describe('Worker Backend & D1 Database Test Suite', () => {
       assert.equal(resSpace.status, 200);
     });
 
-    test('T2-CRUD-04: Massive review text payload boundary (10KB)', async () => {
+    test('T2-CRUD-04: Reject oversized public review text (10KB)', async () => {
       const largeText = 'A'.repeat(10000);
       const res = await worker.fetch(new Request('http://localhost/api/games/large-rev/reviews', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader(aliceToken) },
         body: JSON.stringify({ gameTitle: 'Large Rev', score: 9, review: largeText })
       }), env);
-      assert.equal(res.status, 200);
-      const data = await res.json();
-      assert.equal(data.review.length, 10000);
+      assert.equal(res.status, 400);
+      const row = await d1.prepare('SELECT COUNT(*) AS total FROM ratings WHERE game_key=?').bind('large-rev').first();
+      assert.equal(row.total, 0, 'rejected review must not be stored');
     });
 
     test('T2-CRUD-05: Query non-existent gameKey reviews returns empty list', async () => {

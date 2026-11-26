@@ -24,6 +24,7 @@ import type {
   AdminCoverItem,
   AdminCoversResponse,
   AdminUpdateCoverPayload,
+  ReviewSyncResult,
 } from '../shared/types.js';
 
 let cloudOverrides: { fetchImpl?: FetchLike; workerApiUrl?: string; projectId?: string; userDataDir?: string } = {};
@@ -79,6 +80,34 @@ async function apiFetch(path: string, init: RequestInit = {}, requiresAuth = fal
 
   const doFetch = await fetchImpl();
   return doFetch(url, { ...init, headers });
+}
+
+/** Bounded bridge for the public community API; tokens stay in the main process. */
+export async function communityRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  if (!/^\/api\/community\//.test(path) || path.includes('..') || path.length > 1000 || !['GET','POST','PUT','DELETE'].includes(method)) {
+    throw new Error('Invalid community request');
+  }
+  const response = await apiFetch(path, { method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }, method !== 'GET');
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Community request failed (${response.status})`);
+  const reviewPath = /^\/api\/community\/games\/([^/]+)\/reviews$/.exec(path);
+  if (reviewPath && (method === 'POST' || method === 'DELETE')) {
+    const gameKey = decodeURIComponent(reviewPath[1]);
+    const local = getGames().find(game => computeGameKey(game) === gameKey);
+    if (local) {
+      if (method === 'DELETE') updateGame(local.id, { user_rating: null });
+      else {
+        const review = body as { score: number; review: string };
+        updateGame(local.id, { user_rating: review.score, notes: review.review });
+      }
+    }
+  }
+  return result as T;
+}
+export async function communityUploadImage(bytes: ArrayBuffer, mime: string): Promise<{ key: string }> {
+  if (!(bytes instanceof ArrayBuffer) || bytes.byteLength > 1024 * 1024 || !['image/jpeg','image/png','image/webp'].includes(mime)) throw new Error('Invalid community image');
+  const response = await apiFetch('/api/community/uploads', { method: 'POST', body: bytes, headers: { 'Content-Type': mime } }, true);
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Image upload failed'); return data;
 }
 
 export function computeGameKey(game: Game): string {
@@ -378,6 +407,7 @@ export async function submitReview(
     const errText = await resp.text().catch(() => '');
     throw new Error(`Không đăng được review: ${resp.status} ${errText.slice(0, 200)}`);
   }
+  updateGame(gameId, { user_rating: body.score, notes: body.review });
   return resp.json();
 }
 
@@ -392,7 +422,103 @@ export async function deleteMyReview(gameId: number): Promise<boolean> {
     },
     true
   );
-  return resp.ok || resp.status === 404;
+  if (resp.ok || resp.status === 404) {
+    updateGame(gameId, { user_rating: null });
+    return true;
+  }
+  return false;
+}
+
+let reviewSyncRun: Promise<ReviewSyncResult> | null = null;
+
+/** Acknowledged signatures survive restarts; unsent local edits are retried. */
+export async function syncLocalReviews(): Promise<ReviewSyncResult> {
+  if (reviewSyncRun) {
+    await reviewSyncRun;
+    return syncLocalReviews();
+  }
+  reviewSyncRun = flushLocalReviews();
+  try { return await reviewSyncRun; }
+  finally { reviewSyncRun = null; }
+}
+
+async function flushLocalReviews(): Promise<ReviewSyncResult> {
+  const session = getCurrentSession();
+  if (!session?.user?.uid) return { state: 'signed_out', synced: 0, pending: 0 };
+  const uid = session.user.uid;
+  const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS local_review_sync (
+    uid TEXT NOT NULL, game_id INTEGER NOT NULL, signature TEXT NOT NULL,
+    PRIMARY KEY(uid,game_id))`);
+  const pending = getGames().filter(g => !NON_GAME_TITLE_REGEX.test(g.title)).map(game => {
+    const stored = db.prepare('SELECT signature FROM local_review_sync WHERE uid=? AND game_id=?').get(uid, game.id) as { signature: string } | undefined;
+    const score = game.user_rating != null && game.user_rating >= 1 && game.user_rating <= 10 ? game.user_rating : null;
+    const data = score == null ? null : {
+      gameKey: computeGameKey(game), title: game.title, coverUrl: game.cover_url || null,
+      score, review: game.notes || '', dropped: game.status === 'dropped',
+      playtimeMinutes: game.playtime_minutes || 0,
+    };
+    const signature = JSON.stringify(data);
+    return { game, data, signature, changed: signature !== stored?.signature && (data != null || stored != null) };
+  }).filter(item => item.changed);
+  let synced = 0;
+  let migrated = 0;
+  const acknowledge = (item: typeof pending[number]) => {
+    db.prepare('INSERT INTO local_review_sync(uid,game_id,signature) VALUES (?,?,?) ON CONFLICT(uid,game_id) DO UPDATE SET signature=excluded.signature')
+      .run(uid, item.game.id, item.signature);
+    synced++;
+  };
+  try {
+    const rated = pending.filter(item => item.data != null);
+    for (let offset = 0; offset < Math.max(rated.length, 1); offset += 50) {
+      const chunk = rated.slice(offset, offset + 50);
+      const result = await communityRequest<{ success: boolean; synced: number; migrated?: number }>('/api/community/me/reviews/sync', 'POST', {
+        items: chunk.map(item => ({ ...item.data, updatedAt: new Date(item.game.updated_at.replace(' ', 'T')).toISOString() })),
+        ...(offset === 0 ? { includeStoredScores: true } : {}),
+      });
+      if (!result.success || result.synced < chunk.length) throw new Error('Server did not acknowledge all reviews');
+      chunk.forEach(acknowledge);
+      migrated += result.migrated || 0;
+    }
+    for (const item of pending.filter(item => item.data == null)) {
+      if (!await deleteMyReview(item.game.id)) throw new Error('Could not remove the cloud rating');
+      acknowledge(item);
+    }
+    return { state: 'synced', synced, pending: 0, migrated };
+  } catch (error) {
+    console.warn('[reviews] Cloud sync pending:', error);
+    return { state: 'pending', synced, pending: pending.length - synced, error: String((error as Error).message || error) };
+  }
+}
+
+export async function updateGameAndSyncReview(id: number, data: Partial<Game>): Promise<Game> {
+  const game = updateGame(id, data);
+  if (!('user_rating' in data || 'notes' in data || 'status' in data)) return game;
+  let reviewSync = await syncLocalReviews();
+  if (reviewSync.state !== 'signed_out') {
+    try {
+      const response = await apiFetch('/api/library/sync', {
+        method: 'POST', body: JSON.stringify({ items: [libraryItem(getGameById(id) || game)] }),
+      }, true);
+      if (!response.ok) throw new Error(`Library save failed (${response.status})`);
+    } catch (error) {
+      reviewSync = { ...reviewSync, state: 'pending', error: String((error as Error).message || error) };
+    }
+  }
+  return { ...(getGameById(id) || game), reviewSync };
+}
+
+function libraryItem(g: Game): UserLibraryItem {
+  const remoteUrl = (url?: string | null) => url && /^https?:\/\//.test(url) ? url : null;
+  return {
+    gameKey: computeGameKey(g), title: g.title,
+    steamId: g.steam_id && g.steam_id > 0 ? g.steam_id : null,
+    coverUrl: remoteUrl(g.cover_url), bannerUrl: remoteUrl(g.banner_url),
+    status: g.status, playtimeMinutes: g.playtime_minutes || 0,
+    lastPlayed: g.last_played_at || null, completedAt: g.completed_at || null,
+    userScore: g.user_rating ?? null, userNotes: g.notes || null,
+    isDeleted: false, clientUpdatedAt: g.updated_at || new Date().toISOString(),
+  };
 }
 
 export async function getCurrentPick(): Promise<CommunityPick | null> {
@@ -535,6 +661,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
       status: g.status,
       playtimeMinutes: g.playtime_minutes || 0,
       lastPlayed: g.last_played_at || null,
+      completedAt: g.completed_at || null,
       userScore: g.user_rating != null ? g.user_rating : null,
       userNotes: g.notes || null,
       isDeleted: false,
@@ -669,6 +796,7 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         user_rating: remote.userScore,
         notes: remote.userNotes,
         last_played_at: remote.lastPlayed,
+        completed_at: remote.completedAt || null,
         media_folder: remote.title.replace(/[<>:"/\\|?*]/g, '').trim() || 'Unknown_Game',
       });
       pulled++;
@@ -727,6 +855,15 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
         patch.steam_id = remote.steamId;
         needsUpdate = true;
       }
+      if (remote.completedAt && remote.completedAt !== existing.completed_at) {
+        if (
+          !existing.completed_at ||
+          (remote.clientUpdatedAt && existing.updated_at && new Date(remote.clientUpdatedAt) > new Date(existing.updated_at))
+        ) {
+          patch.completed_at = remote.completedAt;
+          needsUpdate = true;
+        }
+      }
 
       if (needsUpdate) {
         updateGame(existing.id, patch);
@@ -741,6 +878,8 @@ export async function syncLibraryWithCloud(): Promise<LibrarySyncResult> {
   } catch (err) {
     console.warn('Post-sync autoEnrich warning:', err);
   }
+
+  await syncLocalReviews();
 
   return {
     pushed: items.length,

@@ -1,6 +1,7 @@
 import type { RouteHandler, LeaderboardEntry, LeaderboardResponse } from '../types.ts';
 import { authenticate } from '../auth.ts';
 import { jsonResponse } from '../utils.ts';
+import { visibleTo } from '../community-common.ts';
 
 export const handleLeaderboard: RouteHandler = async (request, env, ctx) => {
   const url = ctx.url;
@@ -15,26 +16,32 @@ export const handleLeaderboard: RouteHandler = async (request, env, ctx) => {
   const requestingUid = authUser?.uid || '';
 
   const totalStmt = await env.DB.prepare(
-    `SELECT COUNT(DISTINCT game_key) AS total FROM ratings`
-  ).first<{ total: number }>();
+    `SELECT COUNT(DISTINCT r.game_key) AS total FROM ratings r
+     LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
+     LEFT JOIN community_profiles cp ON cp.uid=r.uid
+     WHERE COALESCE(m.hidden,0)=0 AND COALESCE(cp.suspended,0)=0 AND ${visibleTo('r')}`
+  ).bind(requestingUid,requestingUid).first<{ total: number }>();
   const total = totalStmt?.total ? Number(totalStmt.total) : 0;
 
   const entriesResult = await env.DB.prepare(
     `SELECT
-       game_key AS gameKey,
+       r.game_key AS gameKey,
        MAX(game_title) AS gameTitle,
        MAX(cover_url) AS coverUrl,
        ROUND(AVG(score), 1) AS avgScore,
        COUNT(*) AS reviewCount,
        ROUND(SUM(CASE WHEN dropped = 1 THEN 1.0 ELSE 0.0 END) / COUNT(*), 2) AS dropRate,
        SUM(playtime_minutes) AS totalPlaytimeMinutes,
-       MAX(CASE WHEN uid = ? THEN score ELSE NULL END) AS myScore
-     FROM ratings
-     GROUP BY game_key
+        MAX(CASE WHEN r.uid = ? THEN score ELSE NULL END) AS myScore
+      FROM ratings r
+      LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
+      LEFT JOIN community_profiles cp ON cp.uid=r.uid
+      WHERE COALESCE(m.hidden,0)=0 AND COALESCE(cp.suspended,0)=0 AND ${visibleTo('r')}
+      GROUP BY r.game_key
      ORDER BY reviewCount DESC, avgScore DESC
      LIMIT ? OFFSET ?`
   )
-    .bind(requestingUid, limit, offset)
+    .bind(requestingUid, requestingUid, requestingUid, limit, offset)
     .all<any>();
 
   const rows = entriesResult.results || [];

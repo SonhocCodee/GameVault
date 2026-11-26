@@ -1,4 +1,4 @@
-import type { RouteHandler, CommunityPick } from '../types.ts';
+import type { RouteHandler, CommunityPick, Env } from '../types.ts';
 import { authenticate } from '../auth.ts';
 import { jsonResponse, errorResponse } from '../utils.ts';
 

@@ -275,15 +275,21 @@ async function ingestExternalImage(
   kind: string,
   options?: { rejectLandscape?: boolean }
 ): Promise<string | null> {
-  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
-    return null;
+  if (!url) return null;
+
+  // Reuse cloud URLs only when the stored image actually exists.
+  const internalKey = normalizeImageKey(url);
+  if (internalKey) {
+    if (internalKey.includes('/') || internalKey.includes('\\') || internalKey.includes('..')) return null;
+    try {
+      const check = await checkSingleImageUrl(url, env);
+      return check.status === 'ok' ? `/api/images/${internalKey}` : null;
+    } catch {
+      return null;
+    }
   }
 
-  // Already a permanent cloud URL?
-  if (url.startsWith('/api/images/') || url.includes('/api/images/')) {
-    const parts = url.split('/api/images/');
-    return `/api/images/${parts[parts.length - 1]}`;
-  }
+  if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
 
   if (options?.rejectLandscape && /\/(?:library_hero|header|capsule_616x353)\b/i.test(url)) {
     return null;
@@ -304,10 +310,10 @@ async function ingestExternalImage(
 
     if (!res || !res.ok) return null;
 
-    const rawMime = res.headers.get('content-type') || 'image/jpeg';
+    const rawMime = res.headers.get('content-type') || '';
     const mime = rawMime.split(';')[0].trim().toLowerCase();
-    const ext = ALLOWED_CONTENT_TYPES[mime] || (url.toLowerCase().endsWith('.png') ? 'png' : 'jpg');
-    const validMime = mime && ALLOWED_CONTENT_TYPES[mime] ? mime : (ext === 'png' ? 'image/png' : 'image/jpeg');
+    const ext = ALLOWED_CONTENT_TYPES[mime];
+    if (!ext) return null;
 
     const buf = await res.arrayBuffer();
     if (!buf || buf.byteLength === 0) return null;
@@ -317,7 +323,7 @@ async function ingestExternalImage(
     }
 
     const key = `${keyPrefix}_${Date.now()}.${ext}`;
-    const cloudUrl = await saveImageToCloud(key, buf, validMime, env, { kind });
+    const cloudUrl = await saveImageToCloud(key, buf, mime, env, { kind });
     return cloudUrl;
   } catch (err) {
     console.warn(`[covers] Failed to ingest external image ${url}:`, err);
@@ -367,7 +373,7 @@ export const handleGetCover: RouteHandler = async (_request, env, ctx) => {
 export const handleCacheCover: RouteHandler = async (request, env) => {
   let body: CoverCachePayload;
   try {
-    body = await request.json();
+    body = await request.json() as CoverCachePayload;
   } catch {
     return errorResponse('Invalid JSON body', 400);
   }
@@ -735,32 +741,30 @@ export const handleAdminUpdateCover: RouteHandler = async (request, env, ctx) =>
   // Process poster/cover URL update
   if (body.sourcePosterUrl) {
     const ingested = await ingestExternalImage(body.sourcePosterUrl, `cover_${cleanKey}_poster`, env, 'cover_poster');
-    if (ingested) coverUrl = ingested;
+    if (!ingested) return errorResponse('Không thể tải và lưu Poster lên Cloud. Bìa cũ được giữ nguyên.', 502);
+    coverUrl = ingested;
   } else if (body.coverUrl !== undefined) {
     if (body.coverUrl === null || body.coverUrl === '') {
       coverUrl = null;
-    } else if (String(body.coverUrl).includes('/api/images/')) {
-      const key = normalizeImageKey(String(body.coverUrl));
-      coverUrl = key ? `/api/images/${key}` : String(body.coverUrl);
     } else {
       const ingested = await ingestExternalImage(String(body.coverUrl), `cover_${cleanKey}_poster`, env, 'cover_poster');
-      coverUrl = ingested || String(body.coverUrl);
+      if (!ingested) return errorResponse('Không thể tải và lưu Poster lên Cloud. Bìa cũ được giữ nguyên.', 502);
+      coverUrl = ingested;
     }
   }
 
   // Process banner URL update
   if (body.sourceBannerUrl) {
     const ingested = await ingestExternalImage(body.sourceBannerUrl, `cover_${cleanKey}_banner`, env, 'cover_banner');
-    if (ingested) bannerUrl = ingested;
+    if (!ingested) return errorResponse('Không thể tải và lưu Banner lên Cloud. Bìa cũ được giữ nguyên.', 502);
+    bannerUrl = ingested;
   } else if (body.bannerUrl !== undefined) {
     if (body.bannerUrl === null || body.bannerUrl === '') {
       bannerUrl = null;
-    } else if (String(body.bannerUrl).includes('/api/images/')) {
-      const key = normalizeImageKey(String(body.bannerUrl));
-      bannerUrl = key ? `/api/images/${key}` : String(body.bannerUrl);
     } else {
       const ingested = await ingestExternalImage(String(body.bannerUrl), `cover_${cleanKey}_banner`, env, 'cover_banner');
-      bannerUrl = ingested || String(body.bannerUrl);
+      if (!ingested) return errorResponse('Không thể tải và lưu Banner lên Cloud. Bìa cũ được giữ nguyên.', 502);
+      bannerUrl = ingested;
     }
   }
 

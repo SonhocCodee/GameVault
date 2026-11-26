@@ -37,6 +37,12 @@ export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged, onOpenAdminModa
   }, []);
 
   useEffect(() => {
+    const changed = () => void refresh();
+    window.addEventListener('community-auth-changed', changed);
+    return () => window.removeEventListener('community-auth-changed', changed);
+  }, []);
+
+  useEffect(() => {
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -110,6 +116,7 @@ export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged, onOpenAdminModa
       ) : !profile ? (
         <button
           onClick={handleLogin}
+          data-navbar-sign-in
           disabled={busy}
           className="flex items-center gap-2 rounded-lg border border-[#2a2e3d] bg-[#161821] px-3 py-1.5 text-xs font-semibold text-[#f1f3f7] transition hover:border-[#4285F4] hover:bg-[#1c1f2e] hover:text-white disabled:opacity-50 shadow-sm"
           title="Đăng nhập bằng tài khoản Google"

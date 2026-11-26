@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { initDb, closeDb, createGame } from '../src/main/db.ts';
+import { initDb, closeDb, createGame, getGameById } from '../src/main/db.ts';
 import {
   configureCloudDb,
   computeGameKey,
@@ -18,6 +18,9 @@ import {
   votePick,
   unvotePick,
   getUserDoc,
+  syncLocalReviews,
+  updateGameAndSyncReview,
+  communityRequest,
 } from '../src/main/cloud-db.ts';
 import { configureAuth, persistSession, clearSession } from '../src/main/auth.ts';
 import { createTestWorkerEnv, createTestSessionToken } from './test-helpers-cloudflare.js';
@@ -306,6 +309,66 @@ describe('Cloud DB (Cloudflare Worker REST + D1 SQL leaderboard & picks)', () =>
     assert.equal(doc.hw?.gpu, 'RTX 4090');
     assert.equal(doc.hw?.cpu, 'i9-14900K');
     assert.equal(doc.hw?.ramGb, 64);
+  });
+
+  test('local scores and notes are uploaded to rankings and post history without duplicate reviews', async () => {
+    const game = createGame({ title: 'Local Review', steam_id: 777, user_rating: 8.5, notes: 'Saved local review', playtime_minutes: 60 });
+    const first = await syncLocalReviews();
+    assert.equal(first.state, 'synced');
+    assert.equal(first.synced, 1);
+    const rankings = await communityRequest('/api/community/rankings?sort=score');
+    assert.equal(rankings.items[0].averageScore, 8.5);
+    const posts = await communityRequest('/api/community/posts?uid=me-uid');
+    assert.equal(posts.items[0].body, 'Saved local review');
+    assert.equal((await syncLocalReviews()).synced, 0);
+    const updated = await updateGameAndSyncReview(game.id, { notes: 'Updated', user_rating: 9 });
+    assert.equal(updated.reviewSync.state, 'synced');
+    assert.equal((await getGameReviews('777'))[0].review, 'Updated');
+    assert.equal(d1.sqlite.prepare('SELECT COUNT(*) AS n FROM ratings').get().n, 1);
+    assert.equal(d1.sqlite.prepare('SELECT COUNT(*) AS n FROM community_posts').get().n, 1);
+    await updateGameAndSyncReview(game.id, { user_rating: null });
+    assert.equal((await getGameReviews('777')).length, 0);
+    assert.equal(d1.sqlite.prepare("SELECT user_score FROM user_library WHERE uid='me-uid' AND game_key='777'").get().user_score, null);
+    assert.equal((await syncLocalReviews()).synced, 0);
+  });
+
+  test('unscored notes save privately to the server without creating a ranking', async () => {
+    const game = createGame({ title: 'Notes Only', steam_id: 780 });
+    await updateGameAndSyncReview(game.id, { notes: 'Private until scored' });
+    assert.equal(d1.sqlite.prepare("SELECT user_notes FROM user_library WHERE uid='me-uid' AND game_key='780'").get().user_notes, 'Private until scored');
+    assert.equal((await communityRequest('/api/community/rankings?sort=score')).items.length, 0);
+  });
+
+  test('failed cloud saves retain local changes and retry after connection returns', async () => {
+    const game = createGame({ title: 'Retry Review', steam_id: 778 });
+    configureCloudDb({ fetchImpl: async () => { throw new Error('offline'); } });
+    const saved = await updateGameAndSyncReview(game.id, { user_rating: 7, notes: 'Keep this' });
+    assert.equal(saved.reviewSync.state, 'pending');
+    assert.equal(getGameById(game.id).notes, 'Keep this');
+    configureCloudDb({ fetchImpl: async (url, init) => worker.fetch(new Request(url, init), env) });
+    assert.equal((await syncLocalReviews()).state, 'synced');
+    assert.equal((await getGameReviews('778'))[0].review, 'Keep this');
+  });
+
+  test('bulk review sync handles more than the individual review rate limit', async () => {
+    for (let i = 0; i < 60; i++) createGame({ title: `Rated ${i}`, steam_id: 1000 + i, user_rating: 8 });
+    const result = await syncLocalReviews();
+    assert.equal(result.synced, 60);
+    assert.equal(result.state, 'synced');
+    assert.equal(d1.sqlite.prepare('SELECT COUNT(*) AS n FROM ratings').get().n, 60);
+  });
+
+  test('signed-out edits remain local and public review edits update the same local game', async () => {
+    const game = createGame({ title: 'Same Game', steam_id: 779 });
+    await communityRequest('/api/community/games/779/reviews', 'POST', { title: game.title, score: 9, review: 'Public edit' });
+    assert.equal(getGameById(game.id).user_rating, 9);
+    assert.equal(getGameById(game.id).notes, 'Public edit');
+    await communityRequest('/api/community/games/779/reviews', 'DELETE');
+    assert.equal(getGameById(game.id).user_rating, null);
+    clearSession({ userDataDir });
+    const saved = await updateGameAndSyncReview(game.id, { user_rating: 7 });
+    assert.equal(saved.reviewSync.state, 'signed_out');
+    assert.equal(getGameById(game.id).user_rating, 7);
   });
 
   test('unauthenticated mutations reject with error', async () => {

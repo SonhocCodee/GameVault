@@ -22,6 +22,15 @@ export interface Game {
   last_played_at?: string | null;
   created_at: string;
   updated_at: string;
+  reviewSync?: ReviewSyncResult;
+}
+
+export interface ReviewSyncResult {
+  state: 'synced' | 'pending' | 'signed_out';
+  synced: number;
+  pending: number;
+  migrated?: number;
+  error?: string;
 }
 
 export interface Session {
@@ -330,6 +339,7 @@ export interface UserLibraryItem {
   status: GameStatus;
   playtimeMinutes: number;
   lastPlayed?: string | null;
+  completedAt?: string | null;
   userScore?: number | null;
   userNotes?: string | null;
   isDeleted?: boolean;
@@ -574,6 +584,14 @@ export function isAdminEmail(email?: string | null): boolean {
 }
 
 export interface ElectronAPI {
+  communityRequest?<T>(path: string, method?: string, body?: unknown): Promise<T>;
+  communityUploadImage?(bytes: ArrayBuffer, mime: string): Promise<{ key: string }>;
+  getCommunityBaseUrl?(): Promise<string>;
+  getPerformancePreview?(gameId: number): Promise<import('./community.ts').PerformancePreview>;
+  saveGameGraphics?(gameId: number, graphics: Partial<import('./community.ts').GraphicsContext>): Promise<import('./community.ts').GraphicsContext>;
+  prepareMeasuredReport?(gameId: number, sessionId: number): Promise<import('./community.ts').PerformanceReport>;
+  chooseGameConfig?(gameId: number): Promise<import('./community.ts').ConfigCandidate[]>;
+  exportGameSettings?(gameId: number, selectedPaths: string[]): Promise<{ files: number; destination: string } | null>;
   // Database Operations
   getGames(filter?: GameFilter): Promise<Game[]>;
   getGameById(id: number): Promise<Game | null>;
@@ -683,6 +701,7 @@ export interface ElectronAPI {
   votePick?(gameId: number): Promise<CommunityPick>;
   unvotePick?(): Promise<CommunityPick>;
   syncLibrary?(): Promise<LibrarySyncResult>;
+  syncReviews?(): Promise<ReviewSyncResult>;
   getCloudLibrary?(): Promise<LibrarySyncResponse>;
 
   // Google Drive for Desktop (Virtual Disk G:)
@@ -694,7 +713,7 @@ export interface ElectronAPI {
   adminGetCovers?(params?: { query?: string; limit?: number; offset?: number }): Promise<AdminCoversResponse>;
   adminUpdateCover?(gameKey: string, payload: AdminUpdateCoverPayload): Promise<{ success: boolean; gameKey: string; cover?: AdminCoverItem }>;
   adminDeleteCover?(gameKey: string): Promise<{ success: boolean; gameKey: string }>;
-  adminUploadCover?(gameKey: string, type: 'poster' | 'banner', filePath: string, meta?: { title?: string; steamId?: number }): Promise<string | null>;
+  adminUploadCover?(gameKey: string, type: 'poster' | 'banner', filePath?: string, meta?: { title?: string; steamId?: number }): Promise<string | null>;
   openAdminWebPortal?(): Promise<boolean>;
 
   // Real-time Event Subscriptions
