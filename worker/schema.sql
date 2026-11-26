@@ -186,3 +186,9 @@ CREATE TABLE IF NOT EXISTS user_sessions (
  PRIMARY KEY (uid, game_key, source, start_time)
 );
 CREATE INDEX IF NOT EXISTS idx_user_sessions_uid ON user_sessions(uid);
+
+CREATE TABLE IF NOT EXISTS user_sync_state (
+ uid TEXT PRIMARY KEY NOT NULL,
+ sync_epoch INTEGER NOT NULL DEFAULT 0,
+ updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

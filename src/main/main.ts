@@ -295,7 +295,7 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
 function registerIpcHandlers(): void {
   ipcMain.handle('community:request', (_event, path, method, body) => communityRequest(path, method, body));
   ipcMain.handle('community:uploadImage', (_event, bytes, mime) => communityUploadImage(bytes, mime));
-  ipcMain.handle('community:baseUrl', () => getWorkerBaseUrl());
+  ipcMain.handle('community:baseUrl', () => getWorkerBaseUrl(getCloudConfig()));
   ipcMain.handle('performance:preview', (_event, gameId) => getPerformancePreview(gameId));
   ipcMain.handle('performance:saveGraphics', (_event, gameId, graphics) => saveGameGraphics(gameId, graphics));
   ipcMain.handle('performance:prepareReport', (_event, gameId, sessionId) => prepareMeasuredReport(gameId, sessionId));
@@ -768,8 +768,8 @@ function registerIpcHandlers(): void {
   });
 
   // Multi-device game library sync
-  ipcMain.handle('community:syncLibrary', async () => {
-    return syncLibraryWithCloud();
+  ipcMain.handle('community:syncLibrary', async (_event, options?: { mode?: 'merge' | 'overwrite' }) => {
+    return syncLibraryWithCloud(options);
   });
   ipcMain.handle('community:syncReviews', async () => syncLocalReviews());
   ipcMain.handle('community:getCloudLibrary', async () => {

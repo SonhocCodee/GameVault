@@ -288,8 +288,8 @@ const electronAPI: ElectronAPI = {
     return ipcRenderer.invoke('community:unvotePick');
   },
   syncReviews: () => ipcRenderer.invoke('community:syncReviews'),
-  syncLibrary: (): Promise<LibrarySyncResult> => {
-    return ipcRenderer.invoke('community:syncLibrary');
+  syncLibrary: (options?: import('../shared/types.js').LibrarySyncOptions): Promise<LibrarySyncResult> => {
+    return ipcRenderer.invoke('community:syncLibrary', options);
   },
   getCloudLibrary: (): Promise<LibrarySyncResponse> => {
     return ipcRenderer.invoke('community:getCloudLibrary');

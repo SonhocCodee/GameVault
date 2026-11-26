@@ -106,6 +106,11 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
       binds.push(text(value, 160));
     }
   }
+  const excludeKind = url.searchParams.get("excludeKind");
+  if (excludeKind) {
+    where.push("p.kind!=?");
+    binds.push(text(excludeKind, 40));
+  }
   if (url.searchParams.get("saved") === "true") {
     if (!uid) throw new CommunityError("Sign in to view saved posts", 401);
     where.push(
@@ -921,7 +926,16 @@ export function registerCommunityRoutes(router: Router) {
       SELECT CASE WHEN steam_id>0 THEN CAST(steam_id AS TEXT)
         WHEN game_key GLOB 's_[0-9]*' THEN SUBSTR(game_key,3) ELSE game_key END AS game_key,
         MAX(title) AS title,MAX(steam_id) AS steamId,MAX(cover_url) AS coverUrl
-      FROM game_covers GROUP BY 1
+      FROM game_covers
+      WHERE NOT (
+        game_key LIKE 't_%'
+        AND EXISTS (
+          SELECT 1 FROM game_covers g2
+          WHERE g2.steam_id > 0
+            AND LOWER(TRIM(g2.title)) = LOWER(TRIM(game_covers.title))
+        )
+      )
+      GROUP BY 1
     ), libraries AS (
       SELECT l.game_key,MAX(l.title) AS title,MAX(l.steam_id) AS steamId,MAX(l.cover_url) AS coverUrl,
       COUNT(DISTINCT CASE WHEN l.playtime_minutes>0 OR l.status IN ('completed','playing') THEN l.uid END) AS players,

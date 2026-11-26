@@ -365,11 +365,17 @@ export interface CloudSessionItem {
   durationMinutes: number;
 }
 
+export interface LibrarySyncOptions {
+  mode?: 'merge' | 'overwrite';
+}
+
 export interface LibrarySyncResponse {
   games: UserLibraryItem[];
   sessions?: CloudSessionItem[];
   syncedAt: string;
   stats: LibrarySyncStats;
+  syncEpoch?: number;
+  authoritativePull?: boolean;
 }
 
 export interface LibrarySyncResult {
@@ -380,6 +386,8 @@ export interface LibrarySyncResult {
   totalCount: number;
   timestamp: string;
   stats?: LibrarySyncStats;
+  syncEpoch?: number;
+  authoritativePull?: boolean;
 }
 
 export interface DriveMediaSyncResult {
@@ -709,7 +717,7 @@ export interface ElectronAPI {
   getCurrentPick?(): Promise<CommunityPick | null>;
   votePick?(gameId: number): Promise<CommunityPick>;
   unvotePick?(): Promise<CommunityPick>;
-  syncLibrary?(): Promise<LibrarySyncResult>;
+  syncLibrary?(options?: LibrarySyncOptions): Promise<LibrarySyncResult>;
   syncReviews?(): Promise<ReviewSyncResult>;
   getCloudLibrary?(): Promise<LibrarySyncResponse>;
 

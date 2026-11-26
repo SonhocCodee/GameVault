@@ -132,6 +132,7 @@ export function CommunityHub({
   const [kind, setKind] = useState("");
   const [loading, setLoading] = useState(false);
   const [composer, setComposer] = useState(false);
+  const [composerKind, setComposerKind] = useState<"thought" | "photo" | "question" | "completed">("thought");
 
   const [query, setQuery] = useState("");
   const [gameQuery, setGameQuery] = useState("");
@@ -231,6 +232,7 @@ export function CommunityHub({
         });
         if (saved) params.set("saved", "true");
         if (kind) params.set("kind", kind);
+        else if (!route.post && !route.profile) params.set("excludeKind", "review");
         if (route.profile) params.set("uid", route.profile);
         const next = route.post
           ? {
@@ -398,6 +400,29 @@ export function CommunityHub({
     () => notifications.items.filter((n) => !n.read).length,
     [notifications.items],
   );
+
+  const enableLibraryShare = async () => {
+    if (!me) {
+      await signIn();
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.request("/me", "PUT", {
+        nickname: nickname || me.nickname || "Player",
+        bio: bio || me.bio || "",
+        shareLibrary: true,
+      });
+      setShareLibrary(true);
+      await loadMe();
+      await loadRankings();
+      showToast("Đã bật công khai giờ chơi & thành tích lên BXH!");
+    } catch (e) {
+      setError(communityError(e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const switchTab = (t: Tab) => {
     setTab(t);
@@ -666,42 +691,58 @@ export function CommunityHub({
           </div>
         </section>
       ) : tab === "feed" || route.post ? (
-        /* TAB: BẢNG TIN */
+        /* TAB: BẢNG TIN (Kiểu mạng xã hội — chỉ bài đăng của người chơi, review nằm trong từng game) */
         <section className="gv-stack">
           {!route.post && (
             <>
-              <div className="gv-top">
-                <div>
-                  <h2>Bảng tin cộng đồng</h2>
-                  <p className="gv-muted">
-                    Khoảnh khắc chơi game, cảm nhận, đánh giá và thảo luận mới nhất.
-                  </p>
+              <div className="gv-fb-composer-bar">
+                <div className="gv-actions" style={{ gap: 12 }}>
+                  <Avatar name={me?.nickname || "P"} url={me?.avatarUrl} size={40} />
+                  <button
+                    type="button"
+                    className="gv-fb-prompt"
+                    onClick={() => {
+                      if (!me) return void signIn();
+                      setComposerKind("thought");
+                      setComposer(true);
+                    }}
+                  >
+                    {me
+                      ? `${me.nickname} ơi, bạn đang chơi game gì? Chia sẻ khoảnh khắc hoặc cảm nhận...`
+                      : "Đăng nhập để chia sẻ bài viết, ảnh chụp và thảo luận cùng cộng đồng..."}
+                  </button>
                 </div>
-                <div className="gv-actions">
+                <div className="gv-top" style={{ paddingTop: 8, borderTop: "1px solid rgba(42, 46, 61, 0.55)" }}>
+                  <div className="gv-chip-row">
+                    {(
+                      [
+                        ["photo", "Ảnh game"],
+                        ["thought", "Cảm nhận"],
+                        ["question", "Hỏi đáp"],
+                        ["completed", "Vừa phá đảo"],
+                      ] as const
+                    ).map(([k, label]) => (
+                      <button
+                        type="button"
+                        key={k}
+                        className="gv-chip"
+                        onClick={() => {
+                          if (!me) return void signIn();
+                          setComposerKind(k);
+                          setComposer(true);
+                        }}
+                      >
+                        + {label}
+                      </button>
+                    ))}
+                  </div>
                   <button
                     type="button"
                     onClick={() => void loadFeed()}
                     disabled={loading}
                   >
-                    <RefreshCw size={15} />
+                    <RefreshCw size={14} />
                     Làm mới
-                  </button>
-                  <button
-                    type="button"
-                    className="gv-primary"
-                    onClick={() =>
-                      me ? setComposer(!composer) : void signIn()
-                    }
-                  >
-                    {composer ? (
-                      <>
-                        <X size={15} /> Đóng khung đăng
-                      </>
-                    ) : (
-                      <>
-                        <Plus size={15} /> Đăng bài mới
-                      </>
-                    )}
                   </button>
                 </div>
               </div>
@@ -726,12 +767,11 @@ export function CommunityHub({
 
                 <div className="gv-chip-row">
                   {[
-                    ["", "Tất cả"],
+                    ["", "Tất cả bài đăng"],
                     ["photo", "Ảnh game"],
                     ["thought", "Cảm nhận"],
                     ["question", "Hỏi đáp"],
                     ["completed", "Phá đảo"],
-                    ["review", "Đánh giá"],
                   ].map(([id, label]) => (
                     <button
                       type="button"
@@ -747,11 +787,13 @@ export function CommunityHub({
 
               {composer && me && (
                 <PostComposer
+                  key={composerKind}
                   api={api}
                   games={games}
+                  initialKind={composerKind}
                   onPosted={() => {
                     setComposer(false);
-                    showToast("Đã đăng bài lên cộng đồng!");
+                    showToast("Đã đăng bài lên bảng tin!");
                     void loadFeed();
                   }}
                   onCancel={() => setComposer(false)}
@@ -910,6 +952,22 @@ export function CommunityHub({
             ))}
           </div>
 
+          {me && !me.shareLibrary && (
+            <div className="gv-notice">
+              <span>
+                Thư viện của bạn đang ở chế độ riêng tư nên giờ chơi &amp; số game phá đảo chưa được tính vào Top game.
+              </span>
+              <button
+                type="button"
+                className="gv-primary"
+                disabled={loading}
+                onClick={() => void enableLibraryShare()}
+              >
+                Công khai giờ chơi lên BXH ngay
+              </button>
+            </div>
+          )}
+
           {loading && rankings.items.length === 0 && (
             <p className="gv-muted" role="status">
               Đang tải bảng xếp hạng game…
@@ -962,14 +1020,14 @@ export function CommunityHub({
                       ) : (
                         <div className="gv-poster-md" />
                       )}
-                      <div className="gv-stack-sm">
-                        <strong style={{ fontSize: 15, lineHeight: 1.3 }}>
+                      <div className="gv-podium-meta">
+                        <strong style={{ fontSize: 15, lineHeight: 1.35 }}>
                           {g.title}
                         </strong>
                         <span className="gv-muted" style={{ fontSize: 12 }}>
                           {g.reviewCount > 0
                             ? `${g.reviewCount} đánh giá`
-                            : "Chưa có đánh giá"}
+                            : "Bấm vào xem đánh giá & cấu hình"}
                         </span>
                       </div>
                     </div>

@@ -199,6 +199,8 @@ export interface LibrarySyncResponse {
   sessions?: CloudSessionItem[];
   syncedAt: string;
   stats: LibrarySyncStats;
+  syncEpoch?: number;
+  authoritativePull?: boolean;
 }
 
 export interface GameCoverRecord {

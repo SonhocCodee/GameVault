@@ -26,6 +26,18 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 11:39] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Sửa triệt để lỗi không load được ảnh trong tab Cộng đồng Desktop (`community:baseUrl`), tách riêng Bảng tin kiểu Facebook (ẩn review tự động, đặt khung đăng bài lên đầu), sửa layout Podium Top 3 game không bị rớt dòng, lọc trùng bản ghi `t_*` trong Top game (Alan Wake 2), và thêm nút 1-click bật chia sẻ giờ chơi lên BXH.
+- **Thay đổi chính:**
+  - `src/main/main.ts`: Truyền `getCloudConfig()` vào `getWorkerBaseUrl(getCloudConfig())` trong IPC `community:baseUrl` (fix nguyên nhân mọi ảnh `/api/images/...` bị trỏ về `127.0.0.1:8787`).
+  - `worker/src/routes/community.ts`: Hỗ trợ `?excludeKind=review` ở `GET /api/community/posts` và loại bỏ bản ghi `t_*` trùng tên với game có `steam_id` trong `GET /api/community/rankings`.
+  - `src/renderer/community/CommunityHub.tsx`, `PostComposer.tsx`, `community.css`: Bảng tin kiểu Facebook (khung đăng bài nhanh ngay đầu + truyền `excludeKind=review` để review nằm riêng trong từng game), sửa CSS `.gv-podium-card` chống rớt chữ dọc, thêm banner 1-click **"Công khai giờ chơi lên BXH ngay"** trên Top game.
+  - `tests/community.test.js`: Bổ sung test cho `excludeKind=review` và chống trùng `t_*` trong `/rankings`.
+- **Kiểm tra:**
+  - `npx tsc --noEmit -p worker/tsconfig.json`, `npm run build`, `npm run build:admin`, `npm run build:community`: Pass.
+  - `npm test`: **478/478 tests pass** (`96 suites`, `0 fail`, `0 skipped`).
+- **Bàn giao / Tiếp theo:** Thoát hẳn app GameVault ở System Tray (nếu đang mở) rồi mở lại để nạp bản build mới (ảnh sẽ load đầy đủ), sau đó bấm **Công khai giờ chơi lên BXH ngay** trên Top game (hoặc bật trong Hồ sơ) để `Crimson Desert` 220h và toàn bộ 59 game hiện đủ trên BXH.
+
 ## [2026-11-26 11:32] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Hoàn thiện đồng bộ Cloud 100% (bao gồm `completed_at` và từng phiên chơi `user_sessions`), đại tu toàn diện giao diện & UX tab Cộng đồng (`CommunityHub`, `GameHub`, `PostCard`, `PostComposer`, `PlayerBoard`, `GamePlayers`, `PerformancePanel`, `ScreenshotShare`, `MonthlyPick`), chạy migration D1 + deploy Cloudflare Worker & `/community/` lên production.
 - **Thay đổi chính:**

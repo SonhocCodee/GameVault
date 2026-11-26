@@ -37,6 +37,7 @@ export function PostComposer({
   game,
   games = [],
   initialFiles = [],
+  initialKind,
   onPosted,
   onCancel,
 }: {
@@ -44,6 +45,7 @@ export function PostComposer({
   game?: PublicGame;
   games?: PublicGame[];
   initialFiles?: File[];
+  initialKind?: PostKind;
   onPosted: () => void;
   onCancel?: () => void;
 }) {
@@ -52,7 +54,7 @@ export function PostComposer({
   const [remoteGames, setRemoteGames] = useState<PublicGame[]>([]);
   const [body, setBody] = useState("");
   const [kind, setKind] = useState<PostKind>(
-    initialFiles.length ? "photo" : "thought",
+    initialKind || (initialFiles.length ? "photo" : "thought"),
   );
   const [spoiler, setSpoiler] = useState(false);
   const [files, setFiles] = useState<File[]>(initialFiles);

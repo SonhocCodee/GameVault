@@ -745,3 +745,20 @@ test("concurrent attachment of an upload fails atomically instead of creating an
     "other-post",
   );
 });
+
+test("feed excludeKind=review hides review posts while keeping social posts, and rankings deduplicates legacy t_ covers", async () => {
+  const f = await fixture();
+  await f.call("/posts", "POST", post, "alice");
+  await f.call("/games/814380/reviews", "POST", { title: "Sekiro", score: 9, review: "Great combat" }, "alice");
+
+  const socialFeed = await (await f.call("/posts?excludeKind=review")).json();
+  assert.equal(socialFeed.items.length, 1);
+  assert.equal(socialFeed.items[0].kind, "thought");
+
+  f.d1.sqlite
+    .prepare("INSERT INTO game_covers(game_key,title,steam_id,cover_url) VALUES ('108710','Alan Wake 2',108710,'/api/images/a.jpg'),('t_alanwake2','Alan Wake 2',NULL,'/api/images/b.jpg')")
+    .run();
+  const board = await (await f.call("/rankings?q=Alan+Wake+2")).json();
+  assert.equal(board.items.length, 1);
+  assert.equal(board.items[0].gameKey, "108710");
+});
