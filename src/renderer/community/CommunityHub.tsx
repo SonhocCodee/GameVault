@@ -439,15 +439,6 @@ export function CommunityHub({
   const onGame = (g: PublicGame) => navigate({ game: g });
   const onProfile = (uid: string) => navigate({ profile: uid });
 
-  const top3Games = useMemo(
-    () => (!gameQuery && rankings.items.length >= 3 ? rankings.items.slice(0, 3) : []),
-    [gameQuery, rankings.items],
-  );
-  const restGames = useMemo(
-    () => (top3Games.length ? rankings.items.slice(3) : rankings.items),
-    [top3Games.length, rankings.items],
-  );
-
   const renderRankingCard = (g: GameRanking, rank: number, isPodium: boolean) => {
     const poster = g.coverUrl ? qualifyCommunityUrl(api.publicBase, g.coverUrl) : "";
     const rawBanner =
@@ -463,62 +454,55 @@ export function CommunityHub({
       <button
         type="button"
         key={g.gameKey}
-        className={`gv-game-card ${isPodium ? `is-podium rank-${rank}` : ""}`}
+        className={`gv-game-row ${isPodium ? `is-podium rank-${rank}` : ""}`}
         onClick={() => onGame(g)}
       >
-        <div className={`gv-game-card-banner ${isPodium ? "is-tall" : ""}`}>
-          {banner ? (
-            <img src={banner} alt="" loading="lazy" />
-          ) : poster ? (
-            <img src={poster} alt="" loading="lazy" className="gv-game-card-blur-bg" />
-          ) : (
-            <div className="gv-game-card-banner-fallback" />
-          )}
-          <div className="gv-game-card-banner-fade" />
-          <div className="gv-game-card-banner-badges">
+        {(banner || poster) && (
+          <img
+            src={banner || poster}
+            alt=""
+            loading="lazy"
+            className={`gv-row-backdrop ${!banner ? "is-blur" : ""}`}
+          />
+        )}
+        <div className="gv-row-backdrop-fade" />
+
+        <div className="gv-game-row-left">
+          <div className="gv-game-row-rank">
             {isPodium ? (
               <span className={`gv-pill ${podiumTierClass}`}>
-                <Trophy size={12} /> Hạng #{rank}
+                <Trophy size={13} /> #{rank}
               </span>
             ) : (
               <span className="gv-pill gv-rank-badge">#{rank}</span>
             )}
-            {g.averageScore != null ? (
-              <span className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}>
-                <Star size={12} />
-                {isPodium ? `${g.averageScore.toFixed(1)}/10` : g.averageScore.toFixed(1)}
-              </span>
-            ) : (
-              <span className="gv-pill">{isPodium ? "Chưa chấm điểm" : "Chưa chấm"}</span>
-            )}
           </div>
-        </div>
 
-        <div className="gv-game-card-body">
-          <div className="gv-game-card-head">
-            {poster ? (
-              <img
-                className={`gv-game-card-poster ${isPodium ? "is-lg" : ""}`}
-                src={poster}
-                alt=""
-                loading="lazy"
-              />
-            ) : (
-              <div className={`gv-game-card-poster ${isPodium ? "is-lg" : ""}`} />
-            )}
-            <div className="gv-game-card-title-col">
-              <h3 className="gv-game-card-title">{g.title}</h3>
+          {poster ? (
+            <img
+              className={`gv-game-row-poster ${isPodium ? "is-lg" : ""}`}
+              src={poster}
+              alt=""
+              loading="lazy"
+            />
+          ) : (
+            <div className={`gv-game-row-poster ${isPodium ? "is-lg" : ""}`} />
+          )}
+
+          <div className="gv-game-row-info">
+            <h3 className={`gv-game-row-title ${isPodium ? "is-lg" : ""}`}>{g.title}</h3>
+            <div className="gv-actions" style={{ gap: 8 }}>
               <span className="gv-muted" style={{ fontSize: 12 }}>
                 {g.reviewCount > 0
                   ? `${g.reviewCount} lượt đánh giá`
-                  : isPodium
-                    ? "Chưa có lượt đánh giá"
-                    : "Xem cấu hình & đánh giá"}
+                  : "Xem cấu hình & đánh giá"}
               </span>
             </div>
           </div>
+        </div>
 
-          <div className="gv-stat-mini-grid">
+        <div className="gv-game-row-right">
+          <div className="gv-game-row-stats">
             <div className="gv-stat-mini">
               <span className="gv-stat-mini-label">Giờ chơi</span>
               <span className="gv-stat-mini-value gv-text-emerald">
@@ -534,6 +518,13 @@ export function CommunityHub({
               <span className="gv-stat-mini-value gv-text-cyan">{g.completedPlayers}</span>
             </div>
           </div>
+          {g.averageScore != null ? (
+            <span className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}>
+              <Star size={12} /> {g.averageScore.toFixed(1)}/10
+            </span>
+          ) : (
+            <span className="gv-pill">Chưa chấm</span>
+          )}
         </div>
       </button>
     );
@@ -1151,16 +1142,10 @@ export function CommunityHub({
             </p>
           )}
 
-          {top3Games.length > 0 && (
-            <div className="gv-podium-grid">
-              {top3Games.map((g, idx) => renderRankingCard(g, idx + 1, true))}
-            </div>
-          )}
-
-          {restGames.length > 0 && (
-            <div className="gv-game-grid">
-              {restGames.map((g, index) =>
-                renderRankingCard(g, top3Games.length ? index + 4 : index + 1, false),
+          {rankings.items.length > 0 && (
+            <div className="gv-game-list">
+              {rankings.items.map((g, index) =>
+                renderRankingCard(g, index + 1, !gameQuery && index < 3),
               )}
             </div>
           )}

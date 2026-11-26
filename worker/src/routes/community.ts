@@ -181,6 +181,15 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
   }
   return jsonResponse(page(items, limit, offset));
 }
+const IDLE_APP_KEYS = "('3678970','s_3678970','431960','s_431960','993090','s_993090','3419430','s_3419430','2923300','s_2923300')";
+const IDLE_APP_TITLES = "('tbh: task bar hero','tbh task bar hero','task bar hero','wallpaper engine','lossless scaling','bongo cat','banana','desktop mate','vtube studio')";
+
+function notIdleSql(alias: string): string {
+  const k = alias ? `${alias}.game_key` : "game_key";
+  const t = alias ? `${alias}.title` : "title";
+  return `(LOWER(${k}) NOT IN ${IDLE_APP_KEYS} AND LOWER(TRIM(COALESCE(${t},''))) NOT IN ${IDLE_APP_TITLES})`;
+}
+
 export function registerCommunityRoutes(router: Router) {
   const add = (method: string, path: string, handler: RouteHandler) =>
     router.add(method as any, `/api/community${path}`, async (r, e, c) => {
@@ -206,7 +215,7 @@ export function registerCommunityRoutes(router: Router) {
     const statsRow = await env.DB.prepare(
       `SELECT COUNT(*) AS totalGames,
         SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completedGames,
-        SUM(playtime_minutes) AS totalMinutes
+        SUM(CASE WHEN ${notIdleSql("")} THEN playtime_minutes ELSE 0 END) AS totalMinutes
       FROM user_library WHERE uid=? AND is_deleted=0`,
     )
       .bind(user.uid)
@@ -215,7 +224,7 @@ export function registerCommunityRoutes(router: Router) {
       `SELECT COALESCE(gc.banner_url, ul.banner_url, gc.cover_url, ul.cover_url) AS banner_url
       FROM user_library ul
       LEFT JOIN game_covers gc ON gc.game_key = LOWER(CASE WHEN ul.steam_id>0 THEN CAST(ul.steam_id AS TEXT) ELSE ul.game_key END)
-      WHERE ul.uid=? AND ul.is_deleted=0
+      WHERE ul.uid=? AND ul.is_deleted=0 AND ${notIdleSql("ul")}
       ORDER BY ul.playtime_minutes DESC LIMIT 1`,
     )
       .bind(user.uid)
@@ -328,9 +337,23 @@ export function registerCommunityRoutes(router: Router) {
             .all<any>()
         ).results || []
       : [];
-    const totalMinutes = games.reduce((sum: number, g: any) => sum + (Number(g.playtime_minutes) || 0), 0);
+    const totalMinutes = games.reduce(
+      (sum: number, g: any) =>
+        sum +
+        (IDLE_APP_KEYS.includes(`'${String(g.game_key || "").toLowerCase()}'`) ||
+        IDLE_APP_TITLES.includes(`'${String(g.title || "").trim().toLowerCase()}'`)
+          ? 0
+          : Number(g.playtime_minutes) || 0),
+      0,
+    );
     const completedGames = games.filter((g: any) => g.status === "completed").length;
-    const heroBanner = games.find((g: any) => g.resolved_banner || g.resolved_cover);
+    const heroBanner =
+      games.find(
+        (g: any) =>
+          (g.resolved_banner || g.resolved_cover) &&
+          !IDLE_APP_KEYS.includes(`'${String(g.game_key || "").toLowerCase()}'`) &&
+          !IDLE_APP_TITLES.includes(`'${String(g.title || "").trim().toLowerCase()}'`),
+      ) || games.find((g: any) => g.resolved_banner || g.resolved_cover);
     return jsonResponse({
       uid,
       nickname: safeName(p.nickname),
@@ -440,7 +463,7 @@ export function registerCommunityRoutes(router: Router) {
     const rows = (await env.DB.prepare(`
       SELECT p.uid,p.nickname,p.bio,u.photo_url AS avatar_url,COUNT(*) AS totalGames,
         SUM(CASE WHEN l.status='completed' THEN 1 ELSE 0 END) AS completedGames,
-        SUM(l.playtime_minutes) AS totalMinutes
+        SUM(CASE WHEN ${notIdleSql("l")} THEN l.playtime_minutes ELSE 0 END) AS totalMinutes
       FROM community_profiles p JOIN community_library l ON l.uid=p.uid
       LEFT JOIN users u ON u.uid=p.uid
       WHERE p.share_library=1 AND p.suspended=0 AND ${visibleTo("p")}
@@ -458,7 +481,7 @@ export function registerCommunityRoutes(router: Router) {
           l.status, l.playtime_minutes
         FROM community_library l
         LEFT JOIN game_covers gc ON gc.game_key = LOWER(l.game_key)
-        WHERE l.uid IN (${placeholders})
+        WHERE l.uid IN (${placeholders}) AND ${notIdleSql("l")}
         ORDER BY l.playtime_minutes DESC
       `).bind(...uids).all<any>()).results || [];
       for (const g of gRows) {
@@ -1023,6 +1046,8 @@ export function registerCommunityRoutes(router: Router) {
       COALESCE(l.players,0) AS players,COALESCE(l.completedPlayers,0) AS completedPlayers,COALESCE(l.totalMinutes,0) AS totalMinutes,r.averageScore,COALESCE(r.reviewCount,0) AS reviewCount
     FROM game_keys k LEFT JOIN catalog c ON c.game_key=k.game_key LEFT JOIN libraries l ON l.game_key=k.game_key LEFT JOIN reviews r ON r.game_key=k.game_key
     WHERE COALESCE(c.title,l.title,r.title) LIKE ? ESCAPE '\\'
+      AND LOWER(k.game_key) NOT IN ${IDLE_APP_KEYS}
+      AND LOWER(TRIM(COALESCE(c.title,l.title,r.title,''))) NOT IN ${IDLE_APP_TITLES}
       ${sort === "score" ? "AND COALESCE(r.reviewCount,0)>=1" : ""}
     ORDER BY ${order},title COLLATE NOCASE,gameKey LIMIT ? OFFSET ?`,
         )

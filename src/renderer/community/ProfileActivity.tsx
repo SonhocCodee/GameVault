@@ -42,7 +42,7 @@ export function ProfileActivity({
     try {
       if (kind === "posts") {
         const next = await api.request<Page<CommunityPost>>(
-          `/posts?uid=${encodeURIComponent(me.uid)}&offset=${more ? posts.nextOffset : 0}`,
+          `/posts?uid=${encodeURIComponent(me.uid)}&excludeKind=review&offset=${more ? posts.nextOffset : 0}`,
         );
         if (ticket !== sequence.current) return;
         setPosts((previous) =>

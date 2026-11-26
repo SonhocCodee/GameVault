@@ -42,7 +42,6 @@ export function PlayerBoard({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [hoveredUid, setHoveredUid] = useState<string | null>(null);
   const ticket = useRef(0);
 
   const load = async (more = false) => {
@@ -127,14 +126,12 @@ export function PlayerBoard({
       )}
 
       {board.items.length > 0 && (
-        <div className="gv-player-grid">
+        <div className="gv-player-list">
           {board.items.map((player, index) => {
             const banner = player.bannerUrl
               ? qualifyCommunityUrl(api.publicBase, player.bannerUrl)
               : "";
             const topGames = player.topGames || [];
-            const topOne = topGames[0];
-            const isHovered = hoveredUid === player.uid;
             const rankClass =
               index === 0
                 ? "gv-pill-amber"
@@ -147,44 +144,26 @@ export function PlayerBoard({
             return (
               <div
                 key={player.uid}
-                className={`gv-player-card ${index < 3 ? `rank-${index + 1}` : ""}`}
-                onMouseEnter={() => setHoveredUid(player.uid)}
-                onMouseLeave={() =>
-                  setHoveredUid((cur) => (cur === player.uid ? null : cur))
-                }
+                className={`gv-player-row ${index < 3 ? `rank-${index + 1}` : ""}`}
               >
-                <div
-                  className="gv-player-banner"
-                  onClick={() => onProfile(player.uid)}
-                >
-                  {banner ? (
-                    <img src={banner} alt="" loading="lazy" />
-                  ) : (
-                    <div className="gv-player-banner-fallback" />
-                  )}
-                  <div className="gv-player-banner-overlay" />
-                  <div className="gv-player-banner-badges">
+                {banner && (
+                  <img
+                    className="gv-row-backdrop"
+                    src={banner}
+                    alt=""
+                    loading="lazy"
+                  />
+                )}
+                <div className="gv-row-backdrop-fade" />
+
+                <div className="gv-player-row-left">
+                  <div className="gv-player-row-top">
                     <span className={`gv-pill ${rankClass}`}>
                       <Trophy size={12} /> Hạng #{index + 1}
                     </span>
                     {player.uid === myUid && (
                       <span className="gv-pill gv-pill-emerald">Bạn</span>
                     )}
-                  </div>
-                </div>
-
-                <div className="gv-player-card-body">
-                  <div className="gv-player-avatar-row">
-                    <div
-                      className="gv-player-avatar-ring"
-                      onClick={() => onProfile(player.uid)}
-                    >
-                      <Avatar
-                        name={player.nickname}
-                        url={player.avatarUrl}
-                        size={60}
-                      />
-                    </div>
                     <button
                       type="button"
                       className="gv-link"
@@ -196,22 +175,31 @@ export function PlayerBoard({
                   </div>
 
                   <div
-                    style={{ cursor: "pointer" }}
+                    className="gv-player-row-identity"
                     onClick={() => onProfile(player.uid)}
                   >
-                    <h3 style={{ fontSize: 17 }}>{player.nickname}</h3>
-                    <p
-                      className="gv-muted"
-                      style={{
-                        fontSize: 12,
-                        marginTop: 2,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {player.bio || "Thành viên cộng đồng GameVault"}
-                    </p>
+                    <div className="gv-player-avatar-ring">
+                      <Avatar
+                        name={player.nickname}
+                        url={player.avatarUrl}
+                        size={64}
+                      />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <h3 style={{ fontSize: 19 }}>{player.nickname}</h3>
+                      <p
+                        className="gv-muted"
+                        style={{
+                          fontSize: 13,
+                          marginTop: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {player.bio || "Thành viên cộng đồng GameVault"}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="gv-stat-mini-grid">
@@ -234,68 +222,77 @@ export function PlayerBoard({
                       </span>
                     </div>
                   </div>
-
-                  {topOne && (
-                    <div className="gv-player-top1">
-                      <Sparkles size={13} className="gv-text-amber" />
-                      <span className="gv-muted" style={{ fontSize: 12 }}>
-                        Chơi nhiều nhất:{" "}
-                        <strong style={{ color: "#f1f3f7" }}>
-                          {topOne.title}
-                        </strong>{" "}
-                        ({minutesLabel(topOne.playtimeMinutes)})
-                      </span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Hover Preview Drawer: Top 3 Most-Played Games */}
-                {isHovered && topGames.length > 0 && (
-                  <div className="gv-player-hover-preview">
-                    <div className="gv-muted" style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                      Top game chơi nhiều giờ nhất
-                    </div>
-                    {topGames.map((tg, i) => {
-                      const cover = tg.coverUrl
-                        ? qualifyCommunityUrl(api.publicBase, tg.coverUrl)
-                        : "";
-                      return (
-                        <button
-                          type="button"
-                          key={tg.gameKey}
-                          className="gv-hover-game-row"
-                          onClick={() => (onGame ? onGame(tg) : onProfile(player.uid))}
-                        >
-                          <span className="gv-muted" style={{ fontWeight: 800, width: 18 }}>
-                            #{i + 1}
-                          </span>
-                          {cover ? (
-                            <img src={cover} alt="" />
-                          ) : (
-                            <div className="gv-hover-game-ph" />
-                          )}
-                          <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-                            <strong
-                              style={{
-                                display: "block",
-                                fontSize: 12,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {tg.title}
-                            </strong>
-                            <span className="gv-muted" style={{ fontSize: 11 }}>
-                              {minutesLabel(tg.playtimeMinutes)}
-                              {tg.status === "completed" ? " · Đã phá đảo" : ""}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
+                <div className="gv-player-row-right">
+                  <div
+                    className="gv-muted"
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Sparkles size={12} className="gv-text-amber" />
+                    Top game chơi nhiều giờ nhất
                   </div>
-                )}
+                  {topGames.length > 0 ? (
+                    <div className="gv-player-topgames-list">
+                      {topGames.map((tg, i) => {
+                        const cover = tg.coverUrl
+                          ? qualifyCommunityUrl(api.publicBase, tg.coverUrl)
+                          : "";
+                        return (
+                          <button
+                            type="button"
+                            key={tg.gameKey}
+                            className="gv-hover-game-row"
+                            onClick={() =>
+                              onGame ? onGame(tg) : onProfile(player.uid)
+                            }
+                          >
+                            <span
+                              className="gv-muted"
+                              style={{ fontWeight: 800, width: 20, fontSize: 12 }}
+                            >
+                              #{i + 1}
+                            </span>
+                            {cover ? (
+                              <img src={cover} alt="" loading="lazy" />
+                            ) : (
+                              <div className="gv-hover-game-ph" />
+                            )}
+                            <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                              <strong
+                                style={{
+                                  display: "block",
+                                  fontSize: 13,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {tg.title}
+                              </strong>
+                              <span className="gv-muted" style={{ fontSize: 11 }}>
+                                {minutesLabel(tg.playtimeMinutes)}
+                                {tg.status === "completed" ? " · Đã phá đảo" : ""}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="gv-muted" style={{ fontSize: 12 }}>
+                      Chưa có dữ liệu game chơi nhiều.
+                    </p>
+                  )}
+                </div>
               </div>
             );
           })}

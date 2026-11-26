@@ -26,6 +26,31 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 13:42] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Lịch sử hoạt động (`ProfileActivity.tsx`)**: Thêm `excludeKind=review` khi tải `Bài đã đăng`, đảm bảo chỉ hiển thị bài đăng mạng xã hội từ Bảng tin (không lẫn bài đánh giá sao).
+- **Loại bỏ app/game treo máy khỏi BXH giờ chơi (`worker/src/routes/community.ts`)**: Thêm bộ lọc `notIdleSql` / `IDLE_APP_KEYS` & `IDLE_APP_TITLES` (`TBH: Task Bar Hero`, `Wallpaper Engine`, `Lossless Scaling`, `Bongo Cat`, `Banana`, `Desktop Mate`, `VTube Studio`) ở `/rankings`, `/players`, `/me`, `/profiles/:uid` — nhờ vậy `Crimson Desert` (220h) đứng top #1 giờ chơi và làm banner chính xác.
+- **Chuyển `Top game` & `Top người chơi` sang danh sách xếp hạng theo chiều dọc (`CommunityHub.tsx`, `PlayerBoard.tsx`, `community.css`)**:
+  - `Top game`: Danh sách 1 cột xếp hạng từ trên xuống dưới (`.gv-game-list` / `.gv-game-row`), mỗi hàng có ảnh bìa nền mờ atmospheric, poster đứng lớn (`92×130` cho Top 3, `78×110` cho #4+), thông tin đánh giá và 3 ô thống kê + điểm.
+  - `Top người chơi`: Danh sách 1 cột xếp hạng từ trên xuống dưới (`.gv-player-list` / `.gv-player-row`), hiển thị Top 3 game chơi nhiều nhất ở cột bên phải ngay trong hàng thay vì popup `position: absolute` bị cắt ở mép dưới màn hình.
+
+### File chính đã thay đổi
+- `src/renderer/community/ProfileActivity.tsx`
+- `src/renderer/community/PlayerBoard.tsx`
+- `src/renderer/community/CommunityHub.tsx`
+- `src/renderer/community/community.css`
+- `worker/src/routes/community.ts`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass (exit 0).
+- `npm run build`, `npm run build:admin`, `npm run build:community`: Pass.
+- `npm test`: **478 pass / 0 fail / 0 skipped** (96 suites).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Đã deploy Worker + `/community/` assets lên Cloudflare (`game-vault-worker`).
+- Thoát hẳn GameVault Desktop (kể cả System Tray) và mở lại để nạp bản build UI mới.
+
 ## [2026-11-26 12:55] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc
