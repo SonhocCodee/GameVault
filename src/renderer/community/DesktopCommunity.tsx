@@ -79,7 +79,9 @@ export function DesktopCommunity({
     try {
       const result = await window.electronAPI.syncReviews();
       setReviewSync(result);
-      if (result.synced > 0) setReviewVersion((v) => v + 1);
+      if (result.synced > 0 || (result.migrated ?? 0) > 0) {
+        setReviewVersion((v) => v + 1);
+      }
     } catch (e) {
       setReviewSync({
         state: "pending",

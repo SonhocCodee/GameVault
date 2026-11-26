@@ -19,7 +19,9 @@
   user-select: text;
   padding: 20px 24px 56px;
   max-width: 1240px;
+  width: 100%;
   margin: 0 auto;
+  overflow-x: hidden;
   line-height: 1.55;
   font-size: 14px;
 }
@@ -65,12 +67,17 @@
 
 .gv-stack {
   display: grid;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
 }
 
 .gv-stack-sm {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
 }
 
 .gv-muted {
@@ -860,25 +867,59 @@
 .gv-rank-list {
   display: grid;
   gap: 10px;
+  width: 100%;
 }
 
 .gv-rank-row {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: rgba(22, 24, 33, 0.85);
-  border: 1px solid var(--gv-border);
-  text-align: left;
-  width: 100%;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  justify-content: stretch !important;
+  gap: 14px !important;
+  padding: 14px 18px !important;
+  border-radius: 14px !important;
+  background: rgba(22, 24, 33, 0.88) !important;
+  border: 1px solid var(--gv-border) !important;
+  text-align: left !important;
+  width: 100% !important;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
 }
 
 .gv-rank-row:hover {
-  background: rgba(28, 31, 43, 0.95);
-  border-color: var(--gv-cyan);
+  background: rgba(28, 31, 43, 0.96) !important;
+  border-color: var(--gv-cyan) !important;
+  transform: translateY(-1px);
+}
+
+.gv-stat-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid rgba(42, 46, 61, 0.65);
+}
+
+.gv-stat-mini {
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: rgba(14, 16, 21, 0.65);
+  border: 1px solid rgba(42, 46, 61, 0.7);
+}
+
+.gv-stat-mini-label {
+  font-size: 11px;
+  color: var(--gv-muted);
+  font-weight: 500;
+}
+
+.gv-stat-mini-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--gv-text);
+  font-variant-numeric: tabular-nums;
 }
 
 .gv-rank-num {

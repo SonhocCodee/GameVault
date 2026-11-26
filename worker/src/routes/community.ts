@@ -913,12 +913,12 @@ export function registerCommunityRoutes(router: Router) {
       throw new CommunityError("Invalid ranking sort");
     const order =
       sort === "hours"
-        ? "totalMinutes DESC,players DESC"
+        ? "totalMinutes DESC,players DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC"
         : sort === "completed"
-          ? "completedPlayers DESC,totalMinutes DESC"
+          ? "completedPlayers DESC,totalMinutes DESC,COALESCE(r.averageScore,0) DESC"
         : sort === "score"
-          ? "averageScore DESC,reviewCount DESC"
-          : "players DESC,totalMinutes DESC";
+          ? "averageScore DESC,reviewCount DESC,totalMinutes DESC"
+          : "players DESC,totalMinutes DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC";
     const rows =
       (
         await env.DB.prepare(

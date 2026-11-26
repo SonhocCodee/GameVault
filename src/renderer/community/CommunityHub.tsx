@@ -136,7 +136,7 @@ export function CommunityHub({
 
   const [query, setQuery] = useState("");
   const [gameQuery, setGameQuery] = useState("");
-  const [sort, setSort] = useState("players");
+  const [sort, setSort] = useState("hours");
   const [rankings, setRankings] = useState<Page<GameRanking>>(empty());
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -936,10 +936,10 @@ export function CommunityHub({
 
           <div className="gv-chip-row">
             {[
-              ["players", "Nhiều người chơi"],
               ["hours", "Tổng giờ chơi"],
-              ["completed", "Nhiều người phá đảo"],
               ["score", "Điểm đánh giá cao"],
+              ["completed", "Nhiều người phá đảo"],
+              ["players", "Nhiều người chơi"],
             ].map(([id, label]) => (
               <button
                 type="button"
@@ -999,13 +999,15 @@ export function CommunityHub({
                       >
                         <Trophy size={12} /> Hạng #{idx + 1}
                       </span>
-                      {g.averageScore != null && (
+                      {g.averageScore != null ? (
                         <span
                           className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}
                         >
                           <Star size={12} />
-                          {g.averageScore.toFixed(1)}
+                          {g.averageScore.toFixed(1)}/10
                         </span>
+                      ) : (
+                        <span className="gv-pill">Chưa chấm điểm</span>
                       )}
                     </div>
 
@@ -1026,22 +1028,29 @@ export function CommunityHub({
                         </strong>
                         <span className="gv-muted" style={{ fontSize: 12 }}>
                           {g.reviewCount > 0
-                            ? `${g.reviewCount} đánh giá`
-                            : "Bấm vào xem đánh giá & cấu hình"}
+                            ? `${g.reviewCount} lượt đánh giá`
+                            : "Chưa có lượt đánh giá"}
                         </span>
                       </div>
                     </div>
 
-                    <div className="gv-actions" style={{ gap: 6 }}>
-                      <span className="gv-pill">
-                        <Users size={11} /> {g.players} chơi
-                      </span>
-                      <span className="gv-pill gv-pill-emerald">
-                        <CheckCircle2 size={11} /> {g.completedPlayers} phá đảo
-                      </span>
-                      <span className="gv-pill gv-pill-cyan">
-                        <Clock size={11} /> {minutesLabel(g.totalMinutes)}
-                      </span>
+                    <div className="gv-stat-mini-grid">
+                      <div className="gv-stat-mini">
+                        <span className="gv-stat-mini-label">Giờ chơi</span>
+                        <span className="gv-stat-mini-value gv-text-emerald">
+                          {minutesLabel(g.totalMinutes)}
+                        </span>
+                      </div>
+                      <div className="gv-stat-mini">
+                        <span className="gv-stat-mini-label">Người chơi</span>
+                        <span className="gv-stat-mini-value">{g.players}</span>
+                      </div>
+                      <div className="gv-stat-mini">
+                        <span className="gv-stat-mini-label">Phá đảo</span>
+                        <span className="gv-stat-mini-value gv-text-cyan">
+                          {g.completedPlayers}
+                        </span>
+                      </div>
                     </div>
                   </button>
                 );
@@ -1064,7 +1073,7 @@ export function CommunityHub({
                     onClick={() => onGame(g)}
                   >
                     <span className="gv-rank-num">#{rank}</span>
-                    <div className="gv-actions" style={{ gap: 12 }}>
+                    <div className="gv-actions" style={{ gap: 12, minWidth: 0 }}>
                       {img ? (
                         <img
                           className="gv-poster-sm"
@@ -1075,32 +1084,40 @@ export function CommunityHub({
                       ) : (
                         <div className="gv-poster-sm" />
                       )}
-                      <div>
-                        <strong style={{ fontSize: 14, display: "block" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <strong
+                          style={{
+                            fontSize: 14,
+                            display: "block",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
                           {g.title}
                         </strong>
                         <span className="gv-muted" style={{ fontSize: 12 }}>
                           {g.reviewCount > 0
                             ? `${g.reviewCount} lượt đánh giá`
-                            : "Xem cấu hình & đánh giá"}
+                            : "Chưa có lượt đánh giá"}
                         </span>
                       </div>
                     </div>
                     <div className="gv-rank-metrics">
-                      <span className="gv-pill">
-                        <Users size={11} /> {g.players}
-                      </span>
-                      <span className="gv-pill gv-pill-emerald">
-                        <CheckCircle2 size={11} /> {g.completedPlayers}
-                      </span>
                       <span className="gv-pill gv-pill-cyan">
                         <Clock size={11} /> {minutesLabel(g.totalMinutes)}
+                      </span>
+                      <span className="gv-pill">
+                        <Users size={11} /> {g.players} người chơi
+                      </span>
+                      <span className="gv-pill gv-pill-emerald">
+                        <CheckCircle2 size={11} /> {g.completedPlayers} phá đảo
                       </span>
                       {g.averageScore != null && (
                         <span
                           className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}
                         >
-                          <Star size={12} /> {g.averageScore.toFixed(1)}
+                          <Star size={12} /> {g.averageScore.toFixed(1)}/10
                         </span>
                       )}
                     </div>

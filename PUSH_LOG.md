@@ -26,6 +26,19 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 12:46] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Thiết kế lại card Top 3 & danh sách Top game rõ nhãn tiếng Việt (`Giờ chơi`, `Người chơi`, `Phá đảo`, `★ điểm/10`), sửa lỗi CSS specificity làm `.gv-rank-row` bị co giữa, đặt mặc định Top game sắp theo `Tổng giờ chơi` + tie-break theo điểm đánh giá, cập nhật `DesktopCommunity` tự refresh sau khi sync điểm, và bật `share_library = 1` + nạp `community_library` (55 game) cho tài khoản trên production D1.
+- **Thay đổi chính:**
+  - `src/renderer/community/community.css`: Thêm `!important` cho `.gv-rank-row` grid (`44px minmax(0, 1fr) auto`), `min-width: 0; width: 100%; overflow-x: hidden;` cho `.gv-community`/`.gv-stack`, và `.gv-stat-mini-grid` cho Top 3.
+  - `src/renderer/community/CommunityHub.tsx`: Đổi sắp xếp mặc định Top game sang `hours` (`Tổng giờ chơi`), bỏ các pill số `0` tối nghĩa và thay bằng nhãn rõ ràng (`Giờ chơi`, `Người chơi`, `Phá đảo`, `X lượt đánh giá`, `★ X.X/10`).
+  - `src/renderer/community/DesktopCommunity.tsx`: Refresh `reviewVersion` khi `syncReviews()` có `synced > 0 || migrated > 0`.
+  - `worker/src/routes/community.ts`: Sắp xếp tie-break `/rankings` theo `COALESCE(r.averageScore,0) DESC, COALESCE(r.reviewCount,0) DESC`.
+- **Kiểm tra:**
+  - `npx tsc --noEmit -p worker/tsconfig.json`, `npm run build`, `npm run build:admin`, `npm run build:community`: Pass.
+  - `npm test`: **478/478 tests pass** (`96 suites`, `0 fail`, `0 skipped`).
+  - Cloudflare Production (`16cefe57-85f4-4684-ad04-542d07f6399b` & D1 `game-vault-d1`): Đã bật `share_library = 1` và đồng bộ `55` game vào `community_library`; kiểm tra live `/api/community/rankings?sort=hours` đã trả đủ `Crimson Desert` (`220 giờ`, `10 điểm`, `1 phá đảo`), `Sekiro` (`104 giờ`, `10 điểm`), `Red Dead Redemption 2` (`90 giờ`, `10 điểm`), `FFVII Rebirth` (`84 giờ`, `10 điểm`).
+- **Bàn giao / Tiếp theo:** Thoát hẳn app GameVault (kể cả System Tray) rồi mở lại để nạp giao diện Top game mới và xem số liệu thực tế đầy đủ.
+
 ## [2026-11-26 11:39] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Sửa triệt để lỗi không load được ảnh trong tab Cộng đồng Desktop (`community:baseUrl`), tách riêng Bảng tin kiểu Facebook (ẩn review tự động, đặt khung đăng bài lên đầu), sửa layout Podium Top 3 game không bị rớt dòng, lọc trùng bản ghi `t_*` trong Top game (Alan Wake 2), và thêm nút 1-click bật chia sẻ giờ chơi lên BXH.
 - **Thay đổi chính:**
