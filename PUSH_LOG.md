@@ -26,6 +26,16 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 10:41] — Máy: DESKTOP-BU4IIOC — Branch: main
+- **Tóm tắt:** Sửa fallback ngày trong `TimelineView.tsx` để game phá đảo hoặc thiếu session không bị nhảy nhầm sang tháng tạo DB (`created_at`), đồng thời phát sự kiện `game:updated` khi kết thúc phiên chơi trong `main.ts`.
+- **Thay đổi chính:**
+  - `src/renderer/components/TimelineView.tsx`: Gỡ fallback `created_at` ở tab "Tất cả game" và nhánh game chưa có session; với tab game phá đảo chỉ dùng `game.completed_at` thay vì fallback sang `last_played_at`.
+  - `src/main/main.ts`: Gửi IPC `game:updated` về renderer trong `tracker.onSessionClosed` khi session hợp lệ (`!result.discarded && result.gameId`).
+- **Kiểm tra:**
+  - `npm test`: **403/403 tests pass** (`93 suites`, `0 fail`).
+  - `npm run build`: Build Electron main/preload và Vite thành công.
+- **Bàn giao / Tiếp theo:** Máy kia đang có bản sửa đồng bộ `completed_at` trên Cloud (`0002_completed_at.sql`, `library.ts`, `cloud-db.ts`, `TimelineView.tsx`, `library-sync.test.js`) chưa đẩy lên remote — khi máy kia `git pull` cần chú ý ghép `TimelineView.tsx`, sau đó migrate D1, deploy Worker, rồi mở app trên máy `DESKTOP-BU4IIOC` bấm Sync để đẩy toàn bộ `completed_at` lên Cloud.
+
 ## [2026-11-25 10:43] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Chặn triệt để ảnh ngang (landscape) vào slot Poster 2:3 từ gốc ở cả Worker & Desktop, tự động fallback IGDB (Twitch), và nâng cấp bộ lọc nhận diện game chống nhận nhầm IDE / Electron app (`Antigravity-x64`, `Cursor`, `Windsurf`, v.v.).
 - **Thay đổi chính:**

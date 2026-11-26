@@ -185,7 +185,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       const before2020Games: TimelineGameItem[] = [];
 
       for (const game of filteredGamesMap.values()) {
-        const completedDate = game.completed_at || game.last_played_at;
+        const completedDate = game.completed_at;
         const item: TimelineGameItem = {
           game,
           monthPlaytimeMinutes: game.playtime_minutes || 0,
@@ -296,7 +296,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       const before2020Games: TimelineGameItem[] = [];
 
       for (const game of filteredGamesMap.values()) {
-        const refDate = game.completed_at || game.last_played_at || game.created_at;
+        const refDate = game.completed_at || game.last_played_at;
         const item: TimelineGameItem = {
           game,
           monthPlaytimeMinutes: game.playtime_minutes || 0,
@@ -330,8 +330,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         if (isNaN(year) || isNaN(month)) return;
 
         items.sort((a, b) => {
-          const da = a.game.completed_at || a.game.last_played_at || a.game.created_at || '';
-          const db = b.game.completed_at || b.game.last_played_at || b.game.created_at || '';
+          const da = a.game.completed_at || a.game.last_played_at || '';
+          const db = b.game.completed_at || b.game.last_played_at || '';
           return db.localeCompare(da);
         });
 
@@ -435,10 +435,10 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     }
 
     // 2. Fallback for games without sessions (imported from AMD or added manually)
-    // Place them in the month of their last_played_at, completed_at, or created_at
+    // Place them in the month of their last_played_at or completed_at (never created_at)
     for (const game of filteredGamesMap.values()) {
       if (!gamesWithSessions.has(game.id)) {
-        const refDate = game.last_played_at || game.completed_at || game.created_at;
+        const refDate = game.last_played_at || game.completed_at;
         if (!refDate) continue;
         const datePart = refDate.slice(0, 7);
         if (!datePart || datePart.length !== 7 || !datePart.includes('-')) continue;

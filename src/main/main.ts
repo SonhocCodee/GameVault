@@ -1022,6 +1022,14 @@ app.whenReady().then(() => {
   };
   tracker.onSessionClosed = (result) => {
     fpsMonitor.finishCapture(result).catch(() => {});
+    if (!result.discarded && result.gameId) {
+      try {
+        const updated = getGameById(result.gameId);
+        if (updated) {
+          mainWindow?.webContents.send('game:updated', updated);
+        }
+      } catch {}
+    }
   };
   tracker.start((appSettings.pollIntervalSeconds || 5) * 1000);
 
