@@ -9,24 +9,32 @@ export interface PublicProfile {
   nickname: string;
   bio: string;
   avatarUrl?: string | null;
+  bannerUrl?: string | null;
   shareLibrary: boolean;
   suspended?: boolean;
   isAdmin?: boolean;
   blocked?: boolean;
+  totalGames?: number;
+  completedGames?: number;
+  totalMinutes?: number;
   games?: SharedLibraryGame[];
 }
 export interface SharedLibraryGame extends PublicGame {
   status: string;
   playtimeMinutes: number;
+  bannerUrl?: string | null;
   localGameId?: number;
 }
 export interface PlayerRanking {
   uid: string;
   nickname: string;
   avatarUrl?: string | null;
+  bio?: string;
+  bannerUrl?: string | null;
   totalMinutes: number;
   completedGames: number;
   totalGames: number;
+  topGames?: SharedLibraryGame[];
 }
 export interface GamePlayer {
   uid: string;

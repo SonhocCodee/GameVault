@@ -10,9 +10,12 @@ import {
   ExternalLink,
   Gamepad2,
   MessageCircle,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
+  Settings,
+  Share2,
   Shield,
   Sparkles,
   Star,
@@ -148,6 +151,8 @@ export function CommunityHub({
   const [reports, setReports] = useState<Page<ModerationReport>>(empty());
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [confirmSuspendId, setConfirmSuspendId] = useState<string | null>(null);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [profileSubTab, setProfileSubTab] = useState<"activity" | "games">("activity");
 
   const rankingSequence = useRef(0);
   const identitySequence = useRef(0);
@@ -556,139 +561,219 @@ export function CommunityHub({
           onToast={showToast}
         />
       ) : route.profile ? (
-        /* ROUTE: PUBLIC PROFILE */
+        /* ROUTE: PUBLIC PROFILE (Discord / Threads / Facebook Style) */
         <section className="gv-stack">
           <div>
             <button
               type="button"
               className="gv-link"
-              onClick={() => switchTab("feed")}
+              onClick={() => switchTab("players")}
             >
               <ArrowLeft size={15} />
-              Quay lại bảng tin
+              Quay lại
             </button>
           </div>
 
           {profile && (
-            <div className="gv-card gv-stack">
-              <div className="gv-top">
-                <div className="gv-actions" style={{ gap: 14 }}>
-                  <Avatar
-                    name={profile.nickname}
-                    url={profile.avatarUrl}
-                    size={56}
-                  />
-                  <div>
-                    <h2 style={{ fontSize: 22 }}>{profile.nickname}</h2>
-                    <p className="gv-muted">
-                      {profile.bio || "Thành viên GameVault"}
-                    </p>
-                  </div>
-                </div>
-                <div className="gv-actions">
-                  <a
-                    className="gv-button"
-                    href={shareUrl(api.publicBase, "profile", profile.uid)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <ExternalLink size={14} />
-                    Liên kết công khai
-                  </a>
-                  {me && me.uid !== profile.uid && (
-                    <button
-                      type="button"
-                      className="gv-btn-danger"
-                      onClick={() =>
-                        void api
-                          .request(
-                            `/blocks/${encodeURIComponent(profile.uid)}`,
-                            "PUT",
-                          )
-                          .then(() => {
-                            showToast("Đã chặn tài khoản này.");
-                            switchTab("feed");
-                          })
-                          .catch((e) => setError(communityError(e)))
-                      }
-                    >
-                      Chặn tài khoản
-                    </button>
+            <div className="gv-profile-hero">
+              <div className="gv-profile-banner">
+                {profile.bannerUrl &&
+                  qualifyCommunityUrl(api.publicBase, profile.bannerUrl) && (
+                    <img
+                      src={qualifyCommunityUrl(api.publicBase, profile.bannerUrl)}
+                      alt=""
+                    />
                   )}
-                </div>
+                <div className="gv-profile-banner-fade" />
               </div>
 
-              <div className="gv-stack-sm">
-                <h3>Thư viện game đã chia sẻ</h3>
-                {profile.shareLibrary ? (
-                  profile.games?.length ? (
-                    <div className="gv-results">
-                      {profile.games.map((g) => (
-                        <button
-                          type="button"
-                          className="gv-result"
-                          key={g.gameKey}
-                          onClick={() => onGame(g)}
-                        >
-                          {g.coverUrl &&
-                            qualifyCommunityUrl(api.publicBase, g.coverUrl) && (
-                              <img
-                                className="gv-poster-sm"
-                                src={qualifyCommunityUrl(
-                                  api.publicBase,
-                                  g.coverUrl,
-                                )}
-                                alt=""
-                                loading="lazy"
-                              />
-                            )}
-                          <div>
-                            <strong style={{ display: "block", fontSize: 13 }}>
-                              {g.title}
-                            </strong>
-                            <span className="gv-muted" style={{ fontSize: 12 }}>
-                              {minutesLabel(g.playtimeMinutes)} ·{" "}
-                              {g.status === "completed"
-                                ? "Đã phá đảo"
-                                : g.status === "playing"
-                                  ? "Đang chơi"
-                                  : g.status === "backlog"
-                                    ? "Chờ chơi"
-                                    : g.status === "dropped"
-                                      ? "Đã bỏ"
-                                      : "Tạm dừng"}
-                            </span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="gv-muted">Chưa có game nào được chia sẻ.</p>
-                  )
-                ) : (
-                  <p className="gv-muted">
-                    Người chơi này đang giữ riêng tư thư viện.
+              <div className="gv-profile-body">
+                <div className="gv-profile-top-row">
+                  <div className="gv-profile-avatar-wrap">
+                    <Avatar
+                      name={profile.nickname}
+                      url={profile.avatarUrl}
+                      size={84}
+                    />
+                  </div>
+                  <div className="gv-actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void navigator.clipboard
+                          .writeText(shareUrl(api.publicBase, "profile", profile.uid))
+                          .then(() => showToast("Đã sao chép liên kết hồ sơ."))
+                          .catch(() => {})
+                      }
+                    >
+                      <Share2 size={14} /> Chia sẻ
+                    </button>
+                    <a
+                      className="gv-button"
+                      href={shareUrl(api.publicBase, "profile", profile.uid)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={14} />
+                    </a>
+                    {me && me.uid !== profile.uid && (
+                      <button
+                        type="button"
+                        className="gv-btn-danger"
+                        onClick={() =>
+                          void api
+                            .request(
+                              `/blocks/${encodeURIComponent(profile.uid)}`,
+                              "PUT",
+                            )
+                            .then(() => {
+                              showToast("Đã chặn tài khoản này.");
+                              switchTab("feed");
+                            })
+                            .catch((e) => setError(communityError(e)))
+                        }
+                      >
+                        Chặn
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="gv-stack-sm">
+                  <div className="gv-actions" style={{ gap: 10 }}>
+                    <h2 style={{ fontSize: 24 }}>{profile.nickname}</h2>
+                    {profile.shareLibrary && (
+                      <span className="gv-pill gv-pill-emerald">
+                        Công khai thư viện
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ color: "#cbd5e1", fontSize: 14 }}>
+                    {profile.bio || "Thành viên cộng đồng GameVault"}
                   </p>
+                </div>
+
+                {profile.shareLibrary && (
+                  <div className="gv-profile-stats-row">
+                    <span className="gv-pill gv-pill-emerald">
+                      <CheckCircle2 size={13} />
+                      {profile.completedGames ?? 0} đã phá đảo
+                    </span>
+                    <span className="gv-pill gv-pill-cyan">
+                      <Clock size={13} />
+                      {minutesLabel(profile.totalMinutes ?? 0)}
+                    </span>
+                    <span className="gv-pill">
+                      <Gamepad2 size={13} />
+                      {profile.totalGames ?? profile.games?.length ?? 0} game
+                    </span>
+                  </div>
                 )}
               </div>
             </div>
           )}
 
-          <h2>Bài viết của {profile?.nickname || "người chơi"}</h2>
-          <div className="gv-feed-grid">
-            {feed.items.map((p) => (
-              <PostCard
-                key={p.id}
-                post={p}
-                api={api}
-                me={me}
-                onChanged={() => void refreshPost(p.id)}
-                onGame={onGame}
-                onProfile={onProfile}
-                onToast={showToast}
-              />
-            ))}
+          <div className="gv-chip-row">
+            <button
+              type="button"
+              className={`gv-chip ${profileSubTab === "activity" ? "active" : ""}`}
+              onClick={() => setProfileSubTab("activity")}
+            >
+              Bài viết ({feed.items.length})
+            </button>
+            <button
+              type="button"
+              className={`gv-chip ${profileSubTab === "games" ? "active" : ""}`}
+              onClick={() => setProfileSubTab("games")}
+            >
+              Thư viện game ({profile?.games?.length || 0})
+            </button>
           </div>
+
+          {profileSubTab === "activity" ? (
+            <div className="gv-feed-grid">
+              {feed.items.length === 0 ? (
+                <div className="gv-empty">
+                  <p>Người chơi này chưa đăng bài viết nào.</p>
+                </div>
+              ) : (
+                feed.items.map((p) => (
+                  <PostCard
+                    key={p.id}
+                    post={p}
+                    api={api}
+                    me={me}
+                    onChanged={() => void refreshPost(p.id)}
+                    onGame={onGame}
+                    onProfile={onProfile}
+                    onToast={showToast}
+                  />
+                ))
+              )}
+            </div>
+          ) : profile?.shareLibrary ? (
+            profile.games?.length ? (
+              <div className="gv-profile-games-grid">
+                {profile.games.map((g) => {
+                  const img = g.coverUrl
+                    ? qualifyCommunityUrl(api.publicBase, g.coverUrl)
+                    : "";
+                  return (
+                    <button
+                      type="button"
+                      className="gv-profile-game-card"
+                      key={g.gameKey}
+                      onClick={() => onGame(g)}
+                    >
+                      {img ? (
+                        <img
+                          className="gv-poster-sm"
+                          src={img}
+                          alt=""
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="gv-poster-sm" />
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <strong
+                          style={{
+                            display: "block",
+                            fontSize: 13,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {g.title}
+                        </strong>
+                        <span className="gv-muted" style={{ fontSize: 12 }}>
+                          {minutesLabel(g.playtimeMinutes)} ·{" "}
+                          {g.status === "completed"
+                            ? "Đã phá đảo"
+                            : g.status === "playing"
+                              ? "Đang chơi"
+                              : g.status === "backlog"
+                                ? "Chờ chơi"
+                                : g.status === "dropped"
+                                  ? "Đã bỏ"
+                                  : "Tạm dừng"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="gv-empty">
+                <p>Chưa có game nào được chia sẻ.</p>
+              </div>
+            )
+          ) : (
+            <div className="gv-empty">
+              <p>Người chơi này đang giữ riêng tư thư viện.</p>
+            </div>
+          )}
         </section>
       ) : tab === "feed" || route.post ? (
         /* TAB: BẢNG TIN (Kiểu mạng xã hội — chỉ bài đăng của người chơi, review nằm trong từng game) */
@@ -880,6 +965,7 @@ export function CommunityHub({
           api={api}
           myUid={me?.uid}
           onProfile={onProfile}
+          onGame={onGame}
           onShareLibrary={() => switchTab("profile")}
         />
       ) : tab === "discover" ? (
@@ -1152,18 +1238,59 @@ export function CommunityHub({
           )}
         </section>
       ) : tab === "profile" ? (
-        /* TAB: HỒ SƠ */
+        /* TAB: HỒ SƠ CÁ NHÂN (Discord / Threads / Facebook Profile Style) */
         me ? (
-          <div className="gv-two-col">
-            <div className="gv-stack">
-              <div className="gv-card gv-stack">
-                <div className="gv-actions" style={{ gap: 14 }}>
-                  <Avatar name={me.nickname} url={me.avatarUrl} size={52} />
-                  <div>
-                    <h2>{me.nickname}</h2>
-                    <p className="gv-muted">
-                      Cấu hình hiển thị công khai và đồng bộ lên bảng xếp hạng.
-                    </p>
+          <section className="gv-stack">
+            <div className="gv-profile-hero">
+              <div className="gv-profile-banner">
+                {me.bannerUrl &&
+                  qualifyCommunityUrl(api.publicBase, me.bannerUrl) && (
+                    <img
+                      src={qualifyCommunityUrl(api.publicBase, me.bannerUrl)}
+                      alt=""
+                    />
+                  )}
+                <div className="gv-profile-banner-fade" />
+              </div>
+
+              <div className="gv-profile-body">
+                <div className="gv-profile-top-row">
+                  <div className="gv-profile-avatar-wrap">
+                    <Avatar
+                      name={me.nickname}
+                      url={me.avatarUrl}
+                      size={88}
+                    />
+                  </div>
+                  <div className="gv-actions">
+                    <button
+                      type="button"
+                      className="gv-primary"
+                      onClick={() => setEditProfileOpen(true)}
+                    >
+                      <Pencil size={14} />
+                      Chỉnh sửa hồ sơ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void navigator.clipboard
+                          .writeText(shareUrl(api.publicBase, "profile", me.uid))
+                          .then(() => showToast("Đã sao chép liên kết hồ sơ."))
+                          .catch(() => {})
+                      }
+                    >
+                      <Share2 size={14} />
+                      Chia sẻ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onProfile(me.uid)}
+                      title="Xem dưới góc nhìn người khác"
+                    >
+                      <ExternalLink size={14} />
+                      Xem công khai
+                    </button>
                   </div>
                 </div>
 
@@ -1173,140 +1300,299 @@ export function CommunityHub({
                   </p>
                 )}
 
-                <form
-                  className="gv-stack"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    setLoading(true);
-                    void api
-                      .request("/me", "PUT", {
-                        nickname,
-                        bio,
-                        shareLibrary,
-                      })
-                      .then(() => {
-                        showToast("Đã lưu hồ sơ cộng đồng.");
-                        return loadMe();
-                      })
-                      .catch((e) => setError(communityError(e)))
-                      .finally(() => setLoading(false));
-                  }}
-                >
-                  <label>
-                    Biệt danh hiển thị
-                    <input
-                      required
-                      maxLength={60}
-                      value={nickname}
-                      onChange={(e) => setNickname(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Giới thiệu ngắn
-                    <textarea
-                      rows={3}
-                      maxLength={300}
-                      value={bio}
-                      onChange={(e) => setBio(e.target.value)}
-                      placeholder="Thể loại game yêu thích, cấu hình PC, gu chơi..."
-                    />
-                  </label>
-                  <label className="gv-check">
-                    <input
-                      type="checkbox"
-                      checked={shareLibrary}
-                      onChange={(e) => setShareLibrary(e.target.checked)}
-                    />
-                    Công khai thư viện, số game phá đảo và giờ chơi lên BXH.
-                  </label>
-                  <p className="gv-muted" style={{ fontSize: 12 }}>
-                    Email cá nhân, đường dẫn file trên máy và save game luôn
-                    được giữ riêng tư tuyệt đối.
-                  </p>
-                  <div className="gv-actions">
-                    <button
-                      type="submit"
-                      className="gv-primary"
-                      disabled={loading || identityUnavailable}
+                <div className="gv-stack-sm">
+                  <div className="gv-actions" style={{ gap: 10 }}>
+                    <h2 style={{ fontSize: 24 }}>{me.nickname}</h2>
+                    <span
+                      className={`gv-pill ${me.shareLibrary ? "gv-pill-emerald" : ""}`}
                     >
-                      Lưu hồ sơ
-                    </button>
-                    <button type="button" onClick={() => onProfile(me.uid)}>
-                      Xem hồ sơ công khai
-                    </button>
+                      {me.shareLibrary ? "Đang công khai BXH" : "Thư viện riêng tư"}
+                    </span>
                   </div>
-                </form>
-              </div>
+                  <p style={{ color: "#cbd5e1", fontSize: 14 }}>
+                    {me.bio || "Chưa có giới thiệu. Bấm \"Chỉnh sửa hồ sơ\" để thêm mô tả cá nhân hoặc cấu hình PC của bạn."}
+                  </p>
+                </div>
 
-              <div className="gv-card gv-stack-sm">
-                <h3>Tài khoản đã chặn ({blocked.length})</h3>
-                {blocked.length ? (
-                  blocked.map((b) => (
-                    <div className="gv-top" key={b.uid}>
-                      <span>{b.nickname || "Người chơi"}</span>
-                      <button
-                        type="button"
-                        className="gv-link"
-                        onClick={() =>
-                          void api
-                            .request(
-                              `/blocks/${encodeURIComponent(b.uid)}`,
-                              "DELETE",
-                            )
-                            .then(() => {
-                              setBlocked(blocked.filter((x) => x.uid !== b.uid));
-                              showToast("Đã bỏ chặn.");
-                            })
-                            .catch((e) => setError(communityError(e)))
-                        }
-                      >
-                        Bỏ chặn
-                      </button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="gv-muted">Bạn chưa chặn tài khoản nào.</p>
-                )}
-              </div>
-
-              <div className="gv-card gv-stack-sm">
-                <h3>Dọn dẹp dữ liệu cộng đồng</h3>
-                <p className="gv-muted">
-                  Thư viện game và save cá nhân của bạn sẽ không bị ảnh hưởng.
-                </p>
-                <div className="gv-actions">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void api
-                        .request("/uploads", "DELETE")
-                        .then(() => showToast("Đã dọn các ảnh nháp chưa đăng."))
-                        .catch((e) => setError(communityError(e)))
-                    }
-                  >
-                    Dọn ảnh nháp
-                  </button>
-                  <button
-                    type="button"
-                    className="gv-btn-danger"
-                    onClick={() => setConfirmWipe(true)}
-                  >
-                    <Trash2 size={14} />
-                    Xóa toàn bộ dữ liệu cộng đồng
-                  </button>
+                <div className="gv-profile-stats-row">
+                  <span className="gv-pill gv-pill-emerald">
+                    <CheckCircle2 size={13} />
+                    {me.completedGames ?? games.filter((g) => g.status === "completed").length} đã phá đảo
+                  </span>
+                  <span className="gv-pill gv-pill-cyan">
+                    <Clock size={13} />
+                    {minutesLabel(
+                      me.totalMinutes ??
+                        games.reduce((s, g) => s + (g.playtimeMinutes || 0), 0),
+                    )}
+                  </span>
+                  <span className="gv-pill">
+                    <Gamepad2 size={13} />
+                    {me.totalGames ?? games.length} game trong thư viện
+                  </span>
                 </div>
               </div>
             </div>
 
-            <ProfileActivity
-              key={me.uid}
-              api={api}
-              me={me}
-              onGame={onGame}
-              onProfile={onProfile}
-              onPost={(post) => navigate({ post })}
-              onToast={showToast}
-            />
+            <div className="gv-chip-row">
+              <button
+                type="button"
+                className={`gv-chip ${profileSubTab === "activity" ? "active" : ""}`}
+                onClick={() => setProfileSubTab("activity")}
+              >
+                Lịch sử hoạt động
+              </button>
+              <button
+                type="button"
+                className={`gv-chip ${profileSubTab === "games" ? "active" : ""}`}
+                onClick={() => setProfileSubTab("games")}
+              >
+                Thư viện của tôi ({games.length})
+              </button>
+            </div>
+
+            {profileSubTab === "activity" ? (
+              <ProfileActivity
+                key={me.uid}
+                api={api}
+                me={me}
+                onGame={onGame}
+                onProfile={onProfile}
+                onPost={(post) => navigate({ post })}
+                onToast={showToast}
+              />
+            ) : games.length > 0 ? (
+              <div className="gv-profile-games-grid">
+                {[...games]
+                  .sort((a, b) => (b.playtimeMinutes || 0) - (a.playtimeMinutes || 0))
+                  .map((g) => {
+                    const img = g.coverUrl
+                      ? qualifyCommunityUrl(api.publicBase, g.coverUrl)
+                      : "";
+                    return (
+                      <button
+                        type="button"
+                        className="gv-profile-game-card"
+                        key={g.gameKey}
+                        onClick={() => onGame(g)}
+                      >
+                        {img ? (
+                          <img
+                            className="gv-poster-sm"
+                            src={img}
+                            alt=""
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="gv-poster-sm" />
+                        )}
+                        <div style={{ minWidth: 0 }}>
+                          <strong
+                            style={{
+                              display: "block",
+                              fontSize: 13,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {g.title}
+                          </strong>
+                          <span className="gv-muted" style={{ fontSize: 12 }}>
+                            {minutesLabel(g.playtimeMinutes)} ·{" "}
+                            {g.status === "completed"
+                              ? "Đã phá đảo"
+                              : g.status === "playing"
+                                ? "Đang chơi"
+                                : g.status === "backlog"
+                                  ? "Chờ chơi"
+                                  : g.status === "dropped"
+                                    ? "Đã bỏ"
+                                    : "Tạm dừng"}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            ) : (
+              <div className="gv-empty">
+                <p>Chưa có game nào trong thư viện.</p>
+              </div>
+            )}
+
+            {/* Edit Profile & Privacy Modal */}
+            {editProfileOpen && (
+              <div
+                className="gv-modal-backdrop"
+                role="dialog"
+                aria-modal="true"
+                onClick={() => setEditProfileOpen(false)}
+              >
+                <div
+                  className="gv-modal"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="gv-modal-head">
+                    <div className="gv-modal-title">
+                      <Settings size={18} className="gv-text-cyan" />
+                      <h3>Chỉnh sửa hồ sơ &amp; Quyền riêng tư</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="gv-icon-btn"
+                      onClick={() => setEditProfileOpen(false)}
+                      aria-label="Đóng"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <form
+                    className="gv-stack"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      setLoading(true);
+                      void api
+                        .request("/me", "PUT", {
+                          nickname,
+                          bio,
+                          shareLibrary,
+                        })
+                        .then(() => {
+                          setEditProfileOpen(false);
+                          showToast("Đã cập nhật hồ sơ.");
+                          return loadMe();
+                        })
+                        .catch((e) => setError(communityError(e)))
+                        .finally(() => setLoading(false));
+                    }}
+                  >
+                    <label>
+                      Biệt danh hiển thị
+                      <input
+                        required
+                        maxLength={60}
+                        value={nickname}
+                        onChange={(e) => setNickname(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Giới thiệu ngắn
+                      <textarea
+                        rows={3}
+                        maxLength={300}
+                        value={bio}
+                        onChange={(e) => setBio(e.target.value)}
+                        placeholder="Thể loại game yêu thích, cấu hình PC, gu chơi..."
+                      />
+                    </label>
+                    <label className="gv-check">
+                      <input
+                        type="checkbox"
+                        checked={shareLibrary}
+                        onChange={(e) => setShareLibrary(e.target.checked)}
+                      />
+                      Công khai thư viện, số game phá đảo và giờ chơi lên BXH.
+                    </label>
+                    <p className="gv-muted" style={{ fontSize: 12 }}>
+                      Email cá nhân, đường dẫn file trên máy và save game luôn
+                      được giữ riêng tư tuyệt đối.
+                    </p>
+                    <div className="gv-modal-actions">
+                      <button
+                        type="button"
+                        onClick={() => setEditProfileOpen(false)}
+                      >
+                        Đóng
+                      </button>
+                      <button
+                        type="submit"
+                        className="gv-primary"
+                        disabled={loading || identityUnavailable}
+                      >
+                        {loading ? "Đang lưu…" : "Lưu thay đổi"}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div
+                    className="gv-stack-sm"
+                    style={{
+                      paddingTop: 14,
+                      borderTop: "1px solid var(--gv-border)",
+                    }}
+                  >
+                    <h3>Tài khoản đã chặn ({blocked.length})</h3>
+                    {blocked.length ? (
+                      blocked.map((b) => (
+                        <div className="gv-top" key={b.uid}>
+                          <span>{b.nickname || "Người chơi"}</span>
+                          <button
+                            type="button"
+                            className="gv-link"
+                            onClick={() =>
+                              void api
+                                .request(
+                                  `/blocks/${encodeURIComponent(b.uid)}`,
+                                  "DELETE",
+                                )
+                                .then(() => {
+                                  setBlocked(
+                                    blocked.filter((x) => x.uid !== b.uid),
+                                  );
+                                  showToast("Đã bỏ chặn.");
+                                })
+                                .catch((e) => setError(communityError(e)))
+                            }
+                          >
+                            Bỏ chặn
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="gv-muted">Chưa chặn tài khoản nào.</p>
+                    )}
+                  </div>
+
+                  <div
+                    className="gv-stack-sm"
+                    style={{
+                      paddingTop: 14,
+                      borderTop: "1px solid var(--gv-border)",
+                    }}
+                  >
+                    <h3>Dọn dẹp dữ liệu cộng đồng</h3>
+                    <div className="gv-actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void api
+                            .request("/uploads", "DELETE")
+                            .then(() =>
+                              showToast("Đã dọn các ảnh nháp chưa đăng."),
+                            )
+                            .catch((e) => setError(communityError(e)))
+                        }
+                      >
+                        Dọn ảnh nháp
+                      </button>
+                      <button
+                        type="button"
+                        className="gv-btn-danger"
+                        onClick={() => {
+                          setEditProfileOpen(false);
+                          setConfirmWipe(true);
+                        }}
+                      >
+                        <Trash2 size={14} />
+                        Xóa toàn bộ dữ liệu cộng đồng
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <ConfirmModal
               open={confirmWipe}
@@ -1329,7 +1615,7 @@ export function CommunityHub({
                   .finally(() => setLoading(false));
               }}
             />
-          </div>
+          </section>
         ) : (
           <div className="gv-empty">
             <h3>Đăng nhập để thiết lập hồ sơ cộng đồng</h3>

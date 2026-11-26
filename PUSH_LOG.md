@@ -26,6 +26,35 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-26 12:51] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- Thiết kế lại trang **Hồ sơ** (`Hồ sơ` tab & public profile) theo phong cách Discord / Threads / Facebook: cover banner (từ game chơi nhiều nhất), avatar chồng lên banner (`referrerPolicy="no-referrer"`), bio, thống kê (`Thư viện`, `Đã phá đảo`, `Giờ chơi`), sub-tabs (`Lịch sử hoạt động` | `Thư viện của tôi`), và nút **"Chỉnh sửa hồ sơ"** mở modal chỉnh sửa/riêng tư (không còn hiện form + nút "Lưu hồ sơ" thường trực).
+- Thiết kế lại **Top người chơi** (`PlayerBoard.tsx`): thẻ player có cover banner, avatar, thống kê, game top #1, và hover để xem preview Top 3 game chơi nhiều giờ nhất (poster, tên, giờ chơi, trạng thái).
+- Làm sạch **Lịch sử hoạt động** (`ProfileActivity.tsx` + `PostCard.tsx` prop `hideSave`): chỉ hiển thị lịch sử bài đăng và bình luận của bản thân, bỏ nút "Lưu" dư thừa.
+- Bổ sung dữ liệu Worker (`worker/src/routes/community.ts` & `src/shared/community.ts`): trả `bannerUrl` + tổng thống kê ở `/me` và `/profiles/:uid`, và trả `bio`, `bannerUrl`, `topGames` ở `/players?includeTopGames=1` (giữ nguyên payload mặc định cho backward-compatibility).
+- Khắc phục tải avatar Google (`Avatar` dùng `referrerPolicy="no-referrer"` và giữ fallback `photoUrl` từ shell auth trong `identity.ts`).
+
+### File chính đã thay đổi
+- `src/shared/community.ts`
+- `worker/src/routes/community.ts`
+- `src/renderer/community/CommunityWidgets.tsx`
+- `src/renderer/community/identity.ts`
+- `src/renderer/community/PostCard.tsx`
+- `src/renderer/community/ProfileActivity.tsx`
+- `src/renderer/community/PlayerBoard.tsx`
+- `src/renderer/community/CommunityHub.tsx`
+- `src/renderer/community/community.css`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass (exit 0).
+- `npm run build` / `npm run build:admin` / `npm run build:community`: Pass.
+- `npm test`: **478 pass / 0 fail / 0 skipped** (96 suites).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Đã deploy Worker + `/community/` assets lên Cloudflare (`game-vault-worker`).
+- Thoát hẳn GameVault Desktop (kể cả System Tray) và mở lại để nạp bản build UI mới.
+
 ## [2026-11-26 12:46] — Máy: DESKTOP-BU4IIOC — Branch: main
 - **Tóm tắt:** Thiết kế lại card Top 3 & danh sách Top game rõ nhãn tiếng Việt (`Giờ chơi`, `Người chơi`, `Phá đảo`, `★ điểm/10`), sửa lỗi CSS specificity làm `.gv-rank-row` bị co giữa, đặt mặc định Top game sắp theo `Tổng giờ chơi` + tie-break theo điểm đánh giá, cập nhật `DesktopCommunity` tự refresh sau khi sync điểm, và bật `share_library = 1` + nạp `community_library` (55 game) cho tài khoản trên production D1.
 - **Thay đổi chính:**

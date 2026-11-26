@@ -1,22 +1,37 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Award, CheckCircle2, Clock, Gamepad2, RefreshCw, Trophy } from "lucide-react";
+import {
+  Award,
+  CheckCircle2,
+  Clock,
+  Gamepad2,
+  RefreshCw,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 import type {
   CommunityAdapter,
   Page,
   PlayerRanking,
+  PublicGame,
 } from "../../shared/community.ts";
-import { communityError, minutesLabel } from "./client.ts";
+import {
+  communityError,
+  minutesLabel,
+  qualifyCommunityUrl,
+} from "./client.ts";
 import { Avatar } from "./CommunityWidgets.tsx";
 
 export function PlayerBoard({
   api,
   myUid,
   onProfile,
+  onGame,
   onShareLibrary,
 }: {
   api: CommunityAdapter;
   myUid?: string;
   onProfile: (uid: string) => void;
+  onGame?: (g: PublicGame) => void;
   onShareLibrary: () => void;
 }) {
   const [sort, setSort] = useState("completed");
@@ -27,6 +42,7 @@ export function PlayerBoard({
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hoveredUid, setHoveredUid] = useState<string | null>(null);
   const ticket = useRef(0);
 
   const load = async (more = false) => {
@@ -35,7 +51,7 @@ export function PlayerBoard({
     setError("");
     try {
       const data = await api.request<Page<PlayerRanking>>(
-        `/players?sort=${sort}&offset=${more ? board.nextOffset : 0}`,
+        `/players?sort=${sort}&includeTopGames=1&offset=${more ? board.nextOffset : 0}`,
       );
       if (current !== ticket.current) return;
       setBoard((previous) => ({
@@ -57,22 +73,19 @@ export function PlayerBoard({
     };
   }, [api, sort, myUid]);
 
-  const top3 = board.items.slice(0, 3);
-  const rest = board.items.slice(3);
-
   return (
     <section className="gv-stack">
       <div className="gv-top">
         <div>
           <h2>Top người chơi GameVault</h2>
           <p className="gv-muted">
-            Thành tích từ thư viện được người chơi chủ động công khai.
+            Di chuột vào thẻ người chơi để xem nhanh những tựa game họ chơi nhiều giờ nhất.
           </p>
         </div>
         <div className="gv-actions">
           <button type="button" onClick={onShareLibrary}>
             <Award size={15} />
-            Tham gia BXH
+            Hồ sơ của tôi
           </button>
           <button type="button" disabled={loading} onClick={() => void load()}>
             <RefreshCw size={15} />
@@ -113,91 +126,179 @@ export function PlayerBoard({
         </p>
       )}
 
-      {top3.length > 0 && (
-        <div className="gv-podium-grid">
-          {top3.map((player, index) => (
-            <button
-              type="button"
-              key={player.uid}
-              className={`gv-podium-card rank-${index + 1}`}
-              onClick={() => onProfile(player.uid)}
-            >
-              <div className="gv-top">
-                <span
-                  className={`gv-pill ${
-                    index === 0
-                      ? "gv-pill-amber"
-                      : index === 1
-                        ? "gv-pill-cyan"
-                        : "gv-pill-accent"
-                  }`}
+      {board.items.length > 0 && (
+        <div className="gv-player-grid">
+          {board.items.map((player, index) => {
+            const banner = player.bannerUrl
+              ? qualifyCommunityUrl(api.publicBase, player.bannerUrl)
+              : "";
+            const topGames = player.topGames || [];
+            const topOne = topGames[0];
+            const isHovered = hoveredUid === player.uid;
+            const rankClass =
+              index === 0
+                ? "gv-pill-amber"
+                : index === 1
+                  ? "gv-pill-cyan"
+                  : index === 2
+                    ? "gv-pill-accent"
+                    : "";
+
+            return (
+              <div
+                key={player.uid}
+                className={`gv-player-card ${index < 3 ? `rank-${index + 1}` : ""}`}
+                onMouseEnter={() => setHoveredUid(player.uid)}
+                onMouseLeave={() =>
+                  setHoveredUid((cur) => (cur === player.uid ? null : cur))
+                }
+              >
+                <div
+                  className="gv-player-banner"
+                  onClick={() => onProfile(player.uid)}
                 >
-                  <Trophy size={12} />
-                  Hạng #{index + 1}
-                </span>
-                {player.uid === myUid && (
-                  <span className="gv-pill gv-pill-emerald">Bạn</span>
+                  {banner ? (
+                    <img src={banner} alt="" loading="lazy" />
+                  ) : (
+                    <div className="gv-player-banner-fallback" />
+                  )}
+                  <div className="gv-player-banner-overlay" />
+                  <div className="gv-player-banner-badges">
+                    <span className={`gv-pill ${rankClass}`}>
+                      <Trophy size={12} /> Hạng #{index + 1}
+                    </span>
+                    {player.uid === myUid && (
+                      <span className="gv-pill gv-pill-emerald">Bạn</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="gv-player-card-body">
+                  <div className="gv-player-avatar-row">
+                    <div
+                      className="gv-player-avatar-ring"
+                      onClick={() => onProfile(player.uid)}
+                    >
+                      <Avatar
+                        name={player.nickname}
+                        url={player.avatarUrl}
+                        size={60}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="gv-link"
+                      style={{ marginLeft: "auto", fontSize: 12 }}
+                      onClick={() => onProfile(player.uid)}
+                    >
+                      Xem hồ sơ →
+                    </button>
+                  </div>
+
+                  <div
+                    style={{ cursor: "pointer" }}
+                    onClick={() => onProfile(player.uid)}
+                  >
+                    <h3 style={{ fontSize: 17 }}>{player.nickname}</h3>
+                    <p
+                      className="gv-muted"
+                      style={{
+                        fontSize: 12,
+                        marginTop: 2,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {player.bio || "Thành viên cộng đồng GameVault"}
+                    </p>
+                  </div>
+
+                  <div className="gv-stat-mini-grid">
+                    <div className="gv-stat-mini">
+                      <span className="gv-stat-mini-label">Phá đảo</span>
+                      <span className="gv-stat-mini-value gv-text-emerald">
+                        {player.completedGames}
+                      </span>
+                    </div>
+                    <div className="gv-stat-mini">
+                      <span className="gv-stat-mini-label">Giờ chơi</span>
+                      <span className="gv-stat-mini-value gv-text-cyan">
+                        {minutesLabel(player.totalMinutes)}
+                      </span>
+                    </div>
+                    <div className="gv-stat-mini">
+                      <span className="gv-stat-mini-label">Thư viện</span>
+                      <span className="gv-stat-mini-value">
+                        {player.totalGames} game
+                      </span>
+                    </div>
+                  </div>
+
+                  {topOne && (
+                    <div className="gv-player-top1">
+                      <Sparkles size={13} className="gv-text-amber" />
+                      <span className="gv-muted" style={{ fontSize: 12 }}>
+                        Chơi nhiều nhất:{" "}
+                        <strong style={{ color: "#f1f3f7" }}>
+                          {topOne.title}
+                        </strong>{" "}
+                        ({minutesLabel(topOne.playtimeMinutes)})
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Hover Preview Drawer: Top 3 Most-Played Games */}
+                {isHovered && topGames.length > 0 && (
+                  <div className="gv-player-hover-preview">
+                    <div className="gv-muted" style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      Top game chơi nhiều giờ nhất
+                    </div>
+                    {topGames.map((tg, i) => {
+                      const cover = tg.coverUrl
+                        ? qualifyCommunityUrl(api.publicBase, tg.coverUrl)
+                        : "";
+                      return (
+                        <button
+                          type="button"
+                          key={tg.gameKey}
+                          className="gv-hover-game-row"
+                          onClick={() => (onGame ? onGame(tg) : onProfile(player.uid))}
+                        >
+                          <span className="gv-muted" style={{ fontWeight: 800, width: 18 }}>
+                            #{i + 1}
+                          </span>
+                          {cover ? (
+                            <img src={cover} alt="" />
+                          ) : (
+                            <div className="gv-hover-game-ph" />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                            <strong
+                              style={{
+                                display: "block",
+                                fontSize: 12,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {tg.title}
+                            </strong>
+                            <span className="gv-muted" style={{ fontSize: 11 }}>
+                              {minutesLabel(tg.playtimeMinutes)}
+                              {tg.status === "completed" ? " · Đã phá đảo" : ""}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-              <div className="gv-actions" style={{ gap: 12 }}>
-                <Avatar name={player.nickname} url={player.avatarUrl} size={44} />
-                <div>
-                  <h3 style={{ fontSize: 16 }}>{player.nickname}</h3>
-                  <span className="gv-muted">
-                    {player.totalGames} game trong thư viện
-                  </span>
-                </div>
-              </div>
-              <div className="gv-actions" style={{ gap: 8 }}>
-                <span className="gv-pill gv-pill-emerald">
-                  <CheckCircle2 size={12} />
-                  {player.completedGames} phá đảo
-                </span>
-                <span className="gv-pill gv-pill-cyan">
-                  <Clock size={12} />
-                  {minutesLabel(player.totalMinutes)}
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {rest.length > 0 && (
-        <div className="gv-rank-list">
-          {rest.map((player, index) => (
-            <button
-              type="button"
-              className="gv-rank-row"
-              key={player.uid}
-              onClick={() => onProfile(player.uid)}
-            >
-              <span className="gv-rank-num">#{index + 4}</span>
-              <div className="gv-actions" style={{ gap: 12 }}>
-                <Avatar name={player.nickname} url={player.avatarUrl} size={36} />
-                <div>
-                  <strong style={{ fontSize: 14 }}>
-                    {player.nickname}
-                    {player.uid === myUid ? " (Bạn)" : ""}
-                  </strong>
-                </div>
-              </div>
-              <div className="gv-rank-metrics">
-                <span className="gv-pill gv-pill-emerald">
-                  <CheckCircle2 size={12} />
-                  {player.completedGames} phá đảo
-                </span>
-                <span className="gv-pill gv-pill-cyan">
-                  <Clock size={12} />
-                  {minutesLabel(player.totalMinutes)}
-                </span>
-                <span className="gv-pill">
-                  <Gamepad2 size={12} />
-                  {player.totalGames} game
-                </span>
-              </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -203,14 +203,35 @@ export function registerCommunityRoutes(router: Router) {
     )
       .bind(user.uid)
       .first<any>();
+    const statsRow = await env.DB.prepare(
+      `SELECT COUNT(*) AS totalGames,
+        SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completedGames,
+        SUM(playtime_minutes) AS totalMinutes
+      FROM user_library WHERE uid=? AND is_deleted=0`,
+    )
+      .bind(user.uid)
+      .first<any>();
+    const topBanner = await env.DB.prepare(
+      `SELECT COALESCE(gc.banner_url, ul.banner_url, gc.cover_url, ul.cover_url) AS banner_url
+      FROM user_library ul
+      LEFT JOIN game_covers gc ON gc.game_key = LOWER(CASE WHEN ul.steam_id>0 THEN CAST(ul.steam_id AS TEXT) ELSE ul.game_key END)
+      WHERE ul.uid=? AND ul.is_deleted=0
+      ORDER BY ul.playtime_minutes DESC LIMIT 1`,
+    )
+      .bind(user.uid)
+      .first<any>();
     return jsonResponse({
       uid: user.uid,
       nickname: safeName(p.nickname),
       bio: p.bio,
       avatarUrl: publicUrl(p.avatar_url || user.photoUrl),
+      bannerUrl: publicUrl(topBanner?.banner_url),
       shareLibrary: !!p.share_library,
       suspended: !!p.suspended,
       isAdmin: isAdminUser(user, env),
+      totalGames: Number(statsRow?.totalGames || 0),
+      completedGames: Number(statsRow?.completedGames || 0),
+      totalMinutes: Number(statsRow?.totalMinutes || 0),
     });
   });
   add("PUT", "/me", async (request, env) => {
@@ -298,23 +319,34 @@ export function registerCommunityRoutes(router: Router) {
     const games = p.share_library
       ? (
           await env.DB.prepare(
-            "SELECT * FROM community_library WHERE uid=? ORDER BY playtime_minutes DESC LIMIT 200",
+            `SELECT l.*, COALESCE(gc.cover_url, l.cover_url) AS resolved_cover, gc.banner_url AS resolved_banner
+            FROM community_library l
+            LEFT JOIN game_covers gc ON gc.game_key = LOWER(l.game_key)
+            WHERE l.uid=? ORDER BY l.playtime_minutes DESC LIMIT 200`,
           )
             .bind(uid)
             .all<any>()
         ).results || []
       : [];
+    const totalMinutes = games.reduce((sum: number, g: any) => sum + (Number(g.playtime_minutes) || 0), 0);
+    const completedGames = games.filter((g: any) => g.status === "completed").length;
+    const heroBanner = games.find((g: any) => g.resolved_banner || g.resolved_cover);
     return jsonResponse({
       uid,
       nickname: safeName(p.nickname),
       bio: p.bio,
       avatarUrl: publicUrl(p.avatar_url),
+      bannerUrl: publicUrl(heroBanner?.resolved_banner || heroBanner?.resolved_cover),
       shareLibrary: !!p.share_library,
+      totalGames: games.length,
+      completedGames,
+      totalMinutes,
       games: games.map((g) => ({
         gameKey: g.game_key,
         title: g.title,
         steamId: g.steam_id,
-        coverUrl: publicUrl(g.cover_url),
+        coverUrl: publicUrl(g.resolved_cover),
+        bannerUrl: publicUrl(g.resolved_banner),
         status: g.status,
         playtimeMinutes: g.playtime_minutes,
       })),
@@ -397,6 +429,7 @@ export function registerCommunityRoutes(router: Router) {
     const uid = await viewer(request, env);
     const { limit, offset } = paging(ctx.url);
     const sort = ctx.url.searchParams.get("sort") || "completed";
+    const includeTopGames = ctx.url.searchParams.get("includeTopGames") === "1";
     const orders: Record<string, string> = {
       completed: "completedGames DESC,totalMinutes DESC",
       hours: "totalMinutes DESC,completedGames DESC",
@@ -405,7 +438,7 @@ export function registerCommunityRoutes(router: Router) {
     const order = Object.hasOwn(orders, sort) ? orders[sort] : undefined;
     if (!order) throw new CommunityError("Invalid player sort");
     const rows = (await env.DB.prepare(`
-      SELECT p.uid,p.nickname,u.photo_url AS avatar_url,COUNT(*) AS totalGames,
+      SELECT p.uid,p.nickname,p.bio,u.photo_url AS avatar_url,COUNT(*) AS totalGames,
         SUM(CASE WHEN l.status='completed' THEN 1 ELSE 0 END) AS completedGames,
         SUM(l.playtime_minutes) AS totalMinutes
       FROM community_profiles p JOIN community_library l ON l.uid=p.uid
@@ -413,11 +446,50 @@ export function registerCommunityRoutes(router: Router) {
       WHERE p.share_library=1 AND p.suspended=0 AND ${visibleTo("p")}
       GROUP BY p.uid ORDER BY ${order},p.uid ASC LIMIT ? OFFSET ?
     `).bind(uid, uid, limit + 1, offset).all<any>()).results || [];
+
+    const topGamesByUid = new Map<string, any[]>();
+    if (includeTopGames && rows.length > 0) {
+      const uids = rows.slice(0, limit).map((r: any) => r.uid);
+      const placeholders = uids.map(() => "?").join(",");
+      const gRows = (await env.DB.prepare(`
+        SELECT l.uid, l.game_key, l.title, l.steam_id,
+          COALESCE(gc.cover_url, l.cover_url) AS cover_url,
+          gc.banner_url AS banner_url,
+          l.status, l.playtime_minutes
+        FROM community_library l
+        LEFT JOIN game_covers gc ON gc.game_key = LOWER(l.game_key)
+        WHERE l.uid IN (${placeholders})
+        ORDER BY l.playtime_minutes DESC
+      `).bind(...uids).all<any>()).results || [];
+      for (const g of gRows) {
+        const list = topGamesByUid.get(g.uid) || [];
+        if (list.length < 3) {
+          list.push({
+            gameKey: g.game_key,
+            title: g.title,
+            steamId: g.steam_id,
+            coverUrl: publicUrl(g.cover_url),
+            bannerUrl: publicUrl(g.banner_url),
+            status: g.status,
+            playtimeMinutes: Number(g.playtime_minutes) || 0,
+          });
+          topGamesByUid.set(g.uid, list);
+        }
+      }
+    }
+
     return jsonResponse(page(rows.map(r => {
       const avatar = publicUrl(r.avatar_url);
+      const topGames = includeTopGames ? (topGamesByUid.get(r.uid) || []) : undefined;
+      const topBanner = topGames?.find((g) => g.bannerUrl || g.coverUrl);
       return {
         uid: r.uid, nickname: safeName(r.nickname),
         ...(avatar ? { avatarUrl: avatar } : {}),
+        ...(includeTopGames ? {
+          bio: r.bio || "",
+          bannerUrl: topBanner?.bannerUrl || topBanner?.coverUrl || null,
+          topGames,
+        } : {}),
         totalGames: Number(r.totalGames),
         completedGames: Number(r.completedGames), totalMinutes: Number(r.totalMinutes),
       };

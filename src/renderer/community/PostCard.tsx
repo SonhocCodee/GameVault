@@ -46,6 +46,7 @@ export function PostCard({
   onProfile,
   onToast,
   expanded = false,
+  hideSave = false,
 }: {
   post: CommunityPost;
   api: CommunityAdapter;
@@ -55,6 +56,7 @@ export function PostCard({
   onProfile: (uid: string) => void;
   onToast?: (msg: string) => void;
   expanded?: boolean;
+  hideSave?: boolean;
 }) {
   const [revealed, setRevealed] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(expanded);
@@ -282,23 +284,25 @@ export function PostCard({
             {post.comments} bình luận
           </button>
 
-          <button
-            type="button"
-            disabled={busy}
-            aria-pressed={post.saved}
-            onClick={() =>
-              void run(async () => {
-                await api.request(
-                  `/posts/${post.id}/save`,
-                  post.saved ? "DELETE" : "PUT",
-                );
-                onChanged();
-              })
-            }
-          >
-            <Bookmark size={15} />
-            {post.saved ? "Đã lưu" : "Lưu"}
-          </button>
+          {!hideSave && (
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={post.saved}
+              onClick={() =>
+                void run(async () => {
+                  await api.request(
+                    `/posts/${post.id}/save`,
+                    post.saved ? "DELETE" : "PUT",
+                  );
+                  onChanged();
+                })
+              }
+            >
+              <Bookmark size={15} />
+              {post.saved ? "Đã lưu" : "Lưu"}
+            </button>
+          )}
         </div>
 
         <div className="gv-actions">

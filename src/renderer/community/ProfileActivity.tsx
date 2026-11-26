@@ -134,6 +134,7 @@ export function ProfileActivity({
               post={post}
               api={api}
               me={me}
+              hideSave
               onChanged={() => void load()}
               onGame={onGame}
               onProfile={onProfile}

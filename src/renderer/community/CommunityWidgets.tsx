@@ -31,6 +31,7 @@ export function Avatar({
         alt={label}
         width={size}
         height={size}
+        referrerPolicy="no-referrer"
         style={{ width: size, height: size }}
         onError={() => setFailed(true)}
       />

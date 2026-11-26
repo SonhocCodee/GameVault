@@ -1060,6 +1060,236 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Player Board Showcase Cards */
+.gv-player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 18px;
+  width: 100%;
+}
+
+.gv-player-card {
+  position: relative;
+  border-radius: 18px;
+  overflow: visible;
+  background: rgba(22, 24, 33, 0.94);
+  border: 1px solid var(--gv-border);
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.gv-player-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--gv-cyan);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+
+.gv-player-card.rank-1 {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.gv-player-banner {
+  position: relative;
+  height: 120px;
+  border-radius: 17px 17px 0 0;
+  overflow: hidden;
+  cursor: pointer;
+  background: linear-gradient(135deg, #1e2438, #141724);
+}
+
+.gv-player-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gv-player-banner-fallback {
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle at top right, rgba(255, 42, 68, 0.3), rgba(56, 189, 248, 0.15) 60%, #10131d);
+}
+
+.gv-player-banner-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(16, 18, 25, 0.96) 0%, rgba(16, 18, 25, 0.25) 60%, transparent 100%);
+}
+
+.gv-player-banner-badges {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gv-player-card-body {
+  padding: 0 18px 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.gv-player-avatar-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: -32px;
+  position: relative;
+  z-index: 2;
+}
+
+.gv-player-avatar-ring {
+  padding: 3px;
+  border-radius: 999px;
+  background: #161821;
+  border: 2px solid var(--gv-border-strong);
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.gv-player-top1 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(14, 16, 21, 0.65);
+  border: 1px solid rgba(42, 46, 61, 0.75);
+}
+
+.gv-player-hover-preview {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: calc(100% + 8px);
+  z-index: 50;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #121520;
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.gv-hover-game-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  padding: 6px 8px !important;
+  border-radius: 10px !important;
+  background: rgba(22, 24, 33, 0.9) !important;
+  border: 1px solid var(--gv-border) !important;
+  width: 100% !important;
+}
+
+.gv-hover-game-row:hover {
+  border-color: var(--gv-cyan) !important;
+  background: rgba(30, 35, 50, 0.95) !important;
+}
+
+.gv-hover-game-row img,
+.gv-hover-game-ph {
+  width: 30px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 5px;
+  flex-shrink: 0;
+  background: #0b0d12;
+}
+
+/* Discord / Threads / Facebook Profile Hero */
+.gv-profile-hero {
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(22, 24, 33, 0.92);
+  border: 1px solid var(--gv-border);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28);
+}
+
+.gv-profile-banner {
+  position: relative;
+  height: 190px;
+  background: linear-gradient(135deg, #25172b, #141928 50%, #0f1b29);
+}
+
+.gv-profile-banner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gv-profile-banner-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(22, 24, 33, 1) 0%, rgba(22, 24, 33, 0.35) 55%, rgba(14, 16, 21, 0.15) 100%);
+}
+
+.gv-profile-body {
+  padding: 0 24px 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.gv-profile-top-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: -46px;
+  position: relative;
+  z-index: 2;
+}
+
+.gv-profile-avatar-wrap {
+  padding: 4px;
+  border-radius: 999px;
+  background: #161821;
+  border: 3px solid #242838;
+  display: inline-flex;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+
+.gv-profile-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(42, 46, 61, 0.65);
+}
+
+.gv-profile-games-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+}
+
+.gv-profile-game-card {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 12px !important;
+  padding: 10px 12px !important;
+  border-radius: 12px !important;
+  background: rgba(22, 24, 33, 0.9) !important;
+  border: 1px solid var(--gv-border) !important;
+  text-align: left !important;
+  width: 100%;
+}
+
+.gv-profile-game-card:hover {
+  border-color: var(--gv-cyan) !important;
+  background: rgba(28, 31, 43, 0.96) !important;
+}
+
 /* Profile 2-Col */
 .gv-two-col {
   display: grid;

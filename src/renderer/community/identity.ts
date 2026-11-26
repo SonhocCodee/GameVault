@@ -31,7 +31,11 @@ export async function loadCommunityIdentity(
       }
     : null;
   try {
-    return { profile: await request<PublicProfile>("/me"), state: "ready" };
+    const profile = await request<PublicProfile>("/me");
+    if (!profile.avatarUrl && shellAuth?.profile?.photoUrl) {
+      profile.avatarUrl = shellAuth.profile.photoUrl;
+    }
+    return { profile, state: "ready" };
   } catch (error) {
     const expired = /Sign in|401|Chưa đăng nhập/.test(
       String((error as Error).message),
