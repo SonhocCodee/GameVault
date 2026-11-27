@@ -89,6 +89,18 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-27 16:01] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Sửa workflow `.github/workflows/release.yml`**:
+  - Bỏ `working-directory: GameVault` và đổi `cache-dependency-path: package-lock.json` để khớp với root repository trên GitHub Actions (fix lỗi `Setup Node.js` trên tag `v1.0.2`).
+
+### Kiểm tra (Verify)
+- Đã cập nhật và re-push tag `v1.0.2` để GitHub Actions build & publish Windows installer.
+
+### Bàn giao / Tiếp theo cho máy kia
+- Kiểm tra GitHub Actions / GitHub Releases `v1.0.2` hoàn tất.
+
 ## [2026-11-27 14:24] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc
