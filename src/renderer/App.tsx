@@ -73,19 +73,29 @@ export default function App() {
   const [profileRequest, setProfileRequest] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const [updateReady, setUpdateReady] = useState<{ version?: string; dismissed?: boolean } | null>(null);
+  const [updateBanner, setUpdateBanner] = useState<{
+    state: 'available' | 'downloading' | 'downloaded';
+    version?: string;
+    percent?: number;
+    dismissed?: boolean;
+  } | null>(null);
 
   useEffect(() => {
-    window.electronAPI?.getUpdateStatus?.().then((st) => {
-      if (st?.state === 'downloaded') {
-        setUpdateReady({ version: st.latestVersion });
+    const syncBanner = (st?: { state?: string; latestVersion?: string; percent?: number } | null) => {
+      if (!st) return;
+      if (st.state === 'available' || st.state === 'downloading' || st.state === 'downloaded') {
+        setUpdateBanner((prev) => ({
+          state: st.state as 'available' | 'downloading' | 'downloaded',
+          version: st.latestVersion ?? prev?.version,
+          percent: st.percent ?? prev?.percent,
+          // Always re-surface banner once download completes
+          dismissed: st.state === 'downloaded' ? false : prev?.dismissed,
+        }));
       }
-    }).catch(() => {});
-    const unsub = window.electronAPI?.onUpdateStatus?.((st) => {
-      if (st.state === 'downloaded') {
-        setUpdateReady({ version: st.latestVersion });
-      }
-    });
+    };
+
+    window.electronAPI?.getUpdateStatus?.().then(syncBanner).catch(() => {});
+    const unsub = window.electronAPI?.onUpdateStatus?.(syncBanner);
     return () => {
       unsub?.();
     };
@@ -1145,24 +1155,47 @@ export default function App() {
         onConfirm={confirmAddExternal}
       />
 
-      {/* In-app Update Ready Banner */}
-      {updateReady && !updateReady.dismissed && (
-        <div className="fixed bottom-6 left-6 z-50 flex items-center gap-3 rounded-xl border border-emerald-500/40 bg-[#161821]/95 px-4 py-3 text-sm text-white shadow-2xl backdrop-blur-md">
-          <span className="font-medium">
-            Có bản cập nhật mới{updateReady.version ? ` v${updateReady.version}` : ''} đã sẵn sàng!
-          </span>
-          <button
-            onClick={() => window.electronAPI?.installUpdate?.()}
-            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
-          >
-            Cập nhật & Khởi động lại
-          </button>
-          <button
-            onClick={() => setUpdateReady((prev) => (prev ? { ...prev, dismissed: true } : null))}
-            className="text-zinc-400 hover:text-white transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+      {/* Discord-style In-app Auto-Update Banner (downloading + ready) */}
+      {updateBanner && !updateBanner.dismissed && (
+        <div className="fixed bottom-6 left-6 z-50 w-80 rounded-xl border border-emerald-500/40 bg-[#161821] p-3.5 text-xs text-white shadow-2xl">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-white">
+                {updateBanner.state === 'downloaded'
+                  ? `Bản cập nhật${updateBanner.version ? ` v${updateBanner.version}` : ''} đã sẵn sàng!`
+                  : `Đang tải bản cập nhật${updateBanner.version ? ` v${updateBanner.version}` : ''}...`}
+              </p>
+              {updateBanner.state !== 'downloaded' && (
+                <div className="mt-2">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#242838]">
+                    <div
+                      className="h-full bg-emerald-500 transition-all duration-300"
+                      style={{ width: `${Math.max(5, updateBanner.percent ?? 0)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-[#8e95a5]">
+                    {typeof updateBanner.percent === 'number' ? `${updateBanner.percent}%` : 'Đang chuẩn bị...'}
+                  </p>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setUpdateBanner((prev) => (prev ? { ...prev, dismissed: true } : null))}
+              className="text-zinc-400 hover:text-white transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {updateBanner.state === 'downloaded' && (
+            <button
+              type="button"
+              onClick={() => window.electronAPI?.installUpdate?.()}
+              className="mt-2.5 w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
+            >
+              Cập nhật & Khởi động lại
+            </button>
+          )}
         </div>
       )}
 

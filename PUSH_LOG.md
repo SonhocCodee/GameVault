@@ -89,6 +89,21 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-27 16:02] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Auto-update kiểu Discord (`src/main/updater.ts`, `src/renderer/App.tsx`)**:
+  - Kiểm tra cập nhật sau khi mở app `1.5s` và định kỳ mỗi `30 phút` (thay vì 4 giờ), giữ `autoDownload = true` và `autoInstallOnAppQuit = true`.
+  - Hiển thị banner tiến trình tải bản cập nhật ngay trên giao diện chính (available / downloading % / downloaded → nút **Cập nhật & Khởi động lại**).
+- **Bump version `1.0.3`**.
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+
+### Bàn giao / Tiếp theo cho máy kia
+- Đã push tag `v1.0.3` để GitHub Actions build & publish bản cài đặt Windows mới.
+
 ## [2026-11-27 16:01] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

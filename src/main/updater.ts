@@ -37,6 +37,10 @@ export async function checkForUpdates(): Promise<AppUpdateStatus> {
     return currentStatus;
   }
 
+  if (currentStatus.state === 'downloading' || currentStatus.state === 'downloaded') {
+    return currentStatus;
+  }
+
   try {
     await autoUpdater.checkForUpdates();
   } catch (err: any) {
@@ -132,13 +136,13 @@ export function initAutoUpdater(
     });
   });
 
-  // Initial check 8s after launch so startup stays fast, then every 4 hours
+  // Discord-style background auto-update: check shortly after launch, then every 30 minutes
   setTimeout(() => {
     void checkForUpdates();
-  }, 8000);
+  }, 1500);
 
   if (checkTimer) clearInterval(checkTimer);
   checkTimer = setInterval(() => {
     void checkForUpdates();
-  }, 4 * 60 * 60 * 1000);
+  }, 30 * 60 * 1000);
 }
