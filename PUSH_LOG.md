@@ -89,6 +89,18 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-27 16:06] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Cấu hình `releaseType: "release"` trong `package.json`**:
+  - Đảm bảo `electron-builder --win --publish always` phát hành bản chính thức (không bị giữ ở trạng thái Draft) để `electron-updater` nhận diện và tự động tải về cho người dùng.
+
+### Kiểm tra (Verify)
+- Re-push tag `v1.0.3` để GitHub Actions build & publish bản `1.0.3`.
+
+### Bàn giao / Tiếp theo cho máy kia
+- Chờ workflow `v1.0.3` hoàn tất trên GitHub Actions.
+
 ## [2026-11-27 16:02] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

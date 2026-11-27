@@ -117,7 +117,8 @@
       {
         "provider": "github",
         "owner": "SonhocCodee",
-        "repo": "GameVault"
+        "repo": "GameVault",
+        "releaseType": "release"
       }
     ]
   }
