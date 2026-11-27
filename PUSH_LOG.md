@@ -89,6 +89,21 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-27 16:18] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Đẩy game đang chạy lên giao diện ngay lập tức (`src/main/main.ts`, `src/renderer/App.tsx`)**:
+  - Trong `tracker.onSessionStarted`, gửi ngay `game:updated` cho `mainWindow` khi phát hiện `.exe` game bắt đầu chạy (không còn đợi tới lúc thoát game `onSessionClosed` mới đẩy).
+  - Trong `App.tsx`, `onGameUpdated` thực hiện upsert (thêm mới nếu chưa có trong `games`, cập nhật nếu đã có) và đồng bộ `getTrackerStatus()` ngay lập tức để game hiện lên mục **"Game chơi gần đây"** kèm huy hiệu **Đang chơi**.
+- **Bump version `1.0.4`** (tự động build & release qua `.github/workflows/release.yml` trên nhánh `main`).
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+
+### Bàn giao / Tiếp theo cho máy kia
+- Kiểm tra release `v1.0.4` trên GitHub Releases.
+
 ## [2026-11-27 16:15] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

@@ -372,10 +372,17 @@ export default function App() {
       showToast(`🎮 Đã tự động thêm game: ${newGame.title} & tạo folder E:\\Game\\${newGame.media_folder || newGame.title}`);
     });
 
-    // Cover art resolves in the background seconds after a game is added —
-    // swap the fresh row in so the card shows art without any refresh
+    // Cover art resolves in the background seconds after a game is added, and
+    // tracker.onSessionStarted pushes newly detected / resumed games immediately.
+    // Upsert so newly auto-detected games appear in "Game chơi gần đây" right away.
     const unsubUpdated = window.electronAPI?.onGameUpdated?.((updatedGame) => {
-      setGames((prev) => prev.map((g) => (g.id === updatedGame.id ? updatedGame : g)));
+      setGames((prev) => {
+        const exists = prev.some((g) => g.id === updatedGame.id);
+        return exists
+          ? prev.map((g) => (g.id === updatedGame.id ? updatedGame : g))
+          : [updatedGame, ...prev];
+      });
+      window.electronAPI?.getTrackerStatus?.().then(setTrackerStatus).catch(() => {});
     });
 
     const unsubShot = window.electronAPI?.onScreenshotSynced?.((info) => {

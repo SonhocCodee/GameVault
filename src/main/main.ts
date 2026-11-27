@@ -1182,6 +1182,12 @@ app.whenReady().then(() => {
   const fpsMonitor = getFpsMonitor();
   fpsMonitor.recoverOrphans();
   tracker.onSessionStarted = (info) => {
+    try {
+      const activeGame = getGameById(info.gameId);
+      if (activeGame) {
+        mainWindow?.webContents.send('game:updated', activeGame);
+      }
+    } catch {}
     fpsMonitor
       .startCapture({
         sessionId: info.sessionId,
