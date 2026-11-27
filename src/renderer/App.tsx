@@ -4,7 +4,6 @@ import type { PublicGame, CommunitySearchRequest } from '../shared/community.ts'
 import { Navbar } from './components/Navbar.js';
 import { GameCard } from './components/GameCard.js';
 import { GameDetail } from './components/GameDetail.js';
-import { ImportModal } from './components/ImportModal.js';
 import { SyncModal } from './components/SyncModal.js';
 import { WishlistModal } from './components/WishlistModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
@@ -17,7 +16,6 @@ import { TimelineView } from './components/TimelineView.js';
 import {
   Plus,
   Gamepad2,
-  Download,
   Zap,
   X,
   AlertCircle,
@@ -120,7 +118,6 @@ export default function App() {
   const [trackerStatus, setTrackerStatus] = useState<TrackerStatus | null>(null);
 
   // Modals
-  const [importModalOpen, setImportModalOpen] = useState<boolean>(false);
   const [syncModalOpen, setSyncModalOpen] = useState<boolean>(false);
   const [syncModalTab, setSyncModalTab] = useState<'library' | 'drive_media' | 'local_f6'>('library');
   const [addGameModalOpen, setAddGameModalOpen] = useState<boolean>(false);
@@ -650,7 +647,6 @@ export default function App() {
         trackerStatus={trackerStatus}
         libraryLayout={libraryLayout}
         onLibraryLayoutChange={setLibraryLayout}
-        onOpenImportModal={() => setImportModalOpen(true)}
         onOpenSyncModal={(tab) => {
           if (tab) setSyncModalTab(tab);
           setSyncModalOpen(true);
@@ -712,18 +708,10 @@ export default function App() {
                 <p className="mt-1.5 max-w-md text-xs text-[#8e95a5]">
                   {searchQuery || statusFilter !== 'all'
                     ? 'Không tìm thấy trò chơi phù hợp với bộ lọc hiện tại. Thử xóa tìm kiếm hoặc chuyển tab.'
-                    : 'Hãy nhập 1-click từ cơ sở dữ liệu AMD Adrenalin hoặc thêm game mới để bắt đầu theo dõi giờ chơi và ảnh chụp.'}
+                    : 'Thêm game mới để bắt đầu theo dõi giờ chơi và ảnh chụp trên mọi GPU.'}
                 </p>
 
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    onClick={() => setImportModalOpen(true)}
-                    className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#ff2a44] to-[#e02424] px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-[#ff2a44]/25 hover:brightness-110 transition-all"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>1-Click Import từ AMD Adrenalin</span>
-                  </button>
-
                   <button
                     onClick={() => setAddGameModalOpen(true)}
                     className="flex items-center gap-2 rounded-xl border border-[#2a2e3d] bg-[#161821] px-4 py-2.5 text-xs font-bold text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#1f2230] transition-all"
@@ -1039,13 +1027,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Import Modal */}
-      <ImportModal
-        isOpen={importModalOpen}
-        onClose={() => setImportModalOpen(false)}
-        onSuccess={() => fetchGames()}
-      />
 
       {/* Sync Modal */}
       <SyncModal

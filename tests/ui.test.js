@@ -54,7 +54,6 @@ describe('Milestone 4: React UI & AMD Adrenalin Theme Suite', () => {
       'src/renderer/components/Lightbox.tsx',
       'src/renderer/components/VideoPlayer.tsx',
       'src/renderer/components/CoverArtModal.tsx',
-      'src/renderer/components/ImportModal.tsx',
       'src/renderer/components/SyncModal.tsx',
       'src/renderer/components/SettingsModal.tsx',
       'src/renderer/components/GameRowSection.tsx',
@@ -69,6 +68,18 @@ describe('Milestone 4: React UI & AMD Adrenalin Theme Suite', () => {
         assert.ok(content.length > 50, `File appears empty: ${relPath}`);
       });
     }
+  });
+
+  describe('GPU-neutral library onboarding', () => {
+    test('does not expose the removed AMD-only one-click import action', () => {
+      const app = fs.readFileSync(path.join(projectRoot, 'src/renderer/App.tsx'), 'utf8');
+      const navbar = fs.readFileSync(path.join(projectRoot, 'src/renderer/components/Navbar.tsx'), 'utf8');
+      const source = `${app}\n${navbar}`;
+      assert.ok(!source.includes('ImportModal'));
+      assert.ok(!source.includes('onOpenImportModal'));
+      assert.ok(!source.includes('1-Click Import'));
+      assert.ok(!source.includes('RGStats.db'));
+    });
   });
 
   describe('AMD Adrenalin Theme Configuration in index.css', () => {

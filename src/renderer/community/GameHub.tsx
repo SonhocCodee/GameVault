@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   BookmarkPlus,
@@ -68,6 +68,7 @@ export function GameHub({
   game,
   me,
   onBack,
+  backLabel = "Quay lại Top game",
   onGame,
   onProfile,
   onAdd,
@@ -79,6 +80,7 @@ export function GameHub({
   game: PublicGame;
   me: PublicProfile | null;
   onBack: () => void;
+  backLabel?: string;
   onGame: (g: PublicGame) => void;
   onProfile: (uid: string) => void;
   onAdd?: (g: PublicGame) => Promise<void>;
@@ -97,6 +99,8 @@ export function GameHub({
 
   const [reports, setReports] = useState<Page<PerformanceReport>>(emptyPage());
   const [reviews, setReviews] = useState<Page<CommunityReview>>(emptyPage());
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [reviewsError, setReviewsError] = useState("");
   const [posts, setPosts] = useState<Page<CommunityPost>>(emptyPage());
 
   // Performance filter state
@@ -124,6 +128,7 @@ export function GameHub({
 
   const [busy, setBusy] = useState(false);
   const [playersRevision, setPlayersRevision] = useState(0);
+  const loadSequence = useRef(0);
 
   const activeGame: PublicGame = {
     ...game,
@@ -138,17 +143,36 @@ export function GameHub({
   const base = `/games/${encodeURIComponent(game.gameKey)}`;
 
   const load = useCallback(async () => {
+    const ticket = ++loadSequence.current;
     setLoading(true);
     setError("");
     setSteamError("");
+    setReviewsLoading(true);
+    setReviewsError("");
     const results = await Promise.allSettled([
       api.request<SteamRequirements>(`${base}/requirements`),
       api.request<Page<PerformanceReport>>(`${base}/performance`),
-      api.request<Page<CommunityReview>>(`${base}/reviews`),
+      api.request<Page<CommunityReview>>(`${base}/reviews`).then(
+        (value) => {
+          if (ticket === loadSequence.current) {
+            setReviews(value);
+            setReviewsLoading(false);
+          }
+          return value;
+        },
+        (reason) => {
+          if (ticket === loadSequence.current) {
+            setReviewsError(communityError(reason));
+            setReviewsLoading(false);
+          }
+          throw reason;
+        },
+      ),
       api.request<Page<CommunityPost>>(
         `/posts?gameKey=${encodeURIComponent(game.gameKey)}&excludeKind=review`,
       ),
     ]);
+    if (ticket !== loadSequence.current) return;
     if (results[0].status === "fulfilled") setRequirements(results[0].value);
     else {
       setRequirements(null);
@@ -156,13 +180,11 @@ export function GameHub({
     }
     if (results[1].status === "fulfilled") setReports(results[1].value);
     else setError(communityError(results[1].reason));
-    if (results[2].status === "fulfilled") setReviews(results[2].value);
-    else setError(communityError(results[2].reason));
     if (results[3].status === "fulfilled") setPosts(results[3].value);
     else setError(communityError(results[3].reason));
     setLoading(false);
     setPlayersRevision((value) => value + 1);
-  }, [api, base, game.gameKey]);
+  }, [api, base, game.gameKey, me?.uid]);
 
   useEffect(() => {
     setReports(emptyPage());
@@ -176,6 +198,7 @@ export function GameHub({
     setReviewFormOpen(false);
     setPostComposerOpen(false);
     void load();
+    return () => { loadSequence.current++; };
   }, [load]);
 
   const myReview = useMemo(
@@ -287,7 +310,7 @@ export function GameHub({
       <div className="gv-top">
         <button type="button" className="gv-link" onClick={onBack}>
           <ArrowLeft size={16} />
-          Quay lại Top game
+          {backLabel}
         </button>
         <div className="gv-actions">
           <button
@@ -1028,7 +1051,14 @@ export function GameHub({
             </form>
           )}
 
-          {reviews.items.length === 0 && !loading ? (
+          {reviewsLoading && <p role="status" className="gv-muted">Đang tải đánh giá…</p>}
+          {reviewsError && (
+            <div role="alert" className="gv-error">
+              <span>{reviewsError}</span>
+              <button type="button" onClick={() => void load()}>Thử lại</button>
+            </div>
+          )}
+          {reviews.items.length === 0 && !reviewsLoading && !reviewsError ? (
             <div className="gv-empty">
               <p>Chưa có đánh giá nào. Hãy là người đầu tiên chia sẻ cảm nhận!</p>
             </div>
@@ -1256,18 +1286,21 @@ function ReviewItem({
   const isVip = Boolean(review.vipTier && review.vipTier > 0);
   const vipTier = review.vipTier || (isVip ? 1 : 0);
 
-  const bannerRaw = review.bannerUrl || (me?.uid === review.uid ? me?.bannerUrl : null);
+  const bannerRaw = review.bannerUrl;
   const banner = bannerRaw ? qualifyCommunityUrl(publicBase || "", bannerRaw) : "";
+  const [bannerFailed, setBannerFailed] = useState(false);
+  useEffect(() => setBannerFailed(false), [banner]);
 
   return (
     <article className={`gv-review-card ${isVip ? `is-vip vip-tier-${vipTier}` : ""}`}>
       {/* Full-card Banner Backdrop */}
-      {banner ? (
+      {banner && !bannerFailed ? (
         <img
           className="gv-review-backdrop"
           src={banner}
           alt=""
           loading="lazy"
+          onError={() => setBannerFailed(true)}
         />
       ) : (
         <div className="gv-review-backdrop-fallback" />
@@ -1284,7 +1317,11 @@ function ReviewItem({
               tabIndex={0}
               title={review.nickname}
             >
-              <Avatar name={review.nickname} url={review.avatarUrl} size={42} />
+              <Avatar
+                name={review.nickname}
+                url={review.avatarUrl ? qualifyCommunityUrl(publicBase || "", review.avatarUrl) : undefined}
+                size={42}
+              />
               {isVip && (
                 <span className="gv-vip-crown-badge">
                   <Crown size={10} />

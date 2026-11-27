@@ -90,10 +90,12 @@ export async function capturePerformanceContext(
   hardware?: HardwareInfo,
   capturedAt = new Date().toISOString(),
 ): Promise<void> {
+  const db = getDb();
   ensurePerformanceSchema();
   const graphics = getGameGraphics(gameId);
   const snapshot = hardware || (await getHardwareInfo());
-  getDb()
+  if (getDb() !== db) return;
+  db
     .prepare(
       `INSERT INTO performance_session_context(session_id,game_id,hardware_json,graphics_json,captured_at) VALUES (?,?,?,?,?)
     ON CONFLICT(session_id) DO UPDATE SET hardware_json=excluded.hardware_json,graphics_json=excluded.graphics_json,captured_at=excluded.captured_at

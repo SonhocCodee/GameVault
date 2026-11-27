@@ -1,6 +1,9 @@
 import { isProfilePreset, profilePresetPath } from "../../../src/shared/profile-presets.ts";
 import type { Env, RouteHandler } from "../types.ts";
 import { queueMetadataRefresh, refreshCatalogMetadata } from "../game-metadata.ts";
+import { getMonthlyRankings } from "../monthly-rankings.ts";
+import { IDLE_APP_KEYS, IDLE_APP_TITLES } from "../ranking-eligibility.ts";
+import { currentRankingMonth } from "../../../src/shared/monthly.ts";
 import { authenticate, isAdminUser } from "../auth.ts";
 import { jsonResponse } from "../utils.ts";
 import type { Router } from "../router.ts";
@@ -195,8 +198,6 @@ async function listPosts(request: Request, env: Env, url: URL, id?: string) {
   }
   return jsonResponse(page(items, limit, offset));
 }
-const IDLE_APP_KEYS = "('3678970','s_3678970','431960','s_431960','993090','s_993090','3419430','s_3419430','2923300','s_2923300')";
-const IDLE_APP_TITLES = "('tbh: task bar hero','tbh task bar hero','task bar hero','wallpaper engine','lossless scaling','bongo cat','banana','desktop mate','vtube studio')";
 
 function notIdleSql(alias: string): string {
   const k = alias ? `${alias}.game_key` : "game_key";
@@ -320,6 +321,7 @@ export function registerCommunityRoutes(router: Router) {
         "community_performance",
         "community_images",
         "ratings",
+        "community_rating_history",
       ]
         .map((t) =>
           env.DB.prepare(`DELETE FROM ${t} WHERE uid=?`).bind(user.uid),
@@ -917,7 +919,14 @@ export function registerCommunityRoutes(router: Router) {
     const rows =
       (
         await env.DB.prepare(
-          `SELECT r.*,cp.nickname,cp.avatar_preset,cp.banner_preset,COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg',u.photo_url) AS avatar_url,COALESCE(m.spoiler,0) AS spoiler FROM ratings r
+          `SELECT r.*,COALESCE(cp.nickname,u.display_name) AS nickname,cp.avatar_preset,cp.banner_preset,
+      COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg',u.photo_url) AS avatar_url,
+      (SELECT COALESCE(gc.banner_url,gc.cover_url,l.cover_url)
+        FROM community_library l LEFT JOIN game_covers gc ON gc.game_key=LOWER(l.game_key)
+        WHERE l.uid=r.uid AND cp.share_library=1 AND ${notIdleSql("l")}
+          AND COALESCE(gc.banner_url,gc.cover_url,l.cover_url) IS NOT NULL
+        ORDER BY l.playtime_minutes DESC,l.game_key LIMIT 1) AS default_banner_url,
+      COALESCE(m.spoiler,0) AS spoiler FROM ratings r
       LEFT JOIN community_profiles cp ON cp.uid=r.uid LEFT JOIN users u ON u.uid=r.uid LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
       WHERE r.game_key=? AND COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")}
       ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?`,
@@ -928,7 +937,7 @@ export function registerCommunityRoutes(router: Router) {
     return jsonResponse(
       page(
         rows.map((r) => {
-          const banner = profilePresetPath("banners", r.banner_preset);
+          const banner = profilePresetPath("banners", r.banner_preset) || publicUrl(r.default_banner_url);
           return {
             id: r.id,
             uid: r.uid,
@@ -1037,6 +1046,13 @@ export function registerCommunityRoutes(router: Router) {
     return jsonResponse({
       success: true,
     });
+  });
+  add("GET", "/rankings/monthly", async (_request, env, ctx) => {
+    const month = ctx.url.searchParams.get("month") || currentRankingMonth();
+    const limit = Number(ctx.url.searchParams.get("limit") || 20);
+    const result = await getMonthlyRankings(env, month, limit);
+    queueMetadataRefresh(env, ctx.executionCtx);
+    return jsonResponse(result);
   });
   add("GET", "/rankings", async (request, env, ctx) => {
     const uid = await viewer(request, env),

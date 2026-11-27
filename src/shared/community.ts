@@ -164,6 +164,29 @@ export interface GameRanking extends PublicGame {
   averageScore: number | null;
   reviewCount: number;
 }
+export interface MonthlyGameRanking extends PublicGame {
+  bannerUrl?: string | null;
+  classification: "online" | "hybrid" | "offline" | "unknown";
+  players: number;
+  totalMinutes: number;
+  averageScore: number | null;
+  reviewCount: number;
+  rankingScore: number | null;
+}
+export interface MonthlyRankings {
+  month: string;
+  currentMonth: string;
+  firstMonth: string;
+  timezone: string;
+  state: "live" | "ended";
+  updatedAt: string;
+  scoring: { priorScore: number; priorWeight: number };
+  online: MonthlyGameRanking[];
+  singlePlayer: MonthlyGameRanking[];
+  onlineCount: number;
+  singlePlayerCount: number;
+  unclassifiedCount: number;
+}
 export interface Page<T> {
   items: T[];
   hasMore: boolean;

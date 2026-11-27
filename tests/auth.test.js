@@ -260,6 +260,41 @@ describe('Cloud Auth (Google OAuth loopback + Cloudflare Worker Session)', () =>
     assert.equal(status.profile.displayName, 'Ten');
   });
 
+  for (const kind of ['worker', 'google']) test(`${kind} token refresh cannot resurrect a signed-out session or overwrite another login`, async () => {
+    const userDataDir = newTmp(`race-${kind}`);
+    let release;
+    let started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const waiting = new Promise(resolve => { started = resolve; });
+    configureAuth({ config: CONFIG, userDataDir, fetchImpl: async url => {
+      if (url.includes('/revoke')) return { ok: true, status: 200 };
+      if (url.includes('oauth2.googleapis.com/token')) {
+        started();
+        await gate;
+        return { ok: true, json: async () => ({ access_token: 'new-a', id_token: 'id-a', expires_in: 3600 }) };
+      }
+      return { ok: true, json: async () => ({ token: 'new-worker-a', expiresAt: Date.now() + 3600000,
+        user: { uid: 'account-a', email: 'a@test.vn', displayName: 'A', photoUrl: '' } }) };
+    } });
+    const session = {
+      sessionToken: 'worker-a', expiresAt: 1,
+      user: { uid: 'account-a', email: 'a@test.vn', displayName: 'A', photoUrl: '' },
+      google: { accessToken: 'google-a', refreshToken: 'refresh-a', expiresAt: 1, scope: 'x', idToken: 'id-a' },
+      updatedAt: new Date().toISOString(),
+    };
+    persistSession(session, { userDataDir });
+    const pending = kind === 'worker' ? getValidSessionToken() : getValidGoogleAccessToken();
+    const rejected = assert.rejects(pending, /Account changed/);
+    await waiting;
+    await logout();
+    assert.equal(loadSession({ userDataDir }), null);
+    persistSession({ ...session, sessionToken: 'worker-b', user: { ...session.user, uid: 'account-b' } }, { userDataDir });
+    release();
+    await rejected;
+    assert.equal(loadSession({ userDataDir }).user.uid, 'account-b');
+    assert.equal(loadSession({ userDataDir }).sessionToken, 'worker-b');
+  });
+
   test('logout clears the session file and revokes Google access token', async () => {
     const userDataDir = newTmp('ud3');
     const { impl, calls } = recordingFetch([

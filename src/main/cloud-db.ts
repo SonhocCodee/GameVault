@@ -16,6 +16,7 @@ import { normalizeForMatch } from './media.ts';
 import { autoEnrichAllGameCovers } from './covers.ts';
 import { NON_GAME_TITLE_REGEX } from './tracker.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
+import { assertLibraryAccount } from './account-library.ts';
 import type {
   CloudReview,
   CloudSessionItem,
@@ -81,6 +82,9 @@ async function fetchImpl(): Promise<FetchLike> {
 }
 
 async function apiFetch(path: string, init: RequestInit = {}, requiresAuth = false): Promise<Response> {
+  const uid = getCurrentSession()?.user.uid || '';
+  const db = requiresAuth ? getDb() : null;
+  if (requiresAuth) assertLibraryAccount(uid, db!);
   const baseUrl = getWorkerBaseUrl();
   const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
   const headers = new Headers(init.headers || {});
@@ -102,16 +106,27 @@ async function apiFetch(path: string, init: RequestInit = {}, requiresAuth = fal
   }
 
   const doFetch = await fetchImpl();
-  return doFetch(url, { ...init, headers });
+  if ((getCurrentSession()?.user.uid || '') !== uid) throw new Error('Account changed during request');
+  if (requiresAuth) assertLibraryAccount(uid, db!);
+  const response = await doFetch(url, { ...init, headers });
+  if ((getCurrentSession()?.user.uid || '') !== uid) throw new Error('Account changed during request');
+  if (requiresAuth) assertLibraryAccount(uid, db!);
+  return response;
 }
 
 /** Bounded bridge for the public community API; tokens stay in the main process. */
 export async function communityRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const db = getDb();
+  const uid = getCurrentSession()?.user.uid || '';
   if (!/^\/api\/community\//.test(path) || path.includes('..') || path.length > 1000 || !['GET','POST','PUT','DELETE'].includes(method)) {
     throw new Error('Invalid community request');
   }
   const response = await apiFetch(path, { method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }, method !== 'GET');
   const result = await response.json();
+  if (method !== 'GET') {
+    assertLibraryAccount(uid, db);
+    if (getCurrentSession()?.user.uid !== uid) throw new Error('Account changed during community request');
+  }
   if (!response.ok) throw new Error(result.error || `Community request failed (${response.status})`);
   const reviewPath = /^\/api\/community\/games\/([^/]+)\/reviews$/.exec(path);
   if (reviewPath && (method === 'POST' || method === 'DELETE')) {
@@ -408,6 +423,8 @@ export async function submitReview(
   gameId: number,
   payload: { score: number; review: string; dropped: boolean; dropReason?: string; fps?: number }
 ): Promise<CloudReview> {
+  const db = getDb();
+  const uid = getCurrentSession()?.user.uid || '';
   const game = getGameById(gameId);
   if (!game) throw new Error(`Game with id ${gameId} not found`);
   const gameKey = computeGameKey(game);
@@ -436,11 +453,15 @@ export async function submitReview(
     const errText = await resp.text().catch(() => '');
     throw new Error(`Không đăng được review: ${resp.status} ${errText.slice(0, 200)}`);
   }
+  assertLibraryAccount(uid, db);
+  if (getCurrentSession()?.user.uid !== uid) throw new Error('Account changed during review submission');
   updateGame(gameId, { user_rating: body.score, notes: body.review });
   return resp.json();
 }
 
 export async function deleteMyReview(gameId: number): Promise<boolean> {
+  const db = getDb();
+  const uid = getCurrentSession()?.user.uid || '';
   const game = getGameById(gameId);
   if (!game) return false;
   const gameKey = computeGameKey(game);
@@ -452,6 +473,8 @@ export async function deleteMyReview(gameId: number): Promise<boolean> {
     true
   );
   if (resp.ok || resp.status === 404) {
+    assertLibraryAccount(uid, db);
+    if (getCurrentSession()?.user.uid !== uid) throw new Error('Account changed during review deletion');
     updateGame(gameId, { user_rating: null });
     return true;
   }
@@ -462,8 +485,12 @@ let reviewSyncRun: Promise<ReviewSyncResult> | null = null;
 
 /** Acknowledged signatures survive restarts; unsent local edits are retried. */
 export async function syncLocalReviews(): Promise<ReviewSyncResult> {
+  const uid = getCurrentSession()?.user.uid;
+  const db = getDb();
   if (reviewSyncRun) {
     await reviewSyncRun;
+    if (uid) assertLibraryAccount(uid, db);
+    if (getCurrentSession()?.user.uid !== uid) throw new Error('Account changed during review sync');
     return syncLocalReviews();
   }
   reviewSyncRun = flushLocalReviews();
@@ -476,6 +503,11 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
   if (!session?.user?.uid) return { state: 'signed_out', synced: 0, pending: 0 };
   const uid = session.user.uid;
   const db = getDb();
+  const assertContext = () => {
+    assertLibraryAccount(uid, db);
+    if (getCurrentSession()?.user.uid !== uid) throw new Error('Account changed during review sync');
+  };
+  assertContext();
   const migrationKey = `review_scores_migrated:${uid}`;
   const migrationDone = getSetting(migrationKey) === '1';
   db.exec(`CREATE TABLE IF NOT EXISTS local_review_sync (
@@ -506,12 +538,14 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
     const rated = pending.filter(item => item.data != null);
     if (rated.length > 0 || !migrationDone) {
       for (let offset = 0; offset < Math.max(rated.length, 1); offset += 50) {
+        assertContext();
         const chunk = rated.slice(offset, offset + 50);
         const includeStoredScores = offset === 0 && !migrationDone;
         const result = await communityRequest<{ success: boolean; synced: number; migrated?: number }>('/api/community/me/reviews/sync', 'POST', {
           items: chunk.map(item => ({ ...item.data, updatedAt: new Date(item.game.updated_at.replace(' ', 'T')).toISOString() })),
           ...(includeStoredScores ? { includeStoredScores: true } : {}),
         });
+        assertContext();
         if (!result.success || result.synced < chunk.length) throw new Error('Server did not acknowledge all reviews');
         if (includeStoredScores) {
           setSetting(migrationKey, '1');
@@ -521,6 +555,7 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
       }
     }
     for (const item of pending.filter(item => item.data == null)) {
+      assertContext();
       if (!await deleteMyReview(item.game.id)) throw new Error('Could not remove the cloud rating');
       acknowledge(item);
     }
@@ -532,6 +567,13 @@ async function flushLocalReviews(): Promise<ReviewSyncResult> {
 }
 
 export async function updateGameAndSyncReview(id: number, data: Partial<Game>): Promise<Game> {
+  const db = getDb();
+  const uid = getCurrentSession()?.user.uid;
+  const assertContext = () => {
+    if (getDb() !== db || getCurrentSession()?.user.uid !== uid) throw new Error('Account changed during game update');
+    if (uid) assertLibraryAccount(uid, db);
+  };
+  assertContext();
   // Renderer edits cannot mint app-recorded time; only internal sync carries it.
   data = { ...data };
   delete data.recorded_playtime_minutes;
@@ -539,6 +581,7 @@ export async function updateGameAndSyncReview(id: number, data: Partial<Game>): 
   const game = updateGame(id, data);
   if (!('user_rating' in data || 'notes' in data || 'status' in data)) return game;
   let reviewSync = await syncLocalReviews();
+  assertContext();
   if (reviewSync.state !== 'signed_out') {
     try {
       const response = await apiFetch('/api/library/sync', {
@@ -549,6 +592,7 @@ export async function updateGameAndSyncReview(id: number, data: Partial<Game>): 
       reviewSync = { ...reviewSync, state: 'pending', error: String((error as Error).message || error) };
     }
   }
+  assertContext();
   return { ...(getGameById(id) || game), reviewSync };
 }
 
@@ -657,27 +701,39 @@ const SYNC_EPOCH_SETTING_KEY = 'library_sync_epoch';
 const SYNC_HASH_SETTING_KEY = 'library_sync_hash';
 
 let inFlightLibrarySync: Promise<LibrarySyncResult> | null = null;
+let inFlightLibraryDb: ReturnType<typeof getDb> | null = null;
+let inFlightLibraryUid = '';
 
 export async function syncLibraryWithCloud(options?: LibrarySyncOptions): Promise<LibrarySyncResult> {
   const syncMode = options?.mode === 'overwrite' ? 'overwrite' : 'merge';
-  if (syncMode !== 'overwrite' && inFlightLibrarySync) {
+  if (syncMode !== 'overwrite' && inFlightLibrarySync && inFlightLibraryDb === getDb() && inFlightLibraryUid === getCurrentSession()?.user.uid) {
     return inFlightLibrarySync;
   }
   const run = runSyncLibraryWithCloud(options);
   if (syncMode !== 'overwrite') {
     inFlightLibrarySync = run;
+    inFlightLibraryDb = getDb();
+    inFlightLibraryUid = getCurrentSession()?.user.uid || '';
   }
   try {
     return await run;
   } finally {
     if (inFlightLibrarySync === run) {
       inFlightLibrarySync = null;
+      inFlightLibraryDb = null;
+      inFlightLibraryUid = '';
     }
   }
 }
 
 async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<LibrarySyncResult> {
   const db = getDb();
+  const sessionUid = getCurrentSession()?.user.uid || '';
+  const assertContext = () => {
+    assertLibraryAccount(sessionUid, db);
+    if (getCurrentSession()?.user.uid !== sessionUid) throw new Error('Account changed during library sync');
+  };
+  assertContext();
   const syncMode = options?.mode === 'overwrite' ? 'overwrite' : 'merge';
   const localSyncEpoch = Number(getSetting(SYNC_EPOCH_SETTING_KEY) || '0') || 0;
 
@@ -710,6 +766,7 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
   } catch (err) {
     console.warn('Pre-sync autoEnrich warning:', err);
   }
+  assertContext();
 
   const localGames = getGames();
   const deleted = getDeletedGames();
@@ -825,7 +882,6 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
     }
   }
 
-  const sessionUid = getCurrentSession()?.user?.uid || '';
   const workerBase = getWorkerBaseUrl();
   const hashItems = items.map((it) => ({
     ...it,
@@ -878,6 +934,7 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
     pushedCount = items.length;
   }
 
+  assertContext();
   const serverSyncEpoch = Number(result.syncEpoch) || 0;
   const isAuthoritativePull =
     Boolean(result.authoritativePull) ||
@@ -1074,7 +1131,7 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
   }
 
   // In authoritative pull mode, remove stale local games that do not exist in Cloud snapshot
-  if (isAuthoritativePull && result.games.length > 0) {
+  if (isAuthoritativePull) {
     try {
       const currentLocal = getGames();
       for (const g of currentLocal) {
@@ -1156,7 +1213,9 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
     }
   }
 
+  assertContext();
   await syncLocalReviews();
+  assertContext();
 
   if (serverSyncEpoch > 0) {
     setSetting(SYNC_EPOCH_SETTING_KEY, String(serverSyncEpoch));

@@ -11,7 +11,7 @@ import {
 const { env, d1 } = await createTestWorkerEnv({
   env: { ALLOW_MOCK_AUTH: "false" },
 });
-const root = path.resolve("worker/admin-assets");
+const root = path.resolve(process.env.GAMEVAULT_PREVIEW_ASSETS || "worker/admin-assets");
 env.ASSETS = {
   fetch: async (request) => {
     const url = new URL(typeof request === "string" ? request : request.url),
@@ -55,9 +55,9 @@ for (const [uid, nickname, minutes] of users) {
     .run(uid, "preview@example.test", nickname);
   d1.sqlite
     .prepare(
-      "INSERT INTO community_profiles(uid,nickname,share_library) VALUES (?,?,1)",
+      "INSERT INTO community_profiles(uid,nickname,share_library,avatar_preset,banner_preset) VALUES (?,?,1,?,?)",
     )
-    .run(uid, nickname);
+    .run(uid, nickname, uid === "preview-two" ? "dice" : "gamepad", uid === "preview-user" ? null : "aurora");
   d1.sqlite
     .prepare(
       "INSERT INTO community_library(uid,game_key,title,steam_id,status,playtime_minutes) VALUES (?,'814380','Sekiro: Shadows Die Twice',814380,'completed',?)",
@@ -71,7 +71,7 @@ for (const [uid, nickname, minutes] of users) {
 }
 d1.sqlite
   .prepare(
-    "INSERT INTO game_covers(game_key,title,steam_id) VALUES ('814380','Sekiro: Shadows Die Twice',814380)",
+    "INSERT INTO game_covers(game_key,title,steam_id,cover_url,banner_url) VALUES ('814380','Sekiro: Shadows Die Twice',814380,'https://example.test/community/profile-presets/banners/velocity.svg','https://example.test/community/profile-presets/banners/velocity.svg')",
   )
   .run();
 d1.sqlite
@@ -79,6 +79,13 @@ d1.sqlite
     "INSERT INTO community_posts(id,uid,game_key,game_title,kind,body) VALUES ('preview-post','preview-two','814380','Sekiro: Shadows Die Twice','thought','Preview post — synthetic test data. The combat finally clicked after learning to deflect.')",
   )
   .run();
+d1.sqlite.prepare("INSERT INTO community_steam_cache(key,value,expires_at) VALUES ('details-v2:814380',?,?)")
+  .run(JSON.stringify({
+    gameKey: "814380", title: "Sekiro: Shadows Die Twice", steamId: 814380,
+    coverUrl: "https://example.test/community/profile-presets/banners/velocity.svg", minimum: null, recommended: null,
+    sourceUrl: null, fetchedAt: new Date().toISOString(), available: false,
+    description: "Dữ liệu kiểm thử local — không phải thông tin Steam thật.",
+  }), Math.floor(Date.now() / 1000) + 3600);
 const report = {
   gameKey: "814380",
   title: "Sekiro: Shadows Die Twice",

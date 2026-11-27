@@ -623,9 +623,6 @@ export interface ElectronAPI {
   deleteGame(id: number): Promise<boolean>;
   getSessions(gameId?: number): Promise<Session[]>;
   
-  // AMD Import
-  importAMDDatabase(customPath?: string): Promise<AMDImportSummary>;
-  
   // Screenshot Sync
   syncScreenshots(options?: ScreenshotSyncOptions): Promise<ScreenshotSyncSummary>;
   

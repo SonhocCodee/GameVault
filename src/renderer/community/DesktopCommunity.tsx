@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CalendarDays, RefreshCw, Trophy, Users, Vote } from "lucide-react";
 import type {
   CommunityAdapter,
   CommunitySearchRequest,
@@ -8,12 +7,11 @@ import type {
 } from "../../shared/community.ts";
 import type {
   AuthStatus,
-  CommunityPick,
   Game,
   ReviewSyncResult,
 } from "../../shared/types.ts";
 import { CommunityHub } from "./CommunityHub.tsx";
-import { communityError, qualifyCommunityUrl } from "./client.ts";
+import { communityError } from "./client.ts";
 
 export function gameToPublic(game: Game): SharedLibraryGame {
   return {
@@ -183,150 +181,7 @@ export function DesktopCommunity({
           });
           setGames(await window.electronAPI.getGames());
         }}
-        monthly={<MonthlyPick publicBase={base} />}
       />
     </>
-  );
-}
-
-function MonthlyPick({ publicBase }: { publicBase: string }) {
-  const [pick, setPick] = useState<CommunityPick | null>(null);
-  const [games, setGames] = useState<Game[]>([]);
-  const [selected, setSelected] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  const load = async () => {
-    setBusy(true);
-    try {
-      const [p, g] = await Promise.all([
-        window.electronAPI.getCurrentPick!(),
-        window.electronAPI.getGames(),
-      ]);
-      setPick(p);
-      setGames(g);
-    } catch (e) {
-      setError(communityError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  const voteCount = Object.keys(pick?.votes || {}).length;
-  const coverUrl = pick?.coverUrl
-    ? qualifyCommunityUrl(publicBase, pick.coverUrl)
-    : "";
-
-  return (
-    <section className="gv-stack">
-      <div className="gv-top">
-        <div>
-          <h2>Game cộng đồng tháng này</h2>
-          <p className="gv-muted">
-            Cả cộng đồng cùng bình chọn một tựa game để chơi và chia sẻ ảnh trong tháng.
-          </p>
-        </div>
-        <button type="button" disabled={busy} onClick={() => void load()}>
-          <RefreshCw size={15} />
-          Làm mới
-        </button>
-      </div>
-
-      {error && <p className="gv-error">{error}</p>}
-
-      <div className="gv-two-col">
-        <div className="gv-card gv-stack">
-          {pick ? (
-            <div className="gv-actions" style={{ gap: 16, alignItems: "flex-start" }}>
-              {coverUrl && (
-                <img
-                  className="gv-poster-md"
-                  src={coverUrl}
-                  alt={pick.gameTitle || "Monthly Pick"}
-                />
-              )}
-              <div className="gv-stack-sm">
-                <div className="gv-actions" style={{ gap: 8 }}>
-                  <span className="gv-pill gv-pill-amber">
-                    <CalendarDays size={12} /> {pick.month}
-                  </span>
-                  <span className="gv-pill gv-pill-emerald">
-                    <Trophy size={12} />
-                    {pick.state === "voting"
-                      ? "Đang bình chọn"
-                      : pick.state === "playing"
-                        ? "Đang cùng chơi"
-                        : "Đã kết thúc"}
-                  </span>
-                </div>
-                <h3 style={{ fontSize: 20 }}>
-                  {pick.gameTitle || "Đang chờ đề cử"}
-                </h3>
-                <span className="gv-muted">
-                  <Users size={13} style={{ display: "inline", marginRight: 5 }} />
-                  {voteCount} người đã tham gia bình chọn
-                </span>
-              </div>
-            </div>
-          ) : (
-            !busy && (
-              <p className="gv-muted">Chưa có game nào được chọn trong tháng này.</p>
-            )
-          )}
-        </div>
-
-        <form
-          className="gv-card gv-stack"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setBusy(true);
-            void window.electronAPI
-              .votePick!(Number(selected))
-              .then(setPick)
-              .catch((e) => setError(communityError(e)))
-              .finally(() => setBusy(false));
-          }}
-        >
-          <h3>Đề cử & Bình chọn</h3>
-          <label>
-            Chọn game trong thư viện của bạn
-            <select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-              required
-            >
-              <option value="">-- Chọn game --</option>
-              {games.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="gv-actions">
-            <button type="submit" className="gv-primary" disabled={busy || !selected}>
-              <Vote size={15} />
-              Bình chọn
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void window.electronAPI
-                  .unvotePick!()
-                  .then(setPick)
-                  .catch((e) => setError(communityError(e)))
-              }
-            >
-              Rút bình chọn
-            </button>
-          </div>
-        </form>
-      </div>
-    </section>
   );
 }

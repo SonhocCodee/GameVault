@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu } from 'electron
 import path from 'node:path';
 import fs from 'node:fs';
 import {
-  initDb,
   closeDb,
   getGames,
   getGameById,
@@ -19,7 +18,6 @@ import {
   getSetting,
   setSetting,
 } from './db.js';
-import { importAMDDatabase } from './importer.js';
 import { syncScreenshots } from './sync-screenshots.js';
 import { getTracker, manualEditPlaytime, cleanupNonGameEntries } from './tracker.js';
 import { initDiscordDetectable } from './discord-detectable.js';
@@ -59,6 +57,7 @@ import {
 import { getF6CaptureManager } from './f6-capture.js';
 import { getAMDWatcher } from './amd-watcher.js';
 import { getAuthStatus, login, logout, getValidSessionToken, getCloudConfig, getWorkerBaseUrl } from './auth.js';
+import { openAccountLibrary, persistDevicePreferences, assertLibraryAccount } from './account-library.ts';
 import {
   detectGoogleDriveDesktop,
   applyGoogleDriveDesktopStorage,
@@ -135,6 +134,55 @@ import type { GameFilter, Game, Session, AddWishlistPayload, AppSettings } from 
 registerMediaProtocolScheme();
 
 let mainWindow: BrowserWindow | null = null;
+let changingAccount = false;
+
+function stopAccountServices(): void {
+  getAMDWatcher().stop();
+  getF6CaptureManager().stop();
+  getPlaytimeWatchImporter().stop();
+  getTracker().stop();
+}
+
+function startAccountServices(): void {
+  const uid = getAuthStatus().profile?.uid;
+  if (!uid) return;
+  try { assertLibraryAccount(uid); } catch { return; }
+  const settings = loadAppSettings();
+  const tracker = getTracker();
+  tracker.autoDetectNewGames = settings.autoDetectGames;
+  tracker.start((settings.pollIntervalSeconds || 5) * 1000);
+  const ptWatch = getPlaytimeWatchImporter();
+  ptWatch.autoRegisterGames = settings.autoDetectGames;
+  ptWatch.start(5000);
+  if (settings.amdWatcherEnabled) getAMDWatcher().start(5000);
+  const f6 = getF6CaptureManager();
+  f6.setHotkey(settings.screenshotHotkey, settings.screenshotHotkeyVk);
+  f6.setEnabled(settings.screenshotEnabled);
+  f6.setPaths(settings.screenshotsDir, settings.mediaBaseDir);
+  f6.setHddMode(settings.hddMode);
+  f6.start(50);
+}
+
+async function changeAccount<T>(operation: () => Promise<T>): Promise<T> {
+  if (changingAccount) throw new Error('Account change already in progress');
+  if (getActiveMediaSyncStatus().isRunning) throw new Error('Chờ đồng bộ ảnh hoàn tất trước khi đổi tài khoản');
+  changingAccount = true;
+  try {
+    stopAccountServices();
+    const result = await operation();
+    persistDevicePreferences(app.getPath('userData'));
+    const uid = getAuthStatus().profile?.uid || null;
+    const db = openAccountLibrary(uid, app.getPath('userData'));
+    getTracker().useDatabase(db);
+    setMediaBaseDir(loadAppSettings().mediaBaseDir);
+    // Recreate renderer state, pending selections and account-specific caches.
+    setTimeout(() => mainWindow?.webContents.reload(), 0);
+    return result;
+  } finally {
+    changingAccount = false;
+    startAccountServices();
+  }
+}
 
 // Tray / background state: closing the window hides it instead of quitting so
 // playtime tracking, AMD sync and screenshot sync keep running out of sight
@@ -366,11 +414,6 @@ function registerIpcHandlers(): void {
     return getTracker().getStatus();
   });
 
-  // AMD Import
-  ipcMain.handle('amd:import', async (_event, customPath?: string) => {
-    return importAMDDatabase(customPath, { excludeUtilities: true });
-  });
-
   // Screenshot Sync
   ipcMain.handle('sync:screenshots', async (_event, options) => {
     return syncScreenshots(options);
@@ -476,10 +519,10 @@ function registerIpcHandlers(): void {
 
   // Save Vault (backup / restore save game) — initialized lazily on first
   // use so app startup never stats the (often HDD-hosted) vault root
-  let saveVaultReady = false;
+  let saveVaultDb: ReturnType<typeof getDb> | null = null;
   const ensureSaveVault = (): void => {
-    if (saveVaultReady) return;
-    saveVaultReady = true;
+    if (saveVaultDb === getDb()) return;
+    saveVaultDb = getDb();
     try {
       initSaveVault();
     } catch (err) {
@@ -627,6 +670,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:save', async (_event, patch: Partial<AppSettings>) => {
     const updated = saveAppSettings(patch);
+    persistDevicePreferences(app.getPath('userData'));
     const f6 = getF6CaptureManager();
     f6.setHotkey(updated.screenshotHotkey, updated.screenshotHotkeyVk);
     f6.setEnabled(updated.screenshotEnabled);
@@ -738,11 +782,11 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('auth:login', async () => {
-    return login();
+    return changeAccount(() => login());
   });
 
   ipcMain.handle('auth:logout', async () => {
-    await logout();
+    await changeAccount(() => logout());
     return true;
   });
 
@@ -807,9 +851,13 @@ function registerIpcHandlers(): void {
 
   // Multi-device game library sync
   ipcMain.handle('community:syncLibrary', async (_event, options?: { mode?: 'merge' | 'overwrite' }) => {
+    if (changingAccount) throw new Error('Account change in progress');
     return syncLibraryWithCloud(options);
   });
-  ipcMain.handle('community:syncReviews', async () => syncLocalReviews());
+  ipcMain.handle('community:syncReviews', async () => {
+    if (changingAccount) throw new Error('Account change in progress');
+    return syncLocalReviews();
+  });
   ipcMain.handle('community:getCloudLibrary', async () => {
     return getCloudLibrary();
   });
@@ -972,7 +1020,7 @@ app.whenReady().then(() => {
   registerMediaProtocolHandler();
 
   // Initialize Database
-  initDb();
+  openAccountLibrary(getAuthStatus().profile?.uid || null, app.getPath('userData'));
 
   // Purge legacy non-game utilities (e.g. mRemoteNG, Antigravity, Cursor) stored before filters existed
   try {
@@ -1032,7 +1080,7 @@ app.whenReady().then(() => {
   }
   const ptWatch = getPlaytimeWatchImporter();
   ptWatch.autoRegisterGames = appSettings.autoDetectGames;
-  ptWatch.start(5000);
+  if (getAuthStatus().loggedIn) ptWatch.start(5000);
 
   // Auto-enrich covers asynchronously in background without delaying window display
   setTimeout(() => {
@@ -1056,11 +1104,11 @@ app.whenReady().then(() => {
   }, 6 * 60 * 60 * 1000);
 
   // Start AMD Adrenalin Live Auto-Sync Watcher
-  if (appSettings.amdWatcherEnabled) {
-    const amdWatcher = getAMDWatcher();
-    amdWatcher.onGameAdded = (game) => {
-      mainWindow?.webContents.send('game:added', game);
-    };
+  const amdWatcher = getAMDWatcher();
+  amdWatcher.onGameAdded = (game) => {
+    mainWindow?.webContents.send('game:added', game);
+  };
+  if (appSettings.amdWatcherEnabled && getAuthStatus().loggedIn) {
     amdWatcher.start(5000);
   }
 
@@ -1104,7 +1152,7 @@ app.whenReady().then(() => {
       } catch {}
     }
   };
-  tracker.start((appSettings.pollIntervalSeconds || 5) * 1000);
+  if (getAuthStatus().loggedIn) tracker.start((appSettings.pollIntervalSeconds || 5) * 1000);
   initDiscordDetectable();
 
   // Máy NVIDIA không có PresentMon bundle như AMD — tự tải bản chính thức
@@ -1120,7 +1168,7 @@ app.whenReady().then(() => {
   f6Manager.onScreenshotSynced = (info) => {
     mainWindow?.webContents.send('screenshot:synced', info);
   };
-  f6Manager.start(50);
+  if (getAuthStatus().loggedIn) f6Manager.start(50);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

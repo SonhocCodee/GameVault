@@ -3,6 +3,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { getDb, getDbDir, recalculatePlaytime } from './db.ts';
 import { getTracker } from './tracker.ts';
+import { canImportDeviceHistory, ownedSessionSlices } from './account-library.ts';
 
 /**
  * Playtime Watchdog importer: mirrors AMDWatcher, but reads the session log
@@ -55,6 +56,8 @@ export class PlaytimeWatchImporter {
 
   public checkAndSync(customVaultDb?: DatabaseSync, customLogPath?: string): PtWatchSyncSummary {
     const summary: PtWatchSyncSummary = { importedSessions: 0, updated: false };
+    const db = customVaultDb || getDb();
+    if (!canImportDeviceHistory(db)) return summary;
     const logPath = customLogPath || getPlaytimeWatchLogPath();
     if (!fs.existsSync(logPath)) return summary;
 
@@ -77,14 +80,16 @@ export class PlaytimeWatchImporter {
     }
     if (!raw) return summary;
 
-    const db = customVaultDb || getDb();
     const closed = Array.isArray(raw.sessions)
       ? (raw.sessions as WatchLogSession[])
       : raw.sessions
         ? [raw.sessions as WatchLogSession]
         : [];
     const running = raw.running && raw.running.exe ? (raw.running as WatchLogSession) : null;
-    const all: WatchLogSession[] = [...closed, ...(running ? [running] : [])];
+    const all: WatchLogSession[] = [...closed, ...(running ? [running] : [])].flatMap(session =>
+      ownedSessionSlices(db, String(session.start || ''), session.end || session.last || null)
+        .map(slice => ({ ...session, start: slice.start, end: session.end || !slice.isRunning ? slice.end || undefined : undefined, last: slice.end || undefined })),
+    );
 
     const gameIds = new Map<string, number>();
     const touched = new Set<number>();
@@ -178,6 +183,7 @@ export class PlaytimeWatchImporter {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
     }
+    this.lastLogStamp = null;
   }
 }
 

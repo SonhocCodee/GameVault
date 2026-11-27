@@ -7,7 +7,6 @@ import type {
   MediaItem,
   ScreenshotSyncSummary,
   ScreenshotSyncOptions,
-  AMDImportSummary,
   TrackerStatus,
   SteamCoversResult,
   WebImageCandidate,
@@ -81,11 +80,6 @@ const electronAPI: ElectronAPI = {
   },
   getSessions: (gameId?: number): Promise<Session[]> => {
     return ipcRenderer.invoke('db:getSessions', gameId);
-  },
-
-  // AMD Import
-  importAMDDatabase: (customPath?: string): Promise<AMDImportSummary> => {
-    return ipcRenderer.invoke('amd:import', customPath);
   },
 
   // Screenshot Sync

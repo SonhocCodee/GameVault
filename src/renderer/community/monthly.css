@@ -1,0 +1,117 @@
+.gv-monthly-layout {
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.gv-monthly-history {
+  padding-right: 18px;
+  border-right: 1px solid var(--gv-border);
+  min-width: 0;
+}
+.gv-monthly-history h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.gv-monthly-history summary {
+  cursor: pointer;
+  padding: 8px 2px;
+  font-weight: 700;
+}
+.gv-monthly-history ul,
+.gv-monthly-board ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.gv-monthly-history ul {
+  margin: 0 0 10px 7px;
+  padding-left: 7px;
+  border-left: 1px solid var(--gv-border);
+}
+.gv-community .gv-monthly-history button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gv-muted);
+  font-weight: 500;
+  text-align: left;
+}
+.gv-community .gv-monthly-history button[aria-current="date"] {
+  background: var(--gv-accent-soft);
+  color: var(--gv-text);
+  font-weight: 700;
+}
+.gv-monthly-history button span { font-size: 10px; }
+.gv-monthly-history > p { margin-top: 18px; font-size: 12px; }
+.gv-monthly-content { min-width: 0; }
+.gv-monthly-period { gap: 10px; font-size: 12px; }
+.gv-monthly-boards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.gv-monthly-board { min-width: 0; }
+.gv-monthly-board header { display: grid; gap: 7px; padding-bottom: 16px; }
+.gv-monthly-board h3 { display: flex; align-items: center; gap: 8px; }
+.gv-monthly-board h3 svg { color: var(--gv-accent); }
+.gv-monthly-board header p { font-size: 12px; min-height: 38px; }
+.gv-monthly-board ol { border-top: 1px solid var(--gv-border); }
+.gv-monthly-board li { border-bottom: 1px solid var(--gv-border); }
+.gv-community .gv-monthly-game {
+  display: grid;
+  grid-template-columns: 18px 42px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 100px;
+  gap: 10px;
+  padding: 14px 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  font-weight: 400;
+  transition: background-color 150ms ease;
+}
+.gv-community .gv-monthly-game.is-first { background: var(--gv-accent-soft); }
+.gv-community .gv-monthly-game:hover,
+.gv-community .gv-monthly-history button:hover { background: var(--gv-surface-3); }
+.gv-monthly-rank { color: var(--gv-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.gv-monthly-game.is-first .gv-monthly-rank { color: var(--gv-text); font-weight: 800; }
+.gv-monthly-cover { display: block; width: 42px; height: 60px; object-fit: cover; border-radius: 4px; }
+.gv-monthly-cover-empty { display: grid; place-items: center; background: var(--gv-surface-2); color: var(--gv-muted); }
+.gv-monthly-game-info { display: grid; gap: 4px; min-width: 0; }
+.gv-monthly-game-title { color: var(--gv-text); font-size: 13px; line-height: 1.4; font-weight: 700; overflow-wrap: anywhere; }
+.gv-monthly-game-info .gv-muted { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 11px; line-height: 1.4; }
+.gv-monthly-few-reviews { font-size: 10px; color: var(--gv-muted); }
+.gv-monthly-metric { display: grid; gap: 3px; text-align: right; font-variant-numeric: tabular-nums; }
+.gv-monthly-metric strong { font-size: 21px; font-weight: 800; color: var(--gv-text); line-height: 1.2; }
+.gv-monthly-metric > span { color: var(--gv-muted); font-size: 10px; white-space: nowrap; }
+.gv-monthly-board footer { padding-top: 12px; color: var(--gv-muted); font-size: 11px; }
+.gv-monthly-empty { padding: 24px 0; border-block: 1px solid var(--gv-border); color: var(--gv-muted); font-size: 13px; }
+.gv-monthly-rules { border-top: 1px solid var(--gv-border); padding-top: 16px; font-size: 12px; }
+.gv-monthly-rules summary { cursor: pointer; font-weight: 600; color: var(--gv-text); }
+.gv-monthly-rules > div { padding-top: 12px; max-width: 75ch; }
+.gv-monthly summary:focus-visible,
+.gv-community .gv-monthly button:focus-visible { outline: 2px solid var(--gv-accent); outline-offset: 3px; }
+@media (max-width: 1100px) {
+  .gv-monthly-boards { grid-template-columns: minmax(0, 1fr); gap: 30px; }
+  .gv-monthly-board header p { min-height: 0; }
+}
+@media (max-width: 600px) {
+  .gv-monthly-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .gv-monthly-history { border-right: 0; border-bottom: 1px solid var(--gv-border); padding: 0 0 12px; }
+  .gv-monthly-history h3 { margin-bottom: 4px; }
+  .gv-monthly-history ul { display: flex; flex-wrap: wrap; gap: 6px; }
+  .gv-community .gv-monthly-history button { width: auto; gap: 8px; }
+  .gv-monthly-history > p { margin-top: 6px; }
+  .gv-community .gv-monthly-game { gap: 8px; padding-inline: 4px; }
+  .gv-monthly-metric strong { font-size: 20px; }
+}

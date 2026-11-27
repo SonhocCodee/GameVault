@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getDb, recalculatePlaytime } from './db.ts';
+import { getDb, getSetting, recalculatePlaytime } from './db.ts';
+import { LIBRARY_ACCOUNT_KEY, canImportDeviceHistory, ownedSessionSlices } from './account-library.ts';
 import type { AMDImportSummary } from '../shared/types.js';
 import {
   KNOWN_LAUNCHER_OR_CLIENT_REGEX,
@@ -192,6 +193,8 @@ export function importAMDDatabase(
   }
 
   const vaultDb = options?.targetDb || getDb();
+  if (!canImportDeviceHistory(vaultDb)) return { importedGames: 0, importedSessions: 0, skippedGames: 0 };
+  const accountScoped = getSetting(LIBRARY_ACCOUNT_KEY, vaultDb) !== null;
   const amdDb = new DatabaseSync(amdPath, { readOnly: true });
 
   let rawGames: any[] = [];
@@ -210,6 +213,16 @@ export function importAMDDatabase(
   }
 
   amdDb.close();
+
+  if (accountScoped) {
+    rawSessions = rawSessions.flatMap(session => ownedSessionSlices(
+      vaultDb, String(session.Start || ''), session.End ? String(session.End) : null,
+    ).map(slice => ({ ...session, Start: slice.start, End: slice.end, IsRunning: session.IsRunning && slice.isRunning })));
+    const ownedGameIds = new Set(rawSessions.map(session => session.GameID));
+    // Installed games and lifetime driver counters describe the whole PC.
+    // Only actual sessions owned by this account may introduce a game.
+    rawGames = rawGames.filter(game => ownedGameIds.has(game.GameID));
+  }
 
   // Read gmdb.blb (AMD UI profile cache) for accurate total played minutes
   const blbMap = new Map<string, number>();
@@ -339,7 +352,7 @@ export function importAMDDatabase(
     const exeName = exePath ? path.basename(exePath) : '';
     const rawPlayTotal = Number(g.PlayTotal) || 0;
     const blbMinutes = blbMap.get(title.toLowerCase().trim()) || (rawTitle ? blbMap.get(rawTitle.toLowerCase().trim()) : 0) || 0;
-    const playtime = Math.max(rawPlayTotal, blbMinutes);
+    const playtime = accountScoped ? 0 : Math.max(rawPlayTotal, blbMinutes);
     // Folder probe (fs.existsSync on the game's drive) only for brand-new
     // games: re-probing every sync would wake sleeping HDDs every 5 seconds
     let steamId = typeof g.SteamID === 'number' ? g.SteamID : -1;

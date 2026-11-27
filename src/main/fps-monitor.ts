@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getDbDir, updateSessionFps } from './db.ts';
+import { getDb, getDbDir, updateSessionFps } from './db.ts';
 import { findPresentMon, downloadPresentMon, getManagedPresentMonPath } from './presentmon.ts';
 import type { FpsStatus } from '../shared/types.js';
 
@@ -314,6 +314,7 @@ export class FpsMonitor {
    * and stores them on the session row. Safe to call fire-and-forget.
    */
   public async finishCapture(result: { sessionId?: number; discarded?: boolean }): Promise<void> {
+    const db = getDb();
     const cap = this.activeCapture;
     if (!cap) return;
     if (result?.sessionId && result.sessionId !== cap.sessionId) return; // stale close event
@@ -349,7 +350,7 @@ export class FpsMonitor {
         console.warn('[fps] Failed to read/parse PresentMon CSV:', err);
       }
 
-      if (metrics) {
+      if (metrics && getDb() === db) {
         updateSessionFps(cap.sessionId, {
           fps_avg: metrics.fps_avg,
           fps_samples: metrics.fps_samples,

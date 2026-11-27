@@ -4,7 +4,7 @@ File này lưu tóm tắt mỗi lượt đẩy code (`git push`) để đồng b
 Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 > **Quy ước:**
-> - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
+> - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->`
 
 ## [2026-11-26 19:34] — Máy: CNTT-PM6 — Branch: main
 
@@ -47,6 +47,28 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 ---
 
 <!-- LATEST_FIRST -->
+
+## [2026-11-27 10:15] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Bảng xếp hạng tháng (`MonthlyRankings`)**:
+  - Thêm `MONTHLY_RANKINGS.md`, `worker/migrations/0009_monthly_rankings.sql`, `worker/src/monthly-rankings.ts`, `worker/src/ranking-eligibility.ts`, `src/shared/monthly.ts`, `src/renderer/community/MonthlyRankings.tsx`, `src/renderer/community/monthly.css`, `tests/monthly-rankings.test.js`.
+  - Cập nhật `worker/schema.sql`, `worker/src/routes/community.ts`, `src/shared/community.ts`, `src/renderer/community/CommunityHub.tsx`, `src/renderer/community/DesktopCommunity.tsx`, `src/renderer/community/GameHub.tsx`, `scripts/community-preview.js`, `tests/community.test.js`.
+- **Cô lập thư viện theo tài khoản (`Account Library Isolation`)**:
+  - Thêm `src/main/account-library.ts` và `tests/account-library.test.js`.
+  - Cập nhật `src/main/auth.ts`, `src/main/cloud-db.ts`, `src/main/main.ts`, `src/main/tracker.ts`, `src/main/importer.ts`, `src/main/ptwatch.ts`, `src/main/fps-monitor.ts`, `src/main/performance-context.ts`, `tests/auth.test.js`, `tests/library-sync.test.js`.
+- **Dọn UI & gỡ `ImportModal`**:
+  - Xóa `src/renderer/components/ImportModal.tsx`; cập nhật `src/preload/preload.ts`, `src/renderer/App.tsx`, `src/renderer/components/Navbar.tsx`, `src/shared/types.ts`, `tests/ui.test.js`.
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm run build`: Pass (`scripts/build.js` + `vite build`).
+- `npm test`: Pass (544 tests: 540 pass, 0 fail, 4 skipped).
+
+### Bàn giao / Tiếp theo cho máy kia
+- Sau khi `git pull`, chạy `npm run build` và `npm test` trong `GameVault/` để xác nhận đồng bộ.
+- Khi deploy bảng xếp hạng tháng lên production, chạy migration `worker/migrations/0009_monthly_rankings.sql` trên D1 trước khi `npm run deploy:worker` (chi tiết trong `MONTHLY_RANKINGS.md`).
 
 ## [2026-11-26 19:34] — Máy: CNTT-PM6 — Branch: main
 

@@ -3,7 +3,6 @@ import {
   Gamepad2,
   Search,
   SlidersHorizontal,
-  Download,
   Zap,
   Plus,
   Trophy,
@@ -44,7 +43,6 @@ export interface NavbarProps {
   totalPlaytimeMinutes: number;
   completedGamesCount: number;
   trackerStatus?: TrackerStatus | null;
-  onOpenImportModal: () => void;
   onOpenSyncModal: (tab?: 'library' | 'drive_media' | 'local_f6') => void;
   onOpenAddGameModal: () => void;
   onOpenWishlistModal?: () => void;
@@ -90,7 +88,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   totalPlaytimeMinutes,
   completedGamesCount,
   trackerStatus,
-  onOpenImportModal,
   onOpenSyncModal,
   onOpenAddGameModal,
   onOpenWishlistModal,
@@ -285,7 +282,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </button>
 
-          {/* Quick Tools Dropdown (F6 Sync, AMD Import, Steam Wishlist) */}
+          {/* Quick Tools Dropdown (F6 Sync, Steam Wishlist) */}
           <div className="relative shrink-0" ref={toolsRef}>
             <button
               onClick={() => setToolsOpen(!toolsOpen)}
@@ -294,7 +291,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ? 'border-[#ff2a44] bg-[#202433] text-white ring-1 ring-[#ff2a44]/40'
                   : 'border-[#2a2e3d] bg-[#161821] text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#1f2230] hover:text-[#ff2a44]'
               }`}
-              title="Công cụ đồng bộ ảnh F6, Import AMD và tìm game Steam"
+              title="Công cụ đồng bộ ảnh F6 và tìm game Steam"
             >
               <Zap className="h-3.5 w-3.5 text-amber-400" />
               <span>Công cụ</span>
@@ -309,7 +306,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {toolsOpen && (
               <div className="absolute right-0 mt-2 w-64 rounded-xl border border-[#2a2e3d] bg-[#161822] p-1.5 shadow-2xl backdrop-blur-md z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#8e95a5] border-b border-[#2a2e3d]/60 mb-1">
-                  Đồng bộ &amp; Nhập dữ liệu
+                  Đồng bộ &amp; Tiện ích
                 </div>
 
                 <button
@@ -341,22 +338,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div>
                     <div className="font-semibold text-white group-hover:text-amber-400">Gom ảnh (C: ➔ E: &amp; G:)</div>
                     <div className="text-[10px] text-[#8e95a5]">Cut ảnh sang HDD E &amp; đẩy lên Google Drive</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setToolsOpen(false);
-                    onOpenImportModal();
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] group"
-                >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-rose-500/10 text-rose-400 group-hover:bg-rose-500 group-hover:text-white transition-colors">
-                    <Download className="h-3.5 w-3.5" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-rose-400">1-Click Import AMD</div>
-                    <div className="text-[10px] text-[#8e95a5]">Nhập giờ chơi từ RGStats.db</div>
                   </div>
                 </button>
 

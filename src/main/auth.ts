@@ -405,6 +405,15 @@ export function getCurrentSession(): AuthSession | null {
   return loadSession(authOptions);
 }
 
+function assertSameSession(session: AuthSession): void {
+  const current = loadSession(authOptions);
+  if (!current || current.user.uid !== session.user.uid ||
+      current.sessionToken !== session.sessionToken ||
+      current.google.refreshToken !== session.google.refreshToken) {
+    throw new Error('Account changed during token refresh');
+  }
+}
+
 export function getAuthStatus(): AuthStatus {
   const session = loadSession(authOptions);
   const config = authOptions.config || loadCloudConfig(authOptions);
@@ -730,6 +739,8 @@ export async function getValidSessionToken(): Promise<string> {
   }
 
   const workerAuth = await exchangeGoogleIdTokenForSession(config, idToken, fetchImpl);
+  assertSameSession(session);
+  if (workerAuth.user.uid !== session.user.uid) throw new Error('Token refresh returned a different account');
   const updated: AuthSession = {
     ...session,
     sessionToken: workerAuth.token,
@@ -777,6 +788,7 @@ export async function getValidGoogleAccessToken(): Promise<string> {
   }
   const fetchImpl = getFetch();
   const refreshed = await refreshGoogleTokens(config, session.google.refreshToken, fetchImpl);
+  assertSameSession(session);
   const updated: AuthSession = {
     ...session,
     google: {
@@ -793,16 +805,17 @@ export async function getValidGoogleAccessToken(): Promise<string> {
 
 export async function logout(): Promise<void> {
   const session = loadSession(authOptions);
+  // Invalidate immediately, including refreshes already waiting on the network.
+  clearSession(authOptions);
   if (session?.google.accessToken) {
     try {
-      await getFetch()(GOOGLE_REVOKE_URL, {
+      void getFetch()(GOOGLE_REVOKE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ token: session.google.accessToken }).toString(),
-      });
+      }).catch(() => {});
     } catch {
       // revoke is best-effort
     }
   }
-  clearSession(authOptions);
 }

@@ -194,6 +194,54 @@ test("profile API rejects arbitrary images, upload keys and invalid preset IDs",
   assert.equal(f.d1.sqlite.prepare("SELECT COUNT(*) AS n FROM community_images").get().n, 0);
 });
 
+test("game review artwork belongs to the author for guests, owners and other accounts", async () => {
+  const f = await fixture();
+  f.d1.sqlite.prepare("UPDATE users SET photo_url='https://example.com/alice.jpg' WHERE uid='alice'").run();
+  f.d1.sqlite.prepare("INSERT INTO game_covers(game_key,title,steam_id,cover_url,banner_url) VALUES ('814380','Sekiro',814380,'/api/images/sekiro-cover.jpg','/api/images/sekiro-banner.jpg')").run();
+  f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,steam_id,status,playtime_minutes) VALUES ('alice','814380','Sekiro',814380,'completed',120)").run();
+  await f.call("/me", "GET", undefined, "alice");
+  await f.call("/me", "PUT", { nickname: "Bob", avatarPreset: "dice", bannerPreset: "velocity" }, "bob");
+  assert.equal((await f.call("/games/814380/reviews", "POST", { title: "Sekiro", score: 9, review: "Public review" }, "alice")).status, 200);
+
+  for (const [avatarPreset, bannerPreset] of [[null, null], ["gamepad", "aurora"]]) {
+    await f.call("/me", "PUT", { nickname: "Alice", avatarPreset, bannerPreset }, "alice");
+    const author = await (await f.call("/profiles/alice")).json();
+    for (const viewer of [undefined, "alice", "bob"]) {
+      const response = await f.call("/games/814380/reviews", "GET", undefined, viewer);
+      assert.equal(response.status, 200);
+      const { items } = await response.json();
+      assert.equal(items.length, 1);
+      assert.equal(items[0].uid, "alice");
+      assert.equal(items[0].avatarUrl, author.avatarUrl);
+      assert.equal(items[0].bannerUrl, new URL(author.bannerUrl, "https://example.com").href);
+      assert.ok(!JSON.stringify(items).includes("@example.com"));
+    }
+  }
+  assert.equal((await f.call("/games/814380/reviews", "POST", { title: "Sekiro", score: 1, review: "Anonymous edit" })).status, 401);
+  assert.equal((await f.call("/games/814380/reviews", "DELETE")).status, 401);
+});
+
+test("review default banners use public library artwork and keep visibility filters", async () => {
+  const f = await fixture();
+  await f.call("/games/814380/reviews", "POST", { title: "Sekiro", score: 9, review: "Public review" }, "alice");
+  f.d1.sqlite.prepare("INSERT INTO game_covers(game_key,title,cover_url,banner_url) VALUES ('t_private','Private','/api/images/private-cover.jpg','/api/images/private-banner.jpg'),('431960','Wallpaper Engine',NULL,'/api/images/idle-banner.jpg'),('814380','Sekiro','/api/images/public-cover.jpg',NULL)").run();
+  f.d1.sqlite.prepare("INSERT INTO user_library(uid,game_key,title,status,playtime_minutes) VALUES ('alice','t_private','Private','completed',9999)").run();
+  f.d1.sqlite.prepare("INSERT INTO community_library(uid,game_key,title,status,playtime_minutes) VALUES ('alice','431960','Wallpaper Engine','playing',9999),('alice','814380','Sekiro','completed',120)").run();
+  const reviews = async (viewer) => (await (await f.call("/games/814380/reviews", "GET", undefined, viewer)).json()).items;
+  assert.equal((await reviews())[0].bannerUrl, "https://example.com/api/images/public-cover.jpg");
+  f.d1.sqlite.prepare("UPDATE community_profiles SET share_library=0 WHERE uid='alice'").run();
+  assert.equal((await reviews())[0].bannerUrl, null);
+  f.d1.sqlite.prepare("UPDATE community_profiles SET share_library=1 WHERE uid='alice'").run();
+  await f.call("/blocks/alice", "PUT", undefined, "bob");
+  assert.equal((await reviews("bob")).length, 0);
+  assert.equal((await reviews()).length, 1);
+  f.d1.sqlite.prepare("UPDATE community_review_meta SET hidden=1 WHERE uid='alice' AND game_key='814380'").run();
+  assert.equal((await reviews()).length, 0);
+  f.d1.sqlite.prepare("UPDATE community_review_meta SET hidden=0 WHERE uid='alice'").run();
+  f.d1.sqlite.prepare("UPDATE community_profiles SET suspended=1 WHERE uid='alice'").run();
+  assert.equal((await reviews()).length, 0);
+});
+
 test("player rankings include all metrics, sort, paginate and stay public", async () => {
   const f = await fixture();
   for (const [uid, game, status, minutes] of [

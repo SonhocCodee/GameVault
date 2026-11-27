@@ -9,7 +9,9 @@ import {
   getCloudLibrary,
   syncLibraryWithCloud,
 } from '../src/main/cloud-db.ts';
-import { configureAuth, persistSession, clearSession } from '../src/main/auth.ts';
+import { configureAuth, persistSession, clearSession, getCurrentSession } from '../src/main/auth.ts';
+import { LIBRARY_ACCOUNT_KEY } from '../src/main/account-library.ts';
+import { setSetting } from '../src/main/db.ts';
 import { createTestWorkerEnv, createTestSessionToken, authHeader } from './test-helpers-cloudflare.js';
 import worker from '../worker/src/index.ts';
 
@@ -92,6 +94,67 @@ describe('Multi-Device Game Library Sync Suite (Cloudflare D1 + Worker)', () => 
         fs.rmSync(dir, { recursive: true, force: true });
       } catch {}
     }
+  });
+
+  test('refuses to upload a library owned by a different account', async () => {
+    createGame({ title: 'Other account data', playtime_minutes: 9999, user_rating: 10 });
+    setSetting(LIBRARY_ACCOUNT_KEY, 'different-owner');
+    await assert.rejects(syncLibraryWithCloud(), /another account/);
+    const rows = await d1.prepare('SELECT * FROM user_library WHERE uid=?').bind('gamer-alpha').all();
+    assert.equal(rows.results.length, 0);
+  });
+
+  test('an empty authoritative cloud snapshot removes stale local games, sessions and reviews', async () => {
+    const game = createGame({ title: 'Accidentally copied game', user_rating: 10, playtime_minutes: 9999,
+      cover_url: 'https://cdn.test/cover.jpg', banner_url: 'https://cdn.test/banner.jpg' });
+    createSession({ game_id: game.id, start_time: '2026-11-20T10:00:00Z', end_time: '2026-11-20T11:00:00Z', duration_minutes: 60, source: 'tracker' });
+    await d1.prepare("INSERT INTO user_sync_state(uid,sync_epoch,updated_at) VALUES(?,1,datetime('now'))").bind('gamer-alpha').run();
+    const result = await syncLibraryWithCloud();
+    assert.equal(result.authoritativePull, true);
+    assert.deepEqual(getGames(), []);
+    assert.deepEqual(getSessions(), []);
+    assert.equal((await d1.prepare('SELECT COUNT(*) AS n FROM ratings').first()).n, 0);
+    assert.equal((await d1.prepare('SELECT COUNT(*) AS n FROM user_library').first()).n, 0);
+  });
+
+  test('switching accounts while an upload is waiting keeps the new library and request credentials isolated', async () => {
+    createGame({ title: 'Account A game', playtime_minutes: 120, user_rating: 9,
+      cover_url: 'https://cdn.test/a.jpg', banner_url: 'https://cdn.test/a-banner.jpg' });
+    let release;
+    let started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const waiting = new Promise(resolve => { started = resolve; });
+    let holdFirst = true;
+    configureCloudDb({ fetchImpl: async (url, init = {}) => {
+      const request = new Request(url, init);
+      if (String(url).endsWith('/api/library/sync') && holdFirst) {
+        holdFirst = false;
+        started();
+        await gate;
+      }
+      return worker.fetch(request, env);
+    } });
+    const pendingA = syncLibraryWithCloud();
+    const rejectedA = assert.rejects(pendingA, /account changed/i);
+    await waiting;
+    const sessionA = getCurrentSession();
+    initDb(path.join(newTmp('account-b'), 'gamevault.db'));
+    const tokenB = await createTestSessionToken({ uid: 'gamer-beta', email: 'b@vault.vn', displayName: 'B' }, env.SESSION_SECRET);
+    await d1.prepare('INSERT INTO users(uid,email,display_name) VALUES(?,?,?)').bind('gamer-beta', 'b@vault.vn', 'B').run();
+    persistSession({ ...sessionA, sessionToken: tokenB, user: { ...sessionA.user, uid: 'gamer-beta', email: 'b@vault.vn' } }, { userDataDir });
+    setSetting(LIBRARY_ACCOUNT_KEY, 'gamer-beta');
+    createGame({ title: 'Account B game', playtime_minutes: 5, user_rating: 6,
+      cover_url: 'https://cdn.test/b.jpg', banner_url: 'https://cdn.test/b-banner.jpg' });
+    try {
+      const resultB = await syncLibraryWithCloud();
+      assert.equal(resultB.totalCount, 1);
+    } finally { release(); }
+    await rejectedA;
+    assert.deepEqual(getGames().map(game => game.title), ['Account B game']);
+    const libraryB = await d1.prepare('SELECT title FROM user_library WHERE uid=?').bind('gamer-beta').all();
+    assert.deepEqual(libraryB.results.map(game => game.title), ['Account B game']);
+    const ratingsB = await d1.prepare('SELECT game_title FROM ratings WHERE uid=?').bind('gamer-beta').all();
+    assert.deepEqual(ratingsB.results.map(game => game.game_title), ['Account B game']);
   });
 
   // ==========================================================================

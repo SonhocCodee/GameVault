@@ -53,6 +53,8 @@ import { ProfileActivity } from "./ProfileActivity.tsx";
 import { ProfileEditor } from "./ProfileEditor.tsx";
 import { CommunitySearch } from "./CommunitySearch.tsx";
 import { FollowButton } from "./FollowButton.tsx";
+import { MonthlyRankings } from "./MonthlyRankings.tsx";
+import { currentRankingMonth } from "../../shared/monthly.ts";
 import { Avatar, ConfirmModal, PlaytimeDisplay, playtimeBreakdown, scoreTierClass } from "./CommunityWidgets.tsx";
 import "./community.css";
 
@@ -104,7 +106,6 @@ export function CommunityHub({
   api,
   games = [],
   onAdd,
-  monthly,
   embedded = false,
   shellAuth,
   initialGame,
@@ -116,7 +117,6 @@ export function CommunityHub({
   api: CommunityAdapter;
   games?: SharedLibraryGame[];
   onAdd?: (g: PublicGame) => Promise<void>;
-  monthly?: React.ReactNode;
   embedded?: boolean;
   shellAuth?: AuthStatus | null;
   initialGame?: PublicGame | null;
@@ -163,6 +163,8 @@ export function CommunityHub({
     "all" | "offline" | "online"
   >("all");
   const [rankings, setRankings] = useState<Page<GameRanking>>(empty());
+  const [monthlyMonth, setMonthlyMonth] = useState(currentRankingMonth);
+  const [gameReturnTab, setGameReturnTab] = useState<"discover" | "monthly">("discover");
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [profileReviews, setProfileReviews] = useState<Page<CommunityPost>>(empty());
@@ -509,13 +511,17 @@ export function CommunityHub({
     setNotice("");
   };
 
-  const onGame = (g: PublicGame) => navigate({ game: g });
+  const onGame = (g: PublicGame) => {
+    setGameReturnTab(tab === "monthly" ? "monthly" : "discover");
+    navigate({ game: g });
+  };
   const onProfile = (uid: string) => navigate({ profile: uid });
 
   useEffect(() => {
+    if (!embedded) return;
     if (initialGame) navigate({ game: initialGame });
     else switchTab(profileRequest ? "profile" : "feed");
-  }, [initialGame, profileRequest]);
+  }, [embedded, initialGame, profileRequest]);
 
   const searchCommunity = (request: CommunitySearchRequest) => {
     setSearchVersion((version) => version + 1);
@@ -687,7 +693,7 @@ export function CommunityHub({
               ["players", "Top người chơi", Trophy],
               ["profile", "Hồ sơ", UserRound],
               ["notifications", "Thông báo", Bell],
-              ...(monthly ? [["monthly", "Game tháng này", CalendarDays]] : []),
+              ["monthly", "Game tháng này", CalendarDays],
               ...(me?.isAdmin ? [["moderation", "Quản trị", Shield]] : []),
             ] as const
           ).map(([id, label, Icon]) => (
@@ -776,7 +782,8 @@ export function CommunityHub({
           api={api}
           game={route.game}
           me={me}
-          onBack={() => switchTab("discover")}
+          onBack={() => switchTab(gameReturnTab)}
+          backLabel={gameReturnTab === "monthly" ? "Quay lại Game tháng này" : undefined}
           onGame={onGame}
           onProfile={onProfile}
           onAdd={onAdd}
@@ -1928,7 +1935,7 @@ export function CommunityHub({
           )}
         </section>
       ) : tab === "monthly" ? (
-        monthly
+        <MonthlyRankings api={api} onGame={onGame} month={monthlyMonth} onMonthChange={setMonthlyMonth} />
       ) : null}
 
       {toast && (

@@ -564,6 +564,16 @@ export class PlaytimeTracker {
     }
   }
 
+  public useDatabase(db: DatabaseSync): void {
+    // The caller stops the tracker before closing the previous connection.
+    this.db = db;
+    this.activeSession = null;
+    this.unfocusedPollCount = 0;
+    this.pollCount = 0;
+    this.verifiedGamePathCache.clear();
+    this.nonGamePathCache.clear();
+  }
+
   public isSystemProcess(exeName?: string | null): boolean {
     if (!exeName) return true;
     const lower = exeName.toLowerCase().trim();
@@ -670,7 +680,9 @@ export class PlaytimeTracker {
         if (!existing.cover_url) {
           try {
             const { autoEnrichAllGameCovers } = require('./covers.ts');
+            const db = this.db;
             autoEnrichAllGameCovers(this.db).then(() => {
+              if (this.db !== db) return;
               const fresh = this.db
                 .prepare('SELECT * FROM games WHERE id = ?')
                 .get(existing.id) as unknown as Game;
@@ -724,12 +736,14 @@ export class PlaytimeTracker {
 
       // 2. Asynchronously enrich cover art and cache to cloud (Single source of truth)
       try {
+        const db = this.db;
         resolveWebCoversForGame(this.db, {
           id: newId,
           title: cleanTitle,
           steam_id: detectedSteamId > 0 ? detectedSteamId : undefined,
           exe_path: exePath || undefined,
         }).then((covers) => {
+          if (this.db !== db) return;
           const poster = covers.poster;
           const banner = covers.banner;
           if (poster || banner) {
