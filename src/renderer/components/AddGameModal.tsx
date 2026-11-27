@@ -1,16 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  BookmarkPlus,
   CheckCircle2,
   FolderOpen,
   Gamepad2,
   Loader2,
+  PauseCircle,
   Plus,
   Search,
   Sparkles,
+  Star,
+  Trophy,
   X,
+  XCircle,
 } from 'lucide-react';
-import type { Game, WishlistSearchResult } from '../../shared/types.js';
+import type { Game, GameStatus, WishlistSearchResult } from '../../shared/types.js';
 
 export interface AddGameModalProps {
   isOpen: boolean;
@@ -49,6 +54,9 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onC
   const [exeName, setExeName] = useState('');
   const [exePath, setExePath] = useState<string | null>(null);
   const [exeDetectedNote, setExeDetectedNote] = useState<string | null>(null);
+  const [status, setStatus] = useState<GameStatus>('playing');
+  const [userRating, setUserRating] = useState<number | null>(null);
+  const [notes, setNotes] = useState('');
   const [selectedSteam, setSelectedSteam] = useState<WishlistSearchResult | null>(null);
   const [steamResults, setSteamResults] = useState<WishlistSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -74,6 +82,9 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onC
       setExeName('');
       setExePath(null);
       setExeDetectedNote(null);
+      setStatus('playing');
+      setUserRating(null);
+      setNotes('');
       setSelectedSteam(null);
       setSteamResults([]);
       setSearching(false);
@@ -135,7 +146,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onC
           setSearching(false);
         }
       }
-    }, 300);
+    }, 150);
 
     return () => {
       ++searchRequestRef.current;
@@ -247,7 +258,9 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onC
         steam_id: resolvedSteamId,
         cover_url: coverUrl,
         banner_url: bannerUrl,
-        status: 'playing',
+        status,
+        user_rating: status === 'completed' ? userRating : null,
+        notes: status === 'completed' && notes.trim() ? notes.trim() : null,
         playtime_minutes: 0,
       });
 
@@ -421,17 +434,100 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onC
           )}
 
           <div>
-            <label className="mb-1 block font-semibold text-[#8e95a5]">Trạng thái ban đầu:</label>
-            <div className="flex items-center justify-between rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2">
-              <span className="flex items-center gap-2 font-bold text-emerald-400">
-                <Gamepad2 className="h-4 w-4" />
-                <span>Đang chơi</span>
-              </span>
-              <span className="text-[10px] text-[#8e95a5]">
-                Mặc định — muốn chờ chơi thì tìm qua Wishlist
-              </span>
+            <label className="mb-1.5 block font-semibold text-[#8e95a5]">Trạng thái ban đầu:</label>
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+              {[
+                {
+                  value: 'playing' as GameStatus,
+                  label: 'Đang chơi',
+                  icon: Gamepad2,
+                  activeClass: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-400',
+                },
+                {
+                  value: 'backlog' as GameStatus,
+                  label: 'Wishlist (Chờ chơi)',
+                  icon: BookmarkPlus,
+                  activeClass: 'border-purple-500/60 bg-purple-500/15 text-purple-400',
+                },
+                {
+                  value: 'completed' as GameStatus,
+                  label: 'Đã phá đảo',
+                  icon: Trophy,
+                  activeClass: 'border-amber-500/60 bg-amber-500/15 text-amber-400',
+                },
+                {
+                  value: 'paused' as GameStatus,
+                  label: 'Tạm dừng',
+                  icon: PauseCircle,
+                  activeClass: 'border-sky-500/60 bg-sky-500/15 text-sky-400',
+                },
+                {
+                  value: 'dropped' as GameStatus,
+                  label: 'Bỏ dở',
+                  icon: XCircle,
+                  activeClass: 'border-rose-500/60 bg-rose-500/15 text-rose-400',
+                },
+              ].map((opt) => {
+                const Icon = opt.icon;
+                const active = status === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setStatus(opt.value)}
+                    disabled={submitting}
+                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[11px] font-semibold transition-colors ${
+                      active
+                        ? opt.activeClass
+                        : 'border-[#2a2e3d] bg-[#0e1015] text-[#8e95a5] hover:border-[#3b4156] hover:text-white'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{opt.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
+
+          {status === 'completed' && (
+            <div className="space-y-2.5 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-1.5 font-semibold text-amber-400">
+                  <Star className="h-3.5 w-3.5" />
+                  <span>Điểm đánh giá (tuỳ chọn):</span>
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    step={0.5}
+                    value={userRating ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) {
+                        setUserRating(null);
+                      } else {
+                        const num = Math.max(1, Math.min(10, Number(v)));
+                        setUserRating(Number.isFinite(num) ? num : null);
+                      }
+                    }}
+                    placeholder="1-10"
+                    className="w-16 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2 py-1 text-center text-white outline-none focus:border-amber-400"
+                  />
+                  <span className="text-[11px] text-[#8e95a5]">/ 10</span>
+                </div>
+              </div>
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Ghi chú / cảm nhận về game (không bắt buộc)..."
+                className="w-full resize-none rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1.5 text-white outline-none focus:border-amber-400"
+              />
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-2 border-t border-[#2a2e3d] pt-3">
             <button

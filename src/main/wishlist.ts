@@ -1,4 +1,4 @@
-import { getDb, getGameByTitle, createGame } from './db.ts';
+import { getDb, findMatchingGame, createGame } from './db.ts';
 import { searchSteamApps, searchSteamCovers, type LiveResolveOptions } from './covers.ts';
 import type { Game } from '../shared/types.ts';
 
@@ -115,8 +115,10 @@ export async function addWishlistGame(
 
   const status = payload.status === 'completed' ? 'completed' : 'backlog';
 
+  const steamId = typeof payload.steamId === 'number' && payload.steamId > 0 ? payload.steamId : undefined;
+
   const db = getDb();
-  const existing = getGameByTitle(title);
+  const existing = findMatchingGame({ title, steam_id: steamId });
   if (existing) {
     if (existing.status === status) {
       throw new Error(`"${title}" đã nằm trong thư viện (${STATUS_LABELS[status]})`);
@@ -125,8 +127,6 @@ export async function addWishlistGame(
       `"${title}" đã có trong thư viện với trạng thái khác (${STATUS_LABELS[existing.status] || existing.status})`
     );
   }
-
-  const steamId = typeof payload.steamId === 'number' && payload.steamId > 0 ? payload.steamId : undefined;
 
   // Completed games may carry an optional rating/review; backlog entries do not.
   const rawRating = Number(payload.user_rating);

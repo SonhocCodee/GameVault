@@ -13,6 +13,8 @@ import {
   getGameByTitle,
   getGameByExeName,
   getGameByAmdId,
+  findMatchingGame,
+  mergeGameMetadata,
   createGame,
   updateGame,
   deleteGame,
@@ -430,6 +432,32 @@ describe('GameVault Database Engine (node:sqlite)', () => {
       const list = getGames();
       const found = list.find((g) => g.id === game.id);
       assert.equal(found.last_played_at, '2026-07-16T20:00:00');
+    });
+
+    test('findMatchingGame & mergeGameMetadata prevent duplicate games across exe/steam_id/normalized title', () => {
+      const existing = createGame({
+        title: 'ELDEN RING™',
+        steam_id: 1245620,
+        status: 'playing',
+      });
+
+      assert.equal(findMatchingGame({ exe_name: null, steam_id: 1245620, title: 'Elden Ring' })?.id, existing.id);
+      assert.equal(findMatchingGame({ title: 'Elden Ring' })?.id, existing.id);
+
+      const merged = mergeGameMetadata(existing, {
+        title: 'Elden Ring',
+        exe_name: 'eldenring.exe',
+        exe_path: 'D:\\Games\\ELDEN RING\\Game\\eldenring.exe',
+        cover_url: 'https://example.com/cover.jpg',
+      });
+
+      assert.equal(merged.id, existing.id);
+      assert.equal(merged.title, 'ELDEN RING™');
+      assert.equal(merged.exe_name, 'eldenring.exe');
+      assert.equal(merged.cover_url, 'https://example.com/cover.jpg');
+      assert.equal(getGames().filter((g) => g.steam_id === 1245620).length, 1);
+
+      assert.equal(findMatchingGame({ exe_name: 'ELDENRING.EXE' })?.id, existing.id);
     });
   });
 });

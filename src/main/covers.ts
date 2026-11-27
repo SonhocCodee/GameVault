@@ -587,18 +587,28 @@ async function providerStoreQuery(fetchImpl: FetchLike): Promise<SteamAppCandida
  * CDNs that stay reachable where steamcommunity.com is ISP-blocked.
  * Downloaded once (~20MB) and cached to disk for 30 days.
  */
+const appCatalogMemoryCache = new Map<string, { fetchedAt: number; apps: SteamAppCandidate[] }>();
+
 async function loadOrFetchAppCatalog(
   cacheDir: string,
   fetchImpl: FetchLike,
   options?: { allowFetch?: boolean }
 ): Promise<SteamAppCandidate[] | null> {
   const allowFetch = options?.allowFetch !== false;
+  const mem = appCatalogMemoryCache.get(cacheDir);
+  if (mem && Date.now() - mem.fetchedAt < APP_CATALOG_TTL_MS) {
+    return mem.apps;
+  }
+
   const file = path.join(cacheDir, APP_CATALOG_FILE);
-  let cached: { fetchedAt: number; apps: SteamAppCandidate[] } | null = null;
+  let cached: { fetchedAt: number; apps: SteamAppCandidate[] } | null = mem || null;
   try {
-    if (fs.existsSync(file)) {
+    if (!cached && fs.existsSync(file)) {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      if (parsed && Array.isArray(parsed.apps)) cached = parsed;
+      if (parsed && Array.isArray(parsed.apps)) {
+        cached = parsed;
+        appCatalogMemoryCache.set(cacheDir, parsed);
+      }
     }
   } catch {}
   if (cached && Date.now() - cached.fetchedAt < APP_CATALOG_TTL_MS) {
@@ -626,10 +636,12 @@ async function loadOrFetchAppCatalog(
         }
       }
       if (apps.length === 0) continue;
+      const fetchedAt = Date.now();
+      appCatalogMemoryCache.set(cacheDir, { fetchedAt, apps });
       try {
         if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
         const tmp = `${file}.tmp`;
-        fs.writeFileSync(tmp, JSON.stringify({ fetchedAt: Date.now(), apps }));
+        fs.writeFileSync(tmp, JSON.stringify({ fetchedAt, apps }));
         fs.renameSync(tmp, file);
       } catch {}
       return apps;
@@ -857,6 +869,16 @@ export async function searchSteamApps(
   const fetchImpl = opts.fetchImpl || fetch;
   const cacheDir = opts.cacheDir || app.getPath('userData');
   try {
+    // Fast-path: if the local Steam catalog is already cached (in-memory or on disk),
+    // filter and return immediately in <5ms instead of blocking on slow/ISP-blocked network providers.
+    const catalog = await loadOrFetchAppCatalog(cacheDir, fetchImpl, { allowFetch: false });
+    if (catalog && catalog.length > 0) {
+      const catalogHits = filterCatalogByQuery(catalog, clean);
+      if (catalogHits.length > 0) {
+        return rankCandidates(clean, catalogHits, opts.limit ?? 20);
+      }
+    }
+
     // Live search must not block on the ~20MB catalog download — it only
     // joins in once warmUpAppCatalog has cached it in the background. The
     // slow partial store-query scan is enrichment-only.

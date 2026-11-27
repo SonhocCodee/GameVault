@@ -6,6 +6,35 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-27 16:39] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Chống trùng lặp (x2 game trong DB) giữa thêm thủ công, Wishlist và Auto-detect**:
+  - Thêm `findMatchingGame` và `mergeGameMetadata` trong `src/main/db.ts`, tích hợp vào `db:createGame` (`src/main/main.ts`) để đối chiếu theo `exe_name`, `steam_id`, `title` (NOCASE) và `normalizeForMatch(title)`, tự gộp metadata còn thiếu thay vì tạo bản ghi thứ 2.
+  - Cập nhật `autoRegisterNewGame` trong `src/main/tracker.ts` để nhận diện `steam_id` sớm và đối chiếu cả theo `steam_id` lẫn tên chuẩn hóa trước khi tạo game mới.
+  - Cập nhật `addWishlistGame` trong `src/main/wishlist.ts` dùng `findMatchingGame`.
+- **Gộp chọn trạng thái ban đầu vào `AddGameModal.tsx`**:
+  - Cho phép chọn trực tiếp 1 trong 5 trạng thái (`Đang chơi`, `Wishlist (Chờ chơi)`, `Đã phá đảo`, `Tạm dừng`, `Bỏ dở`), kèm đánh giá & ghi chú tùy chọn khi chọn `Đã phá đảo`.
+- **Tối ưu tốc độ tìm kiếm Steam (`covers.ts`, `AddGameModal.tsx`)**:
+  - Thêm `appCatalogMemoryCache` (cache trong RAM) và fast-path trong `searchSteamApps` để trả kết quả ngay (~0–5ms) từ catalog local mà không bị chặn 4–8s bởi các provider mạng; giảm debounce gõ phím xuống `150ms`.
+- **Bump version `1.0.5`**:
+  - Cập nhật `package.json` lên `1.0.5` để `.github/workflows/release.yml` tự động build & publish bản cài đặt Windows lên GitHub Releases.
+
+### File chính đã thay đổi
+- `src/main/db.ts`, `src/main/main.ts`, `src/main/tracker.ts`, `src/main/wishlist.ts`, `src/main/covers.ts`
+- `src/renderer/components/AddGameModal.tsx`
+- `tests/db.test.js`, `tests/tracker.test.js`, `package.json`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+- `node --experimental-strip-types --test tests/db.test.js tests/tracker.test.js`: Pass.
+- `node --experimental-strip-types --test tests/wishlist.test.js tests/cloud-covers.test.js`: Pass (29/29).
+
+### Bàn giao cho máy kia (Notes / Next)
+- GitHub Actions workflow `.github/workflows/release.yml` sẽ tự động build & publish bản cài đặt `v1.0.5` lên GitHub Releases sau khi push `main`.
+- Lưu ý: trên máy `CNTT-PM6` còn một số file sửa dở trước đó (`community-web/`, `status-worker/`, `worker/`, `SettingsModal.tsx`, `SyncModal.tsx`) chưa được commit trong lượt này.
+
 ## [2026-11-27 15:47] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

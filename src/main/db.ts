@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
+import { normalizeForMatch } from './media.ts';
 import type { Game, Session, GameFilter, GameStatus, SessionSource, SavePathConfig, SaveBackup } from '../shared/types.js';
 
 let dbInstance: DatabaseSync | null = null;
@@ -391,6 +392,87 @@ export function getGameByAmdId(amdGameId: number): Game | null {
   const stmt = db.prepare('SELECT * FROM games WHERE amd_game_id = ?');
   const row = stmt.get(amdGameId);
   return (row as unknown as Game) || null;
+}
+
+/**
+ * Finds an existing game by exe_name, steam_id (> 0), exact title (NOCASE),
+ * or normalized title (stripping punctuation/spaces) to prevent duplicate rows.
+ */
+export function findMatchingGame(criteria: {
+  title?: string | null;
+  exe_name?: string | null;
+  steam_id?: number | null;
+}): Game | null {
+  const db = getDb();
+
+  const exeName = criteria.exe_name?.trim();
+  if (exeName) {
+    const byExe = db
+      .prepare('SELECT * FROM games WHERE exe_name = ? COLLATE NOCASE LIMIT 1')
+      .get(exeName) as unknown as Game | undefined;
+    if (byExe) return byExe;
+  }
+
+  const steamId = criteria.steam_id;
+  if (typeof steamId === 'number' && Number.isFinite(steamId) && steamId > 0) {
+    const bySteam = db
+      .prepare('SELECT * FROM games WHERE steam_id = ? LIMIT 1')
+      .get(steamId) as unknown as Game | undefined;
+    if (bySteam) return bySteam;
+  }
+
+  const title = criteria.title?.trim();
+  if (title) {
+    const byTitle = db
+      .prepare('SELECT * FROM games WHERE title = ? COLLATE NOCASE LIMIT 1')
+      .get(title) as unknown as Game | undefined;
+    if (byTitle) return byTitle;
+
+    const normTarget = normalizeForMatch(title);
+    if (normTarget.length >= 3) {
+      const rows = db.prepare('SELECT * FROM games').all() as unknown as Game[];
+      for (const row of rows) {
+        if (normalizeForMatch(row.title) === normTarget) {
+          return row;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Fills in missing exe/steam/artwork metadata on an existing game record
+ * without overwriting user-curated fields or creating a duplicate row.
+ */
+export function mergeGameMetadata(existing: Game, incoming: Partial<Game>): Game {
+  const patch: Partial<Game> = {};
+
+  if (!existing.exe_name && incoming.exe_name?.trim()) {
+    patch.exe_name = incoming.exe_name.trim();
+  }
+  if (!existing.exe_path && incoming.exe_path?.trim()) {
+    patch.exe_path = incoming.exe_path.trim();
+  }
+  if (
+    (existing.steam_id == null || existing.steam_id <= 0) &&
+    typeof incoming.steam_id === 'number' &&
+    incoming.steam_id > 0
+  ) {
+    patch.steam_id = incoming.steam_id;
+  }
+  if (!existing.cover_url && incoming.cover_url) {
+    patch.cover_url = incoming.cover_url;
+  }
+  if (!existing.banner_url && incoming.banner_url) {
+    patch.banner_url = incoming.banner_url;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return existing;
+  }
+  return updateGame(existing.id, patch);
 }
 
 export function createGame(game: Partial<Game>): Game {

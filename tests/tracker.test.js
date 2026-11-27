@@ -663,4 +663,32 @@ describe('Zero-Impact Playtime Tracker Suite (R2)', () => {
       assert.equal(tombstones[1].exe_name, 'mRemoteNG.exe');
     });
   });
+
+  describe('Auto-Register Deduplication', () => {
+    it('links exe_name to existing manually-added game matched by steam_id or normalized title without creating duplicates', () => {
+      setDiscordDetectableEntries([
+        { id: '201', name: 'Cyberpunk 2077', steamId: 1091500, exes: ['cyberpunk2077.exe'] },
+      ]);
+
+      // User added game via AddGameModal without picking .exe
+      db.prepare(`
+        INSERT INTO games (title, steam_id, status, playtime_minutes)
+        VALUES ('Cyberpunk 2077™', 1091500, 'playing', 0)
+      `).run();
+
+      const tracker = new PlaytimeTracker(db);
+      const matched = tracker.autoRegisterNewGame(
+        'Cyberpunk2077.exe',
+        'D:\\Games\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe'
+      );
+
+      assert.ok(matched, 'Should match the existing game');
+      assert.equal(matched.exe_name, 'Cyberpunk2077.exe');
+
+      const allRows = db.prepare('SELECT id, title, exe_name, steam_id FROM games').all();
+      assert.equal(allRows.length, 1, 'Must not create a duplicate row in DB');
+      assert.equal(allRows[0].exe_name, 'Cyberpunk2077.exe');
+      assert.equal(allRows[0].steam_id, 1091500);
+    });
+  });
 });

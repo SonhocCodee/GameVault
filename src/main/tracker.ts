@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { getDb, recalculatePlaytime, setManualPlaytime } from './db.ts';
 import { extractTitleFromExe } from './importer.ts';
-import { ensureGameFolder, sanitizeTitleForFolder } from './media.ts';
+import { ensureGameFolder, normalizeForMatch, sanitizeTitleForFolder } from './media.ts';
 import { searchSteamCovers, detectSteamAppIdFromExe, resolveSteamAppId, CURATED_STEAM_APP_IDS, resolveWebCoversForGame } from './covers.ts';
 import { matchDiscordDetectableGame } from './discord-detectable.ts';
 import type { TrackerStatus, Game } from '../shared/types.js';
@@ -649,29 +649,62 @@ export class PlaytimeTracker {
         return null;
       }
 
+      // Detect steam appid early so both deleted_games and existing-game dedup can match by steam_id
+      let detectedSteamId = -1;
+      if (exePath) {
+        try {
+          const id = detectSteamAppIdFromExe(exePath);
+          if (id) detectedSteamId = id;
+        } catch {}
+      }
+      if (detectedSteamId <= 0 && discordMatch?.steamId) {
+        detectedSteamId = discordMatch.steamId;
+      }
+
       // Check if user previously deleted or dismissed this game
       try {
-        const deleted = this.db
-          .prepare('SELECT 1 FROM deleted_games WHERE exe_name = ? COLLATE NOCASE OR title = ? COLLATE NOCASE LIMIT 1')
-          .get(foregroundExe, cleanTitle);
+        const deleted = detectedSteamId > 0
+          ? this.db
+              .prepare('SELECT 1 FROM deleted_games WHERE exe_name = ? COLLATE NOCASE OR title = ? COLLATE NOCASE OR steam_id = ? LIMIT 1')
+              .get(foregroundExe, cleanTitle, detectedSteamId)
+          : this.db
+              .prepare('SELECT 1 FROM deleted_games WHERE exe_name = ? COLLATE NOCASE OR title = ? COLLATE NOCASE LIMIT 1')
+              .get(foregroundExe, cleanTitle);
         if (deleted) {
           return null;
         }
       } catch {}
 
-      // Check if title already exists (case-insensitive)
-      const existing = this.db
+      // Check if game already exists by exact title, steam_id, or normalized title
+      let existing = this.db
         .prepare('SELECT * FROM games WHERE title = ? COLLATE NOCASE')
         .get(cleanTitle) as unknown as Game | undefined;
+
+      if (!existing && detectedSteamId > 0) {
+        existing = this.db
+          .prepare('SELECT * FROM games WHERE steam_id = ? LIMIT 1')
+          .get(detectedSteamId) as unknown as Game | undefined;
+      }
+
+      if (!existing) {
+        const normTarget = normalizeForMatch(cleanTitle);
+        if (normTarget.length >= 3) {
+          const allRows = this.db.prepare('SELECT * FROM games').all() as unknown as Game[];
+          existing = allRows.find((row) => normalizeForMatch(row.title) === normTarget);
+        }
+      }
 
       if (existing) {
         this.db
           .prepare(`
             UPDATE games
-            SET exe_name = ?, exe_path = COALESCE(?, exe_path), updated_at = datetime('now', 'localtime')
+            SET exe_name = ?,
+                exe_path = COALESCE(?, exe_path),
+                steam_id = CASE WHEN (steam_id IS NULL OR steam_id <= 0) AND ? > 0 THEN ? ELSE steam_id END,
+                updated_at = datetime('now', 'localtime')
             WHERE id = ?
           `)
-          .run(foregroundExe, exePath || null, existing.id);
+          .run(foregroundExe, exePath || null, detectedSteamId, detectedSteamId, existing.id);
 
         // Wishlist game just launched: promote to 'playing' (+ create folder)
         const promoted = this.promoteWishlistGameIfNeeded(existing);
@@ -685,7 +718,7 @@ export class PlaytimeTracker {
               if (this.db !== db) return;
               const fresh = this.db
                 .prepare('SELECT * FROM games WHERE id = ?')
-                .get(existing.id) as unknown as Game;
+                .get(existing!.id) as unknown as Game;
               if (fresh?.cover_url && this.onCoversUpdated) {
                 this.onCoversUpdated(fresh);
               }
@@ -693,7 +726,11 @@ export class PlaytimeTracker {
           } catch {}
         }
 
-        return { ...promoted, exe_name: foregroundExe };
+        const resolvedSteamId =
+          (existing.steam_id == null || existing.steam_id <= 0) && detectedSteamId > 0
+            ? detectedSteamId
+            : existing.steam_id;
+        return { ...promoted, exe_name: foregroundExe, steam_id: resolvedSteamId };
       }
 
       // Positively verify that this unknown executable is genuinely a game
@@ -702,18 +739,6 @@ export class PlaytimeTracker {
       }
 
       const mediaFolder = sanitizeTitleForFolder(cleanTitle);
-
-      // Detect steam appid if available from exe directory, falling back to Discord SKU
-      let detectedSteamId = -1;
-      if (exePath) {
-        try {
-          const id = detectSteamAppIdFromExe(exePath);
-          if (id) detectedSteamId = id;
-        } catch {}
-      }
-      if (detectedSteamId <= 0 && discordMatch?.steamId) {
-        detectedSteamId = discordMatch.steamId;
-      }
 
       const insertRes = this.db
         .prepare(`

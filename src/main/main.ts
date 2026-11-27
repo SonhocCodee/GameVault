@@ -6,6 +6,8 @@ import {
   getGames,
   getGameById,
   getGameByTitle,
+  findMatchingGame,
+  mergeGameMetadata,
   createGame,
   updateGame,
   deleteGame,
@@ -194,6 +196,12 @@ let tray: Tray | null = null;
 let forceQuit = false;
 let closeToTrayEnabled = true;
 
+// Isolate dev userData so Dev (`npm run dev`) and Prod (`.exe`) can run side-by-side
+// with separate single-instance locks, databases, and auth sessions.
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), `${app.getName()}-dev`));
+}
+
 // Single instance: a second launch (double-clicking the exe while the app
 // sits in the tray) must focus the running window, never spawn a duplicate
 // tracker/watcher pair
@@ -225,10 +233,11 @@ function createTray(): void {
   const iconPath = path.join(__dirname, '../assets/icon.ico');
   if (!fs.existsSync(iconPath)) return;
 
+  const devSuffix = app.isPackaged ? '' : ' [DEV]';
   tray = new Tray(iconPath);
-  tray.setToolTip('GameVault — đang chạy ngầm, theo dõi giờ chơi');
+  tray.setToolTip(`GameVault${devSuffix} — đang chạy ngầm, theo dõi giờ chơi`);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Mở GameVault', click: () => showMainWindow() },
+    { label: `Mở GameVault${devSuffix}`, click: () => showMainWindow() },
     { type: 'separator' },
     {
       label: 'Thoát hoàn toàn',
@@ -278,7 +287,7 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'GameVault',
+    title: app.isPackaged ? 'GameVault' : 'GameVault [DEV]',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
     backgroundColor: '#0e1015',
     autoHideMenuBar: true,
@@ -314,8 +323,15 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
     event.preventDefault();
   });
 
-  // In development, keep F12 / Ctrl+Shift+I for DevTools and F5 / Ctrl+R for reload
+  // In development, keep F12 / Ctrl+Shift+I for DevTools, F5 / Ctrl+R for reload,
+  // and tag the window title with [DEV] so it's easy to tell apart from Prod.
   if (!app.isPackaged) {
+    mainWindow.on('page-title-updated', (event, title) => {
+      if (!title.includes('[DEV]')) {
+        event.preventDefault();
+        mainWindow?.setTitle(`${title} [DEV]`);
+      }
+    });
     mainWindow.webContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
       if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
@@ -397,6 +413,14 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('db:createGame', async (_event, game: Partial<Game>) => {
+    const existing = findMatchingGame({
+      title: game.title,
+      exe_name: game.exe_name,
+      steam_id: game.steam_id,
+    });
+    if (existing) {
+      return mergeGameMetadata(existing, game);
+    }
     // The renderer may provide a personal total, never recorded-time credit.
     return createGame({ ...game, recorded_playtime_minutes: 0 });
   });
