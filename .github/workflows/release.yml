@@ -48,4 +48,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if (Test-Path "release/latest.yml") {
+            gh release upload "v$version" "release/latest.yml" --clobber
+          }
           gh release edit "v$version" --draft=false

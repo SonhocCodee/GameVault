@@ -6,6 +6,22 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-27 17:34] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Fix lỗi thiếu `latest.yml` trên GitHub Releases (`v1.0.6` bị 404 khi auto-update)**:
+  - Cập nhật `.github/workflows/release.yml` để luôn chạy `gh release upload "v$version" "release/latest.yml" --clobber` trước khi mở draft (`gh release edit --draft=false`).
+  - Cập nhật `src/shared/changelog.ts` thêm `1.0.8` và bump `package.json` lên `1.0.8`.
+
+### File chính đã thay đổi
+- `.github/workflows/release.yml`, `package.json`, `src/shared/changelog.ts`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- Phát hiện từ GitHub Releases API: `v1.0.6` thiếu asset `latest.yml` (trong khi `v1.0.5` có). Đã bổ sung bước upload `release/latest.yml` trực tiếp trong workflow.
+
+### Bàn giao cho máy kia (Notes / Next)
+- GitHub Actions sẽ tự động build & publish `v1.0.8` kèm `latest.yml`.
+
 ## [2026-11-27 17:31] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc

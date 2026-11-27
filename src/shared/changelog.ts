@@ -14,6 +14,14 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '1.0.8',
+    date: '2026-11-27',
+    summary: 'Khắc phục lỗi thiếu file latest.yml khi phát hành bản cập nhật tự động.',
+    fixes: [
+      'Sửa workflow phát hành (.github/workflows/release.yml) để luôn upload latest.yml trước khi công bố release, khắc phục lỗi 404 Cannot find latest.yml khi auto-update.',
+    ],
+  },
+  {
     version: '1.0.7',
     date: '2026-11-27',
     summary: 'Thêm mục Báo lỗi (Bug Report) trực tiếp trong app và Nhật ký cập nhật (Changelog) thông báo chi tiết bản mới đã sửa gì.',
