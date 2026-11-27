@@ -14,6 +14,7 @@ import type {
   IgdbConfig,
   WishlistSearchResult,
   AddWishlistPayload,
+  BrowseGameExeResult,
   SaveLocationCandidate,
   SavePathConfig,
   SavesListResult,
@@ -134,6 +135,9 @@ const electronAPI: ElectronAPI = {
   },
   addWishlistGame: (payload: AddWishlistPayload): Promise<Game> => {
     return ipcRenderer.invoke('wishlist:add', payload);
+  },
+  browseGameExe: (): Promise<BrowseGameExeResult | null> => {
+    return ipcRenderer.invoke('game:browseExe');
   },
 
   // Playtime Tracker

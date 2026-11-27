@@ -11,6 +11,7 @@ import { AdminCoversModal } from './components/AdminCoversModal.js';
 import { FirstRunSetupModal } from './components/FirstRunSetupModal.js';
 import { CommunityView } from './components/CommunityView.js';
 import { AddGameDetailsModal, type PendingAddGame } from './components/AddGameDetailsModal.js';
+import { AddGameModal } from './components/AddGameModal.js';
 import { GameRowSection } from './components/GameRowSection.js';
 import { TimelineView } from './components/TimelineView.js';
 import { ConfirmModal } from './components/ConfirmModal.js';
@@ -142,12 +143,6 @@ export default function App() {
   const [wishlistModalOpen, setWishlistModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [adminCoversModalOpen, setAdminCoversModalOpen] = useState<boolean>(false);
-
-  // Add Game form fields
-  const [newTitle, setNewTitle] = useState('');
-  const [newExeName, setNewExeName] = useState('');
-  const [addError, setAddError] = useState<string | null>(null);
-  const [addingGame, setAddingGame] = useState(false);
 
   // Fetch games from SQLite backend
   const fetchGames = useCallback(async () => {
@@ -583,15 +578,17 @@ export default function App() {
   const [pendingDeleteCard, setPendingDeleteCard] = useState<{ id: number; title: string } | null>(null);
 
   const openAddGameModal = () => {
-    setAddError(null);
-    setAddingGame(false);
     setAddGameModalOpen(true);
   };
 
   const closeAddGameModal = () => {
-    setAddError(null);
-    setAddingGame(false);
     setAddGameModalOpen(false);
+  };
+
+  const handleGameCreated = async (created: Game) => {
+    setAddGameModalOpen(false);
+    await fetchGames();
+    handleSelectGame(created.id);
   };
 
   const handleDeleteGameCard = (gameId: number, gameTitle: string) => {
@@ -646,55 +643,6 @@ export default function App() {
       setPendingAddError(err?.message || 'Không thể thêm game vào thư viện');
     } finally {
       setPendingAddBusy(false);
-    }
-  };
-
-  // Add Game handler
-  const handleCreateGame = async (e: React.FormEvent) => {    e.preventDefault();
-    if (!newTitle.trim()) {
-      setAddError('Vui lòng nhập tên trò chơi');
-      return;
-    }
-
-    setAddingGame(true);
-    setAddError(null);
-    try {
-      if (window.electronAPI?.createGame) {
-        // New games are ALWAYS 'playing' by default — 'Chờ chơi' (wishlist)
-        // is only reachable through the Steam wishlist search modal
-        const created = await window.electronAPI.createGame({
-          title: newTitle.trim(),
-          exe_name: newExeName.trim() || null,
-          status: 'playing',
-          playtime_minutes: 0,
-        });
-
-        // Try automatic Steam cover art lookup in background
-        if (window.electronAPI.searchSteamCovers) {
-          window.electronAPI
-            .searchSteamCovers(created.title)
-            .then(async (covers) => {
-              if (covers.posterUrl || covers.bannerUrl) {
-                await window.electronAPI.updateGame(created.id, {
-                  cover_url: covers.posterUrl || null,
-                  banner_url: covers.bannerUrl || null,
-                });
-                fetchGames();
-              }
-            })
-            .catch(() => {});
-        }
-
-        setNewTitle('');
-        setNewExeName('');
-        setAddGameModalOpen(false);
-        await fetchGames();
-        handleSelectGame(created.id);
-      }
-    } catch (err: any) {
-      setAddError(err?.message || 'Lỗi khi tạo trò chơi');
-    } finally {
-      setAddingGame(false);
     }
   };
 
@@ -1112,86 +1060,12 @@ export default function App() {
         onSuccess={() => fetchGames()}
       />
 
-      {/* Add Game Modal */}
-      {addGameModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-md rounded-2xl border border-[#2a2e3d] bg-[#161821] p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#2a2e3d] pb-3 mb-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Plus className="h-5 w-5 text-[#ff2a44]" />
-                <span>Thêm trò chơi mới</span>
-              </h3>
-              <button
-                type="button"
-                onClick={closeAddGameModal}
-                className="rounded-lg p-1 text-[#8e95a5] hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {addError && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-400">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{addError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleCreateGame} noValidate className="space-y-4 text-xs">
-              <div>
-                <label className="block font-semibold text-[#8e95a5] mb-1">Tên trò chơi (*):</label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Ví dụ: Cyberpunk 2077, Elden Ring..."
-                  className="w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 text-white outline-none focus:border-[#ff2a44]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#8e95a5] mb-1">
-                  Tên file thực thi .exe (tùy chọn để theo dõi):
-                </label>
-                <input
-                  type="text"
-                  value={newExeName}
-                  onChange={(e) => setNewExeName(e.target.value)}
-                  placeholder="Ví dụ: Cyberpunk2077.exe, eldenring.exe"
-                  className="w-full rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 font-mono text-white outline-none focus:border-[#ff2a44]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#8e95a5] mb-1">Trạng thái ban đầu:</label>
-                <div className="flex items-center justify-between rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-2">
-                  <span className="flex items-center gap-2 font-bold text-emerald-400">🎮 Đang chơi</span>
-                  <span className="text-[10px] text-[#8e95a5]">Mặc định — muốn chờ chơi thì tìm qua Wishlist</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#2a2e3d]">
-                <button
-                  type="button"
-                  onClick={closeAddGameModal}
-                  className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 font-semibold text-[#8e95a5] hover:text-white"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={addingGame}
-                  className="flex items-center gap-1.5 rounded-lg bg-[#ff2a44] px-4 py-1.5 font-bold text-white shadow hover:brightness-110 disabled:opacity-50"
-                >
-                  {addingGame ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                  <span>Thêm vào Thư viện</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Add Game Modal (Steam search + manual fallback) */}
+      <AddGameModal
+        isOpen={addGameModalOpen}
+        onClose={closeAddGameModal}
+        onCreated={handleGameCreated}
+      />
 
       <ConfirmModal
         isOpen={Boolean(pendingDeleteCard)}

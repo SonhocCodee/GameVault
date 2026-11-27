@@ -6,6 +6,23 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-27 15:47] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Nâng cấp modal thêm game (`AddGameModal.tsx`)**:
+  - Tách riêng `src/renderer/components/AddGameModal.tsx`, reset toàn bộ state & timer mỗi khi đóng/mở và bỏ `autoFocus` trực tiếp để tránh kẹt focus trên Electron Windows.
+  - Tích hợp tìm kiếm trực tiếp qua Steam API (`searchWishlistGames`) và resolve cover/banner + `steam_id` trước khi gọi `createGame` (tránh race condition `updateGame` ngầm khi xóa game nhanh).
+  - Thêm nút **"Chọn file .exe"** (`game:browseExe` IPC trong `src/main/main.ts` & `src/preload/preload.ts`) dùng `extractTitleFromExe` + `detectSteamAppIdCached` để tự nhận diện đúng tên game, `steam_id`, `exe_name` và `exe_path` từ file `.exe`.
+- **Bump version `1.0.2`**:
+  - Cập nhật `package.json` lên `1.0.2`.
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+
+### Bàn giao / Tiếp theo cho máy kia
+- Tạo tag `v1.0.2` (hoặc push tag `v1.0.2`) để GitHub Actions workflow `.github/workflows/release.yml` build & phát hành bản cài đặt Windows mới.
+
 ## [2026-11-27 14:24] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

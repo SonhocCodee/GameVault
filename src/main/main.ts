@@ -49,7 +49,9 @@ import {
   setGoogleConfig,
   getIgdbConfig,
   setIgdbConfig,
+  detectSteamAppIdCached,
 } from './covers.js';
+import { extractTitleFromExe } from './importer.js';
 import {
   searchWishlistGames,
   addWishlistGame,
@@ -454,6 +456,25 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('wishlist:add', async (_event, payload: AddWishlistPayload) => {
     return addWishlistGame(payload);
+  });
+
+  ipcMain.handle('game:browseExe', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Chọn file thực thi của game (.exe)',
+      properties: ['openFile'],
+      filters: [{ name: 'Game Executable', extensions: ['exe'] }],
+    });
+    if (result.canceled || !result.filePaths?.[0]) return null;
+    const exePath = result.filePaths[0];
+    const exeName = path.basename(exePath);
+    const detectedTitle = extractTitleFromExe(exePath);
+    const detectedSteamId = detectSteamAppIdCached(exePath);
+    return {
+      exePath,
+      exeName,
+      detectedTitle,
+      detectedSteamId: detectedSteamId && detectedSteamId > 0 ? detectedSteamId : null,
+    };
   });
 
   ipcMain.handle('covers:searchSteam', async (_event, gameTitle: string, steamId?: number) => {

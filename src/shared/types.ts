@@ -573,6 +573,13 @@ export interface GameFilter {
   sort?: 'playtime_desc' | 'playtime_asc' | 'rating_desc' | 'title_asc' | 'recent_played' | 'created_desc' | string;
 }
 
+export interface BrowseGameExeResult {
+  exePath: string;
+  exeName: string;
+  detectedTitle: string;
+  detectedSteamId: number | null;
+}
+
 export interface AdminCoverItem {
   game_key: string;
   title: string;
@@ -645,6 +652,7 @@ export interface ElectronAPI {
   // Wishlist & external catalog ('Chờ chơi' / 'Đã phá đảo' — search Steam, add with cover/banner only)
   searchWishlistGames?(query: string): Promise<WishlistSearchResult[]>;
   addWishlistGame?(payload: AddWishlistPayload): Promise<Game>;
+  browseGameExe?(): Promise<BrowseGameExeResult | null>;
   
   // Playtime Tracker
   getTrackerStatus(): Promise<TrackerStatus>;
