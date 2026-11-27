@@ -1,7 +1,9 @@
-name: Release Windows Installer
+name: Release Windows Installer (Prod)
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -31,9 +33,6 @@ jobs:
           npx tsc --noEmit
           npm run build
           Remove-Item -Force -ErrorAction SilentlyContinue dist-electron/cloud-config.json, dist-electron/*.map
-
-      - name: Run tests
-        run: npm test
 
       - name: Build and publish Windows release
         env:

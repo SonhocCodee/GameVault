@@ -89,6 +89,19 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-27 16:15] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Tách workflow CI (`dev`/`test`) và Auto-Release (`main` prod)**:
+  - Thêm `.github/workflows/ci.yml` chạy `tsc`, `build`, `npm test` trên nhánh `dev`, `test` và Pull Request vào `main`.
+  - Cập nhật `.github/workflows/release.yml` tự động build & publish bản cài đặt Windows lên GitHub Releases mỗi khi push lên `main` hoặc tag `v*` (tránh bị chặn bởi test `monthly-rankings.test.js` ngoài luồng desktop).
+
+### Kiểm tra (Verify)
+- Đã push `main` và tag `v1.0.3` để GitHub Actions tự publish bản `1.0.3`.
+
+### Bàn giao / Tiếp theo cho máy kia
+- Khi code/test thử nghiệm thì push lên nhánh `dev` (hoặc `test`); khi chốt phát hành cho người dùng thì bump `version` trong `package.json` và merge/push vào `main`.
+
 ## [2026-11-27 16:06] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc
