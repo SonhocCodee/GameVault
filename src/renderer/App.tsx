@@ -13,6 +13,7 @@ import { CommunityView } from './components/CommunityView.js';
 import { AddGameDetailsModal, type PendingAddGame } from './components/AddGameDetailsModal.js';
 import { GameRowSection } from './components/GameRowSection.js';
 import { TimelineView } from './components/TimelineView.js';
+import { ConfirmModal } from './components/ConfirmModal.js';
 import {
   Plus,
   Gamepad2,
@@ -71,6 +72,23 @@ export default function App() {
   const [profileRequest, setProfileRequest] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [updateReady, setUpdateReady] = useState<{ version?: string; dismissed?: boolean } | null>(null);
+
+  useEffect(() => {
+    window.electronAPI?.getUpdateStatus?.().then((st) => {
+      if (st?.state === 'downloaded') {
+        setUpdateReady({ version: st.latestVersion });
+      }
+    }).catch(() => {});
+    const unsub = window.electronAPI?.onUpdateStatus?.((st) => {
+      if (st.state === 'downloaded') {
+        setUpdateReady({ version: st.latestVersion });
+      }
+    });
+    return () => {
+      unsub?.();
+    };
+  }, []);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -177,35 +195,72 @@ export default function App() {
     autoSync();
   }, []);
 
-  // One-time setup wizard: first launch asks where screenshots & media live
+  // One-time setup wizard: Step 1 mandatory Google login, Step 2 storage + screenshot setup
   const [firstRunPaths, setFirstRunPaths] = useState({
     mediaBaseDir: '',
     screenshotsDir: '',
     vaultRoot: '',
     hddMode: true,
+    screenshotEnabled: true,
+    screenshotHotkey: 'F6',
+    appStartupEnabled: true,
   });
 
-  useEffect(() => {
-    const checkSetup = async () => {
-      try {
-        if (window.electronAPI?.getSettings) {
-          const s = await window.electronAPI.getSettings();
-          if (!s.setupCompleted) {
-            setFirstRunPaths({
-              mediaBaseDir: s.mediaBaseDir || 'E:\\Game',
-              screenshotsDir: s.screenshotsDir || '',
-              vaultRoot: s.vaultRoot || 'E:\\Game\\SaveVault',
-              hddMode: s.hddMode !== undefined ? s.hddMode : true,
-            });
-            setFirstRunOpen(true);
-          }
-        }
-      } catch {
-        // Setup check is best-effort
+  const refreshOnboardingState = useCallback(async () => {
+    try {
+      const auth = window.electronAPI?.getAuthStatus
+        ? await window.electronAPI.getAuthStatus()
+        : null;
+      if (auth) setAuthStatus(auth);
+
+      if (!auth?.loggedIn) {
+        setFirstRunOpen(true);
+        return;
       }
-    };
-    checkSetup();
+
+      if (window.electronAPI?.getSettings) {
+        const s = await window.electronAPI.getSettings();
+        if (!s.setupCompleted) {
+          setFirstRunPaths({
+            mediaBaseDir: s.mediaBaseDir || '',
+            screenshotsDir: s.screenshotsDir || '',
+            vaultRoot: s.vaultRoot || '',
+            hddMode: s.hddMode !== undefined ? s.hddMode : true,
+            screenshotEnabled: s.screenshotEnabled !== undefined ? s.screenshotEnabled : true,
+            screenshotHotkey: s.screenshotHotkey || 'F6',
+            appStartupEnabled: s.appStartupEnabled !== undefined ? s.appStartupEnabled : false,
+          });
+          setFirstRunOpen(true);
+        } else {
+          setFirstRunOpen(false);
+        }
+      }
+    } catch {
+      // Setup check is best-effort
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshOnboardingState();
+  }, [refreshOnboardingState]);
+
+  const handleFirstRunLogin = async () => {
+    if (!window.electronAPI?.login) return;
+    const profile = await window.electronAPI.login();
+    const nextAuth: AuthStatus = {
+      loggedIn: true,
+      profile,
+      configPresent: authStatus?.configPresent ?? true,
+    };
+    setAuthStatus(nextAuth);
+    try {
+      if (window.electronAPI?.syncLibrary) {
+        await window.electronAPI.syncLibrary();
+      }
+    } catch {}
+    await fetchGames();
+    await refreshOnboardingState();
+  };
 
   const handleFirstRunBrowse = async (field: 'media' | 'screenshots' | 'vault') => {
     if (!window.electronAPI?.browseFolder) return;
@@ -225,6 +280,9 @@ export default function App() {
       screenshotsDir: firstRunPaths.screenshotsDir.trim(),
       vaultRoot: firstRunPaths.vaultRoot.trim(),
       hddMode: firstRunPaths.hddMode,
+      screenshotEnabled: firstRunPaths.screenshotEnabled,
+      screenshotHotkey: firstRunPaths.screenshotHotkey,
+      appStartupEnabled: firstRunPaths.appStartupEnabled,
       setupCompleted: true,
     });
     setFirstRunOpen(false);
@@ -522,16 +580,31 @@ export default function App() {
     fetchGames();
   };
 
-  const handleDeleteGameCard = async (gameId: number, gameTitle: string) => {
-    if (
-      window.confirm(
-        `Bạn có chắc chắn muốn xóa "${gameTitle}" khỏi thư viện GameVault không?\n\n(Chỉ xóa dữ liệu khỏi app, không ảnh hưởng file game thực tế)`
-      )
-    ) {
-      if (window.electronAPI?.deleteGame) {
-        await window.electronAPI.deleteGame(gameId);
-        fetchGames();
-      }
+  const [pendingDeleteCard, setPendingDeleteCard] = useState<{ id: number; title: string } | null>(null);
+
+  const openAddGameModal = () => {
+    setAddError(null);
+    setAddingGame(false);
+    setAddGameModalOpen(true);
+  };
+
+  const closeAddGameModal = () => {
+    setAddError(null);
+    setAddingGame(false);
+    setAddGameModalOpen(false);
+  };
+
+  const handleDeleteGameCard = (gameId: number, gameTitle: string) => {
+    setPendingDeleteCard({ id: gameId, title: gameTitle });
+  };
+
+  const confirmDeleteGameCard = async () => {
+    if (!pendingDeleteCard) return;
+    const { id } = pendingDeleteCard;
+    setPendingDeleteCard(null);
+    if (window.electronAPI?.deleteGame) {
+      await window.electronAPI.deleteGame(id);
+      fetchGames();
     }
   };
 
@@ -630,7 +703,10 @@ export default function App() {
       {/* Top Navbar */}
       <Navbar
         onCommunitySearch={setCommunitySearch}
-        onAuthChanged={setAuthStatus}
+        onAuthChanged={(st) => {
+          setAuthStatus(st);
+          void refreshOnboardingState();
+        }}
         currentView={view}
         isDetailView={view === 'detail'}
         selectedGameTitle={selectedGame?.title}
@@ -651,7 +727,7 @@ export default function App() {
           if (tab) setSyncModalTab(tab);
           setSyncModalOpen(true);
         }}
-        onOpenAddGameModal={() => setAddGameModalOpen(true)}
+        onOpenAddGameModal={openAddGameModal}
         onOpenWishlistModal={() => setWishlistModalOpen(true)}
         onOpenSettingsModal={() => setSettingsModalOpen(true)}
         onOpenAdminModal={() => setAdminCoversModalOpen(true)}
@@ -713,7 +789,7 @@ export default function App() {
 
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
                   <button
-                    onClick={() => setAddGameModalOpen(true)}
+                    onClick={openAddGameModal}
                     className="flex items-center gap-2 rounded-xl border border-[#2a2e3d] bg-[#161821] px-4 py-2.5 text-xs font-bold text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#1f2230] transition-all"
                   >
                     <Plus className="h-4 w-4 text-[#ff2a44]" />
@@ -1038,7 +1114,7 @@ export default function App() {
 
       {/* Add Game Modal */}
       {addGameModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-md rounded-2xl border border-[#2a2e3d] bg-[#161821] p-6 shadow-2xl">
             <div className="flex items-center justify-between border-b border-[#2a2e3d] pb-3 mb-4">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -1046,7 +1122,8 @@ export default function App() {
                 <span>Thêm trò chơi mới</span>
               </h3>
               <button
-                onClick={() => setAddGameModalOpen(false)}
+                type="button"
+                onClick={closeAddGameModal}
                 className="rounded-lg p-1 text-[#8e95a5] hover:text-white"
               >
                 <X className="h-4 w-4" />
@@ -1060,12 +1137,12 @@ export default function App() {
               </div>
             )}
 
-            <form onSubmit={handleCreateGame} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateGame} noValidate className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-[#8e95a5] mb-1">Tên trò chơi (*):</label>
                 <input
                   type="text"
-                  required
+                  autoFocus
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="Ví dụ: Cyberpunk 2077, Elden Ring..."
@@ -1097,7 +1174,7 @@ export default function App() {
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#2a2e3d]">
                 <button
                   type="button"
-                  onClick={() => setAddGameModalOpen(false)}
+                  onClick={closeAddGameModal}
                   className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 font-semibold text-[#8e95a5] hover:text-white"
                 >
                   Hủy
@@ -1115,6 +1192,19 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={Boolean(pendingDeleteCard)}
+        title="Xóa trò chơi khỏi thư viện"
+        message={
+          pendingDeleteCard
+            ? `Bạn có chắc chắn muốn xóa "${pendingDeleteCard.title}" khỏi thư viện GameVault không?\n\n(Chỉ xóa dữ liệu khỏi app, không ảnh hưởng file game thực tế)`
+            : ''
+        }
+        confirmText="Xóa khỏi thư viện"
+        onConfirm={confirmDeleteGameCard}
+        onCancel={() => setPendingDeleteCard(null)}
+      />
 
       {/* Wishlist Search Modal ('Chờ chơi') */}
       <WishlistModal
@@ -1145,20 +1235,29 @@ export default function App() {
         onCoversChanged={() => fetchGames()}
       />
 
-      {/* One-time first-run storage setup wizard */}
+      {/* Mandatory 2-step first-run onboarding */}
       {firstRunOpen && (
         <FirstRunSetupModal
+          loggedIn={!!authStatus?.loggedIn}
+          userEmail={authStatus?.profile?.email}
           mediaBaseDir={firstRunPaths.mediaBaseDir}
           screenshotsDir={firstRunPaths.screenshotsDir}
           vaultRoot={firstRunPaths.vaultRoot}
           hddMode={firstRunPaths.hddMode}
+          screenshotEnabled={firstRunPaths.screenshotEnabled}
+          screenshotHotkey={firstRunPaths.screenshotHotkey}
+          appStartupEnabled={firstRunPaths.appStartupEnabled}
           onHddModeChange={(enabled) => setFirstRunPaths((p) => ({ ...p, hddMode: enabled }))}
+          onScreenshotEnabledChange={(enabled) => setFirstRunPaths((p) => ({ ...p, screenshotEnabled: enabled }))}
+          onScreenshotHotkeyChange={(hotkey) => setFirstRunPaths((p) => ({ ...p, screenshotHotkey: hotkey }))}
+          onAppStartupChange={(enabled) => setFirstRunPaths((p) => ({ ...p, appStartupEnabled: enabled }))}
           onFieldChange={(field, value) => {
             if (field === 'media') setFirstRunPaths((p) => ({ ...p, mediaBaseDir: value }));
             else if (field === 'screenshots') setFirstRunPaths((p) => ({ ...p, screenshotsDir: value }));
             else setFirstRunPaths((p) => ({ ...p, vaultRoot: value }));
           }}
           onBrowseFolder={handleFirstRunBrowse}
+          onGoogleLogin={handleFirstRunLogin}
           onComplete={handleFirstRunComplete}
         />
       )}
@@ -1171,6 +1270,27 @@ export default function App() {
         onClose={() => setPendingAdd(null)}
         onConfirm={confirmAddExternal}
       />
+
+      {/* In-app Update Ready Banner */}
+      {updateReady && !updateReady.dismissed && (
+        <div className="fixed bottom-6 left-6 z-50 flex items-center gap-3 rounded-xl border border-emerald-500/40 bg-[#161821]/95 px-4 py-3 text-sm text-white shadow-2xl backdrop-blur-md">
+          <span className="font-medium">
+            Có bản cập nhật mới{updateReady.version ? ` v${updateReady.version}` : ''} đã sẵn sàng!
+          </span>
+          <button
+            onClick={() => window.electronAPI?.installUpdate?.()}
+            className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
+          >
+            Cập nhật & Khởi động lại
+          </button>
+          <button
+            onClick={() => setUpdateReady((prev) => (prev ? { ...prev, dismissed: true } : null))}
+            className="text-zinc-400 hover:text-white transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Real-time Floating Toast Notification */}
       {toastMsg && (

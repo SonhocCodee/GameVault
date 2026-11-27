@@ -13,6 +13,7 @@ import { handleGetUser, handleUpdateHardware } from './routes/users.ts';
 import { handleGetCurrentPick, handleVotePick, handleUnvotePick } from './routes/picks.ts';
 import { handleImageUpload, handleImageGet } from './routes/images.ts';
 import { handleGetLibrary, handleSyncLibrary } from './routes/library.ts';
+import { handleSubmitClientLog, handleAdminGetClientLogs } from './routes/logs.ts';
 import {
   handleGetCover,
   handleCacheCover,
@@ -61,6 +62,10 @@ router.delete('/api/picks/vote', handleUnvotePick);
 // Multi-device game library sync
 router.get('/api/library', handleGetLibrary);
 router.post('/api/library/sync', handleSyncLibrary);
+
+// Client diagnostic logs
+router.post('/api/logs', handleSubmitClientLog);
+router.get('/api/admin/logs', handleAdminGetClientLogs);
 
 // Images (R2 / D1)
 router.post('/api/images/upload', handleImageUpload);

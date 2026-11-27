@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { PerformancePanel } from '../community/PerformancePanel.tsx';
 import { ScreenshotShare } from '../community/ScreenshotShare.tsx';
 import { gameToPublic } from '../community/DesktopCommunity.tsx';
+import { ConfirmModal } from './ConfirmModal.js';
 import type { PublicGame } from '../../shared/community.ts';
 import {
   ArrowLeft,
@@ -363,17 +364,20 @@ const handleCompletedDateChange = async (dateStr: string) => {
     }
   };
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
   // Delete Game
-  const handleDeleteGame = async () => {
+  const handleDeleteGame = () => {
     if (!game) return;
-    const confirmed = window.confirm(
-      `Bạn có chắc chắn muốn xóa "${game.title}" khỏi thư viện GameVault không?\n\n(Lưu ý: Chỉ xóa khỏi danh sách app GameVault, không ảnh hưởng đến file game thực tế trên máy tính của bạn)`
-    );
-    if (confirmed) {
-      if (window.electronAPI?.deleteGame) {
-        await window.electronAPI.deleteGame(game.id);
-        onBack();
-      }
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDeleteGame = async () => {
+    if (!game) return;
+    setDeleteConfirmOpen(false);
+    if (window.electronAPI?.deleteGame) {
+      await window.electronAPI.deleteGame(game.id);
+      onBack();
     }
   };
 const filteredMedia = useMemo(() => {
@@ -1123,6 +1127,19 @@ setGame(updated);
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deleteConfirmOpen}
+        title="Xóa trò chơi khỏi thư viện"
+        message={
+          game
+            ? `Bạn có chắc chắn muốn xóa "${game.title}" khỏi thư viện GameVault không?\n\n(Lưu ý: Chỉ xóa khỏi danh sách app GameVault, không ảnh hưởng đến file game thực tế trên máy tính của bạn)`
+            : ''
+        }
+        confirmText="Xóa khỏi thư viện"
+        onConfirm={confirmDeleteGame}
+        onCancel={() => setDeleteConfirmOpen(false)}
+      />
 
       {/* Floating Sticky Corner Back Button - Always visible when scrolling down */}
       <button

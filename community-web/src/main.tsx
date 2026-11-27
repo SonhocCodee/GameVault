@@ -164,6 +164,47 @@ function App() {
   );
   return (
     <>
+      <div
+        className="gv-community"
+        style={{
+          paddingBottom: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            padding: "10px 14px",
+            marginBottom: 12,
+            borderRadius: 12,
+            border: "1px solid rgba(255,42,68,0.35)",
+            background: "rgba(255,42,68,0.08)",
+          }}
+        >
+          <span style={{ fontSize: 13 }}>
+            <strong>GameVault Desktop (Windows)</strong> — Cài đặt để tự động đếm giờ chơi, chụp màn hình và đồng bộ thư viện.
+          </span>
+          <a
+            href="/community/downloads/GameVault-Web-Setup-1.0.0.exe"
+            download="GameVault-Web-Setup-1.0.0.exe"
+            style={{
+              display: "inline-block",
+              padding: "7px 14px",
+              borderRadius: 8,
+              background: "#ff2a44",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 13,
+              textDecoration: "none",
+            }}
+          >
+            Tải bản cài đặt (.exe)
+          </a>
+        </div>
+      </div>
       {(loginOpen || error || hasToken) && (
         <div
           className="gv-community"

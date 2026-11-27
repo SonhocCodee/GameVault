@@ -659,6 +659,10 @@ export interface ElectronAPI {
   downloadPresentMon?(force?: boolean): Promise<string | null>;
   getFpsLeaderboard?(): Promise<FpsLeaderboardEntry[]>;
 
+  // Diagnostic Logs
+  sendDiagnosticLog?(note?: string): Promise<{ ok: boolean; id?: number; error?: string }>;
+  openLogFolder?(): Promise<string>;
+
   // F6 Hotkey & Real-time Auto-Sync
   getF6Status?(): Promise<any>;
   syncF6Now?(): Promise<any>;
@@ -741,6 +745,20 @@ export interface ElectronAPI {
   onGameUpdated?(callback: (game: Game) => void): () => void;
   onScreenshotSynced?(callback: (info: { gameTitle: string; file: string; targetPath: string }) => void): () => void;
   onDriveMediaProgress?(callback: (progress: DriveMediaProgress) => void): () => void;
+
+  // In-app Auto Updater
+  getUpdateStatus?(): Promise<AppUpdateStatus>;
+  checkForUpdates?(): Promise<AppUpdateStatus>;
+  installUpdate?(): Promise<boolean>;
+  onUpdateStatus?(callback: (status: AppUpdateStatus) => void): () => void;
+}
+
+export interface AppUpdateStatus {
+  state: 'idle' | 'dev' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+  currentVersion: string;
+  latestVersion?: string;
+  percent?: number;
+  message?: string;
 }
 
 declare global {

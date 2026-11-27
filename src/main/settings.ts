@@ -471,7 +471,13 @@ export async function toggleAppStartup(enable: boolean, launch?: AppStartupLaunc
 export const PLAYTIME_WATCH_LNK_NAME = 'PlaytimeWatch.lnk';
 
 function getPlaytimeWatchScriptPath(): string {
-  // Bundled into dist-electron — the script ships in resources/ like fps-helper.ps1
+  // Prefer unpacked extraResources path in packaged builds so powershell.exe can execute it directly
+  const unpacked = process.resourcesPath
+    ? path.join(process.resourcesPath, 'resources', 'playtime-watch.ps1')
+    : '';
+  if (unpacked && fs.existsSync(unpacked)) {
+    return unpacked;
+  }
   return path.join(__dirname, '..', 'resources', 'playtime-watch.ps1');
 }
 

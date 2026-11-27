@@ -91,6 +91,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [syncingDrive, setSyncingDrive] = useState<boolean>(false);
   const [restoringDrive, setRestoringDrive] = useState<boolean>(false);
   const [actionResultMsg, setActionResultMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sendingLog, setSendingLog] = useState<boolean>(false);
+  const [logSendMsg, setLogSendMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Hotkey recording mode
   const [isListeningKey, setIsListeningKey] = useState<boolean>(false);
@@ -116,6 +118,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Process toggling loading
   const [togglingProcess, setTogglingProcess] = useState<boolean>(false);
   const [enrichingCovers, setEnrichingCovers] = useState<boolean>(false);
+  const [updateStatus, setUpdateStatus] = useState<import('../../shared/types').AppUpdateStatus | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    window.electronAPI?.getUpdateStatus?.().then((st) => setUpdateStatus(st)).catch(() => {});
+    const unsub = window.electronAPI?.onUpdateStatus?.((st) => setUpdateStatus(st));
+    return () => {
+      unsub?.();
+    };
+  }, [isOpen]);
 
   // Load settings on open
   const loadData = useCallback(async () => {
@@ -1322,6 +1334,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     </div>
 
+                    {/* App Version & Auto-Update */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-white">Cập nhật ứng dụng (In-app)</span>
+                          <span className="rounded bg-[#222638] px-1.5 py-0.5 font-mono text-[10px] text-[#9aa3b8]">
+                            v{updateStatus?.currentVersion || '1.0.0'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-[#8e95a5]">
+                          {updateStatus?.message || 'Tự động kiểm tra và tải bản cập nhật mới từ GitHub Releases.'}
+                        </p>
+                        {updateStatus?.state === 'downloading' && typeof updateStatus.percent === 'number' && (
+                          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#242838]">
+                            <div
+                              className="h-full bg-emerald-500 transition-all duration-300"
+                              style={{ width: `${updateStatus.percent}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      {updateStatus?.state === 'downloaded' ? (
+                        <button
+                          onClick={() => window.electronAPI?.installUpdate?.()}
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
+                        >
+                          Cài đặt & Khởi động lại
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => window.electronAPI?.checkForUpdates?.()}
+                          disabled={updateStatus?.state === 'checking' || updateStatus?.state === 'downloading'}
+                          className="rounded-lg border border-[#2e3446] bg-[#1f2433] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2a3044] disabled:opacity-50 transition-colors"
+                        >
+                          {updateStatus?.state === 'checking' ? 'Đang kiểm tra...' : 'Kiểm tra cập nhật'}
+                        </button>
+                      )}
+                    </div>
+
                     {/* Auto-detect running games */}
                     <div className="flex items-center justify-between rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
                       <div>
@@ -1808,9 +1859,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Modal Footer: Save & Close */}
-        <div className="flex items-center justify-between border-t border-[#2a2e3d] bg-[#161822] px-6 py-3.5">
-          <div className="text-[11px] text-[#8e95a5]">
-            💡 Mọi thay đổi về phím nóng và thư mục sẽ có hiệu lực ngay sau khi lưu.
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#2a2e3d] bg-[#161822] px-6 py-3.5">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#8e95a5]">
+            <button
+              type="button"
+              disabled={sendingLog}
+              onClick={async () => {
+                if (!window.electronAPI?.sendDiagnosticLog) return;
+                setSendingLog(true);
+                setLogSendMsg(null);
+                try {
+                  const res = await window.electronAPI.sendDiagnosticLog();
+                  if (res.ok) {
+                    setLogSendMsg({ ok: true, text: `Đã gửi log (#${res.id || 'ok'})` });
+                  } else {
+                    setLogSendMsg({ ok: false, text: res.error || 'Gửi log thất bại' });
+                  }
+                } catch (err: any) {
+                  setLogSendMsg({ ok: false, text: err?.message || 'Lỗi gửi log' });
+                } finally {
+                  setSendingLog(false);
+                }
+              }}
+              className="flex items-center gap-1 rounded-md border border-[#2a2e3d] bg-[#1a1d28] px-2.5 py-1 text-[11px] font-semibold text-[#c4c9d4] hover:border-sky-500/50 hover:text-white disabled:opacity-50"
+              title="Gửi file log chẩn đoán lên server để kiểm tra lỗi"
+            >
+              {sendingLog ? <Loader2 className="h-3 w-3 animate-spin" /> : <UploadCloud className="h-3 w-3 text-sky-400" />}
+              <span>Gửi log lỗi</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => window.electronAPI?.openLogFolder?.()}
+              className="rounded-md border border-[#2a2e3d] bg-[#1a1d28] px-2 py-1 text-[11px] text-[#8e95a5] hover:text-white"
+              title="Mở thư mục chứa file gamevault.log"
+            >
+              Mở log
+            </button>
+            {logSendMsg && (
+              <span className={logSendMsg.ok ? 'text-emerald-400' : 'text-rose-400'}>
+                {logSendMsg.text}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

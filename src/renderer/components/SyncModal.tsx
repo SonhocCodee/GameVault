@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ConfirmModal } from './ConfirmModal.js';
 import {
   X,
   Zap,
@@ -156,13 +157,13 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
   if (!isOpen) return null;
 
+  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
+
   // Handler: Sync Library with Cloudflare D1
-  const handleSyncLibrary = async (mode: 'merge' | 'overwrite' = 'merge') => {
-    if (mode === 'overwrite') {
-      const confirmed = window.confirm(
-        'Thao tác này sẽ dùng toàn bộ thư viện & lịch sử chơi của MÁY NÀY làm chuẩn, ghi đè sạch dữ liệu cũ trên Cloud. Các máy khác khi bấm Đồng bộ lần tới sẽ tự động kéo bản chuẩn này về. Tiếp tục?'
-      );
-      if (!confirmed) return;
+  const handleSyncLibrary = async (mode: 'merge' | 'overwrite' = 'merge', confirmedOverwrite = false) => {
+    if (mode === 'overwrite' && !confirmedOverwrite) {
+      setOverwriteConfirmOpen(true);
+      return;
     }
 
     setLibraryLoading(true);
@@ -903,6 +904,18 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           </button>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={overwriteConfirmOpen}
+        title="Ghi đè dữ liệu Cloud"
+        message="Thao tác này sẽ dùng toàn bộ thư viện & lịch sử chơi của MÁY NÀY làm chuẩn, ghi đè sạch dữ liệu cũ trên Cloud. Các máy khác khi bấm Đồng bộ lần tới sẽ tự động kéo bản chuẩn này về. Tiếp tục?"
+        confirmText="Ghi đè Cloud"
+        onConfirm={() => {
+          setOverwriteConfirmOpen(false);
+          void handleSyncLibrary('overwrite', true);
+        }}
+        onCancel={() => setOverwriteConfirmOpen(false)}
+      />
     </div>
   );
 };

@@ -51,6 +51,7 @@ import type {
   AdminCoverItem,
   AdminCoversResponse,
   AdminUpdateCoverPayload,
+  AppUpdateStatus,
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
@@ -161,6 +162,14 @@ const electronAPI: ElectronAPI = {
   },
   getFpsLeaderboard: (): Promise<FpsLeaderboardEntry[]> => {
     return ipcRenderer.invoke('fps:getLeaderboard');
+  },
+
+  // Diagnostic Logs
+  sendDiagnosticLog: (note?: string): Promise<{ ok: boolean; id?: number; error?: string }> => {
+    return ipcRenderer.invoke('logs:sendToServer', note);
+  },
+  openLogFolder: (): Promise<string> => {
+    return ipcRenderer.invoke('logs:openFolder');
   },
 
   // F6 Hotkey & Real-time Auto-Sync
@@ -401,6 +410,24 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on('drive:mediaProgress', handler);
     return () => {
       ipcRenderer.removeListener('drive:mediaProgress', handler);
+    };
+  },
+
+  // In-app Auto Updater
+  getUpdateStatus: (): Promise<AppUpdateStatus> => {
+    return ipcRenderer.invoke('updater:getStatus');
+  },
+  checkForUpdates: (): Promise<AppUpdateStatus> => {
+    return ipcRenderer.invoke('updater:check');
+  },
+  installUpdate: (): Promise<boolean> => {
+    return ipcRenderer.invoke('updater:install');
+  },
+  onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => {
+    const handler = (_event: any, status: AppUpdateStatus) => callback(status);
+    ipcRenderer.on('updater:status', handler);
+    return () => {
+      ipcRenderer.removeListener('updater:status', handler);
     };
   },
 };

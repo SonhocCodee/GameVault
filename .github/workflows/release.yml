@@ -1,0 +1,44 @@
+name: Release Windows Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: GameVault/package-lock.json
+
+      - name: Install dependencies
+        working-directory: GameVault
+        run: npm ci
+
+      - name: Typecheck & build clean bundle
+        working-directory: GameVault
+        run: |
+          npx tsc --noEmit
+          npm run build
+          Remove-Item -Force -ErrorAction SilentlyContinue dist-electron/cloud-config.json, dist-electron/*.map
+
+      - name: Run tests
+        working-directory: GameVault
+        run: npm test
+
+      - name: Build and publish Windows release
+        working-directory: GameVault
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always

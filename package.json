@@ -1,6 +1,6 @@
 {
   "name": "game-vault",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
     "build:community": "vite build --config community-web/vite.config.ts",
     "dev:community": "vite --config community-web/vite.config.ts",
     "deploy:worker": "npm run build:admin && npm run build:community && npx wrangler deploy",
+    "pack:win": "electron-builder --win",
     "postinstall": "node scripts/ensure-config.js",
     "test": "cross-env ELECTRON_RUN_AS_NODE=1 electron --test tests/**/*.test.js"
   },
@@ -22,6 +23,7 @@
   "description": "GameVault - Personal Game Library and Playtime Tracker",
   "dependencies": {
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.11",
     "koffi": "^3.3.8",
     "lucide-react": "^1.77.0",
     "react": "^19.3.1",
@@ -37,8 +39,86 @@
     "concurrently": "^9.2.5",
     "cross-env": "^10.1.0",
     "electron": "^41.7.1",
+    "electron-builder": "^26.18.0",
     "tailwindcss": "^4.3.5",
     "typescript": "^5.9.3",
     "vite": "^6.4.6"
+  },
+  "build": {
+    "appId": "com.gamevault.app",
+    "productName": "GameVault",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "!dist-electron/*.map",
+      "!dist-electron/cloud-config.json",
+      "assets/**/*",
+      "package.json",
+      "!worker/**",
+      "!admin-web/**",
+      "!community-web/**",
+      "!status-worker/**",
+      "!.dev.vars*",
+      "!cloud-config.json",
+      "!**/*.map",
+      "!gamevault.db*",
+      "!auth-session.json",
+      "!tests/**",
+      "!scripts/**",
+      "!.agents/**",
+      "!.wrangler/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis-web",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "GameVault-Setup-${version}.${ext}"
+    },
+    "nsisWeb": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "GameVault-Web-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "GameVault-Portable-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "SonhocCodee",
+        "repo": "GameVault"
+      }
+    ]
   }
 }

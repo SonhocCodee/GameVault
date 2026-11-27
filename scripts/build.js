@@ -15,6 +15,7 @@ if (!fs.existsSync(distElectron)) {
 // Common externals for Node/Electron main process
 const mainExternal = [
   'electron',
+  'electron-updater',
   'koffi',
   'node:sqlite',
   'sqlite',

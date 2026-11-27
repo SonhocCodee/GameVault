@@ -128,6 +128,8 @@ import {
   ensurePlaytimeWatch,
   type AppStartupLaunchInfo,
 } from './settings.js';
+import { initAutoUpdater, getUpdateStatus, checkForUpdates, installUpdate } from './updater.js';
+import { initLogger, getLogFilePath, sendDiagnosticLogToServer } from './logger.js';
 import type { GameFilter, Game, Session, AddWishlistPayload, AppSettings } from '../shared/types.js';
 
 // Register privileged scheme before app ready
@@ -334,6 +336,10 @@ function createWindow(startHidden: boolean = false): BrowserWindow {
 
   mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     console.error(`[Renderer Log ${level}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[main] Renderer process gone:', details.reason, 'exitCode=', details.exitCode);
   });
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -1012,10 +1018,30 @@ function registerIpcHandlers(): void {
   ipcMain.handle('drive:getActiveMediaSync', async () => {
     return getActiveMediaSyncStatus();
   });
+
+  // In-app Auto Updater
+  ipcMain.handle('updater:getStatus', () => getUpdateStatus());
+  ipcMain.handle('updater:check', () => checkForUpdates());
+  ipcMain.handle('updater:install', () => installUpdate());
+
+  // Diagnostic Logs
+  ipcMain.handle('logs:sendToServer', async (_event, note?: string) => {
+    return sendDiagnosticLogToServer(note);
+  });
+  ipcMain.handle('logs:openFolder', async () => {
+    const logPath = getLogFilePath();
+    shell.showItemInFolder(logPath);
+    return logPath;
+  });
 }
 
 // App lifecycle
+app.on('child-process-gone', (_event, details) => {
+  console.error('[main] Child process gone:', details.type, details.reason, 'exitCode=', details.exitCode);
+});
+
 app.whenReady().then(() => {
+  initLogger();
   // Register custom game-media:// streaming protocol handler
   registerMediaProtocolHandler();
 
@@ -1064,6 +1090,7 @@ app.whenReady().then(() => {
   // Create Window immediately for instant UX
   createWindow(startHidden);
   createTray();
+  initAutoUpdater(() => mainWindow, () => { forceQuit = true; });
 
   // Re-ensure the Startup shortcut exists (e.g. after a folder cleanup)
   if (appSettings.appStartupEnabled) {
@@ -1134,12 +1161,20 @@ app.whenReady().then(() => {
   const fpsMonitor = getFpsMonitor();
   fpsMonitor.recoverOrphans();
   tracker.onSessionStarted = (info) => {
-    const started = fpsMonitor.startCapture({
-      sessionId: info.sessionId,
-      exeName: info.processName,
-      processId: info.pid,
-    });
-    if (started) capturePerformanceContext(info.sessionId, info.gameId).catch((error) => console.warn('[performance] Snapshot failed:', error));
+    fpsMonitor
+      .startCapture({
+        sessionId: info.sessionId,
+        exeName: info.processName,
+        processId: info.pid,
+      })
+      .then((started) => {
+        if (started) {
+          capturePerformanceContext(info.sessionId, info.gameId).catch((error) =>
+            console.warn('[performance] Snapshot failed:', error)
+          );
+        }
+      })
+      .catch(() => {});
   };
   tracker.onSessionClosed = (result) => {
     fpsMonitor.finishCapture(result).catch(() => {});

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getDb, getDbDir, updateSessionFps } from './db.ts';
@@ -232,10 +232,10 @@ export class FpsMonitor {
   }
 
   /**
-   * Starts PresentMon capture for a tracker session (fire-and-forget; failures
-   * only mean "no FPS for this session", never break the tracker).
+   * Starts PresentMon capture for a tracker session (non-blocking; failures
+   * only mean "no FPS for this session", never break or freeze the tracker).
    */
-  public startCapture(target: CaptureTarget): boolean {
+  public async startCapture(target: CaptureTarget): Promise<boolean> {
     if (process.platform !== 'win32' || !target?.sessionId || !target.exeName) {
       return false;
     }
@@ -277,15 +277,19 @@ export class FpsMonitor {
       fs.writeFileSync(configPath, JSON.stringify(config), 'utf8');
 
       // schtasks /run can transiently fail while a previous helper instance is
-      // still finishing — retry for a few seconds before giving up
+      // still finishing — retry asynchronously without blocking Electron's main thread
       let started = false;
       for (let attempt = 0; attempt < 12; attempt++) {
-        const res = spawnSync('schtasks', ['/Run', '/TN', TASK_NAME], { windowsHide: true });
-        if (res.status === 0) {
+        const ok = await new Promise<boolean>((resolve) => {
+          execFile('schtasks', ['/Run', '/TN', TASK_NAME], { windowsHide: true, timeout: 5000 }, (err) => {
+            resolve(!err);
+          });
+        });
+        if (ok) {
           started = true;
           break;
         }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+        await new Promise((r) => setTimeout(r, 500));
       }
       if (!started) {
         try { fs.unlinkSync(configPath); } catch {}

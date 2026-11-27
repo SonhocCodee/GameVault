@@ -4,7 +4,31 @@ File này lưu tóm tắt mỗi lượt đẩy code (`git push`) để đồng b
 Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 > **Quy ước:**
-> - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->`
+> - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
+
+## [2026-11-27 14:24] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Fix treo/kẹt bấm sau khi xóa game & trên máy NVIDIA**:
+  - Thêm `src/renderer/components/ConfirmModal.tsx` thay toàn bộ `window.confirm()` trong `App.tsx`, `GameDetail.tsx`, `SyncModal.tsx` (tránh lỗi kẹt focus/compositor của Chromium trên Electron Windows).
+  - Reset sạch state modal `Thêm trò chơi mới` và bỏ `backdrop-blur-md` / `required` native trong `App.tsx`.
+  - Chuyển `FpsMonitor.startCapture` (`src/main/fps-monitor.ts`) sang `async` (`execFile` + `setTimeout`), bỏ `spawnSync` + `Atomics.wait` chặn main thread.
+  - Thêm listener `render-process-gone` và `child-process-gone` trong `src/main/main.ts`.
+- **Hệ thống Log local + gửi log về Cloudflare Worker**:
+  - Thêm `src/main/logger.ts` ghi `gamevault.log`, migration `worker/migrations/0010_client_logs.sql`, route `worker/src/routes/logs.ts` (`POST /api/logs`, `GET /api/admin/logs`), và nút **"Gửi log lỗi"** / **"Mở log"** trong `SettingsModal.tsx`.
+- **Deploy Worker & Đóng gói `v1.0.1`**:
+  - Đã chạy `0010_client_logs.sql` lên D1 remote (`game-vault-d1`) và `npm run deploy:worker`.
+  - Tăng version `package.json` lên `1.0.1` và đóng gói sạch `GameVault/release/`.
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass (544 tests: 540 pass, 0 fail, 4 skipped).
+- `npm run pack:win`: Pass (`GameVault-Setup-1.0.1.exe`, `GameVault-Web-Setup-1.0.1.exe`, `GameVault-Portable-1.0.1.exe`).
+
+### Bàn giao / Tiếp theo cho máy kia
+- Tạo GitHub Release `v1.0.1` trên `SonhocCodee/GameVault` và đính kèm `latest.yml`, `GameVault-Setup-1.0.1.exe`, `GameVault-Setup-1.0.1.exe.blockmap` để máy cài bản Setup tự động cập nhật.`
 
 ## [2026-11-26 19:34] — Máy: CNTT-PM6 — Branch: main
 
@@ -47,6 +71,30 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 ---
 
 <!-- LATEST_FIRST -->
+
+## [2026-11-27 14:24] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Fix treo/kẹt bấm sau khi xóa game & trên máy NVIDIA**:
+  - Thêm `src/renderer/components/ConfirmModal.tsx` thay toàn bộ `window.confirm()` trong `App.tsx`, `GameDetail.tsx`, `SyncModal.tsx` (tránh lỗi kẹt focus/compositor của Chromium trên Electron Windows).
+  - Reset sạch state modal `Thêm trò chơi mới` và bỏ `backdrop-blur-md` / `required` native trong `App.tsx`.
+  - Chuyển `FpsMonitor.startCapture` (`src/main/fps-monitor.ts`) sang `async` (`execFile` + `setTimeout`), bỏ `spawnSync` + `Atomics.wait` chặn main thread.
+  - Thêm listener `render-process-gone` và `child-process-gone` trong `src/main/main.ts`.
+- **Hệ thống Log local + gửi log về Cloudflare Worker**:
+  - Thêm `src/main/logger.ts` ghi `gamevault.log`, migration `worker/migrations/0010_client_logs.sql`, route `worker/src/routes/logs.ts` (`POST /api/logs`, `GET /api/admin/logs`), và nút **"Gửi log lỗi"** / **"Mở log"** trong `SettingsModal.tsx`.
+- **Deploy Worker & Đóng gói `v1.0.1`**:
+  - Đã chạy `0010_client_logs.sql` lên D1 remote (`game-vault-d1`) và `npm run deploy:worker`.
+  - Tăng version `package.json` lên `1.0.1` và đóng gói sạch `GameVault/release/`.
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass (544 tests: 540 pass, 0 fail, 4 skipped).
+- `npm run pack:win`: Pass (`GameVault-Setup-1.0.1.exe`, `GameVault-Web-Setup-1.0.1.exe`, `GameVault-Portable-1.0.1.exe`).
+
+### Bàn giao / Tiếp theo cho máy kia
+- Tạo GitHub Release `v1.0.1` trên `SonhocCodee/GameVault` và đính kèm `latest.yml`, `GameVault-Setup-1.0.1.exe`, `GameVault-Setup-1.0.1.exe.blockmap` để máy cài bản Setup tự động cập nhật.
 
 ## [2026-11-27 10:15] — Máy: CNTT-PM6 — Branch: main
 
