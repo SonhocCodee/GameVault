@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import worker from "../worker/src/index.ts";
 import { createTestWorkerEnv, createMockD1, createTestSessionToken } from "./test-helpers-cloudflare.js";
-import { getMonthlyRankings, mergedMinutes, sessionTimestamp } from "../worker/src/monthly-rankings.ts";
-import { currentRankingMonth, rankingMonthBounds, rankingMonths, monthlyRatingScore } from "../src/shared/monthly.ts";
+import { getMonthlyPlayerRankings, getMonthlyRankings, mergedMinutes, sessionTimestamp } from "../worker/src/monthly-rankings.ts";
+import { currentRankingMonth, FIRST_PLAYER_RANKING_MONTH, rankingMonthBounds, rankingMonths, monthlyRatingScore } from "../src/shared/monthly.ts";
 
 const now = new Date("2026-12-15T12:00:00Z");
 async function fixture() {
@@ -82,20 +82,24 @@ test("single-player ratings ignore hours and include one valid review", async ()
   assert.equal(result.singlePlayer[0].averageScore, 10);
 });
 
-test("review confidence balances a lone perfect score against many strong ratings", async () => {
+test("single-player ranks by average score first then review count, and requires monthly playtime", async () => {
   const f = await fixture();
-  f.game("10", "offline"); f.game("20", "hybrid");
-  f.user("solo"); f.rating("solo", "10", 10);
-  for (let i = 0; i < 30; i++) { f.user(`p${i}`); f.rating(`p${i}`, "20", 9.3); }
+  f.game("10", "offline"); f.game("20", "hybrid"); f.game("30", "offline");
+  f.user("solo"); f.library("solo", "10"); f.session("solo", "10", "2026-11-05T08:00:00", 60); f.rating("solo", "10", 10);
+  f.library("solo", "30"); f.rating("solo", "30", 10); // no session in month -> excluded
+  for (let i = 0; i < 3; i++) {
+    f.user(`p${i}`); f.library(`p${i}`, "20"); f.session(`p${i}`, "20", "2026-11-05T08:00:00", 60); f.rating(`p${i}`, "20", 9.3);
+  }
   const result = await f.board();
-  assert.deepEqual(result.singlePlayer.map(g => g.gameKey), ["20", "10"]);
-  assert.equal(result.singlePlayer[0].reviewCount, 30);
-  assert.ok(Math.abs(result.singlePlayer[0].rankingScore - monthlyRatingScore(9.3, 30)) < 1e-9);
+  assert.deepEqual(result.singlePlayer.map(g => g.gameKey), ["10", "20"]);
+  assert.equal(result.singlePlayer[0].averageScore, 10);
+  assert.equal(result.singlePlayer[1].reviewCount, 3);
 });
 
 test("one player has one vote across Steam aliases and hidden alias reviews cannot leak", async () => {
   const f = await fixture();
-  f.user("a"); f.game("10", "offline");
+  f.user("a"); f.game("10", "offline"); f.library("a", "10");
+  f.session("a", "10", "2026-11-05T08:00:00", 60);
   f.rating("a", "10", 8, "2026-11-10 12:00:00");
   f.rating("a", "s_10", 9, "2026-11-11 12:00:00");
   let result = await f.board();
@@ -112,6 +116,7 @@ test("historical months use the rating before month end, including late synced a
   f.rating("a", "10", 9, "2026-10-10 12:00:00");
   assert.equal((await f.board()).singlePlayer.length, 0);
   f.session("a", "10", "2026-11-12T08:00:00", 120);
+  f.session("a", "10", "2026-12-05T08:00:00", 60);
   f.db.prepare("INSERT INTO community_rating_history(uid,game_key,game_title,score,effective_at) VALUES ('a','10','10',2,'2026-12-05 12:00:00')").run();
   assert.equal((await f.board("2026-11")).singlePlayer[0].averageScore, 9);
   assert.equal((await f.board("2026-12")).singlePlayer[0].averageScore, 2);
@@ -204,4 +209,41 @@ test("an immediate edit of a millisecond ISO rating remains the latest score", a
   const latest = f.db.prepare("SELECT score,effective_at FROM community_rating_history ORDER BY julianday(effective_at) DESC,id DESC LIMIT 1").get();
   assert.equal(latest.score, 9);
   assert.match(latest.effective_at, /\.\d{3}Z$/);
+});
+
+test("monthly player rankings start in December 2026 and rank by recorded hours", async () => {
+  assert.deepEqual(rankingMonths("2026-11", FIRST_PLAYER_RANKING_MONTH), []);
+  assert.deepEqual(rankingMonths("2026-12", FIRST_PLAYER_RANKING_MONTH), ["2026-12"]);
+  assert.deepEqual(rankingMonths("2027-02", FIRST_PLAYER_RANKING_MONTH), ["2027-02", "2027-01", "2026-12"]);
+
+  const f = await fixture();
+  f.user("a"); f.user("b"); f.user("hidden", 0);
+  f.game("10", "online", "Game 10"); f.game("20", "offline", "Game 20");
+  f.library("a", "10"); f.library("a", "20");
+  f.library("b", "10"); f.library("hidden", "10");
+
+  // November sessions must not count toward December; manual sessions must not count
+  f.session("a", "10", "2026-11-15T10:00:00", 600);
+  f.session("a", "10", "2026-12-02T10:00:00", 90);
+  f.session("a", "20", "2026-12-03T10:00:00", 30);
+  f.session("a", "20", "2026-12-04T10:00:00", 9999, "manual");
+  f.session("b", "10", "2026-12-02T10:00:00", 180);
+  f.session("hidden", "10", "2026-12-02T10:00:00", 500);
+
+  await assert.rejects(() => getMonthlyPlayerRankings(f.env, "2026-11", {}, now), /December 2026/);
+
+  const res = await getMonthlyPlayerRankings(f.env, "2026-12", { includeTopGames: true }, now);
+  assert.equal(res.firstMonth, "2026-12");
+  assert.equal(res.state, "live");
+  assert.deepEqual(res.items.map(p => [p.uid, p.recordedMinutes, p.totalGames]), [
+    ["b", 180, 1],
+    ["a", 120, 2],
+  ]);
+  assert.deepEqual(res.items[1].topGames.map(g => [g.gameKey, g.playtimeMinutes]), [
+    ["10", 90],
+    ["20", 30],
+  ]);
+
+  const httpBeforeStart = await worker.fetch(new Request("https://example.test/api/community/players/monthly?month=2026-11"), f.env);
+  assert.equal(httpBeforeStart.status, 400);
 });

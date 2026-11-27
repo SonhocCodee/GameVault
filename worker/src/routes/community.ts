@@ -1,7 +1,7 @@
 import { isProfilePreset, profilePresetPath } from "../../../src/shared/profile-presets.ts";
 import type { Env, RouteHandler } from "../types.ts";
 import { queueMetadataRefresh, refreshCatalogMetadata } from "../game-metadata.ts";
-import { getMonthlyRankings } from "../monthly-rankings.ts";
+import { getMonthlyPlayerRankings, getMonthlyRankings } from "../monthly-rankings.ts";
 import { IDLE_APP_KEYS, IDLE_APP_TITLES } from "../ranking-eligibility.ts";
 import { currentRankingMonth } from "../../../src/shared/monthly.ts";
 import { authenticate, isAdminUser } from "../auth.ts";
@@ -553,6 +553,20 @@ export function registerCommunityRoutes(router: Router) {
       };
     }), limit, offset));
   });
+  add("GET", "/players/monthly", async (request, env, ctx) => {
+    const uid = await viewer(request, env);
+    const { limit, offset } = paging(ctx.url);
+    const month = ctx.url.searchParams.get("month") || currentRankingMonth();
+    const includeTopGames = ctx.url.searchParams.get("includeTopGames") === "1";
+    const result = await getMonthlyPlayerRankings(env, month, {
+      limit,
+      offset,
+      includeTopGames,
+      viewerUid: uid,
+      request,
+    });
+    return jsonResponse(result);
+  });
   add("GET", "/posts", async (r, e, c) => listPosts(r, e, c.url));
   add("GET", "/posts/:id", async (r, e, c) =>
     listPosts(r, e, c.url, text(c.params?.id, 100, true)),
@@ -902,7 +916,8 @@ export function registerCommunityRoutes(router: Router) {
     const object = env.IMAGES_BUCKET
       ? await env.IMAGES_BUCKET.get(`community/${image.key}`)
       : null;
-    const data = object?.body || image.data;
+    // D1 returns BLOB columns as number arrays; Response would stringify them.
+    const data = object?.body || (Array.isArray(image.data) ? new Uint8Array(image.data) : image.data);
     if (!data) throw new CommunityError("Image not found", 404);
     return new Response(data, {
       headers: {

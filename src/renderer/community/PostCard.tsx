@@ -3,6 +3,7 @@ import {
   Bookmark,
   Clock,
   Eye,
+  EyeOff,
   Flag,
   Heart,
   MessageCircle,
@@ -116,6 +117,11 @@ export function PostCard({
     if (commentsOpen) void loadComments();
   }, [commentsOpen, post.id]);
 
+  useEffect(() => {
+    setRevealed(false);
+    setLightboxSrc(null);
+  }, [post.id, post.spoiler]);
+
   const coverUrl = post.coverUrl
     ? qualifyCommunityUrl(api.publicBase, post.coverUrl)
     : "";
@@ -125,14 +131,23 @@ export function PostCard({
       <header className="gv-post-header">
         <div className="gv-post-author">
           <Avatar name={post.nickname} url={post.avatarUrl} size={38} />
-          <div>
-            <div className="gv-actions" style={{ gap: 8 }}>
+          <div className="gv-post-identity">
+            <div className="gv-post-identity-row">
               <button
                 className="gv-link"
                 style={{ padding: 0, fontWeight: 700, color: "#f1f3f7" }}
                 onClick={() => onProfile(post.uid)}
               >
                 {post.nickname}
+              </button>
+              <button
+                type="button"
+                className="gv-game-chip gv-post-game"
+                onClick={() => onGame(post)}
+                title={post.title}
+              >
+                {coverUrl && <img src={coverUrl} alt="" loading="lazy" />}
+                <span>{post.title}</span>
               </button>
               <KindBadge kind={post.kind} />
               {post.kind === "review" && post.reviewScore != null && (
@@ -154,20 +169,27 @@ export function PostCard({
             </div>
           </div>
         </div>
-
-        <button className="gv-game-chip" onClick={() => onGame(post)}>
-          {coverUrl && <img src={coverUrl} alt="" loading="lazy" />}
-          <span style={{ fontWeight: 700, fontSize: 13 }}>{post.title}</span>
-        </button>
       </header>
 
-      {post.spoiler && !revealed ? (
-        <div className="gv-spoiler-box">
-          <span>Bài viết có tiết lộ nội dung game (Spoiler).</span>
-          <button type="button" onClick={() => setRevealed(true)}>
-            <Eye size={14} />
-            Hiện nội dung
-          </button>
+      {post.spoiler && !revealed && !editing ? (
+        <div className={`gv-spoiler-box${post.images.length ? " gv-spoiler-preview" : ""}`}>
+          {post.images.length > 0 && (
+            <div className="gv-spoiler-media" aria-hidden="true">
+              {post.images.map((url) => {
+                const src = qualifyCommunityUrl(api.publicBase, url);
+                return src ? <img key={url} src={src} alt="" loading="lazy" draggable={false} /> : null;
+              })}
+            </div>
+          )}
+          <div className="gv-spoiler-warning">
+            <EyeOff size={24} aria-hidden="true" />
+            <strong>Cảnh báo spoiler</strong>
+            <span>Bài viết tiết lộ nội dung game. Chỉ mở khi bạn sẵn sàng xem.</span>
+            <button type="button" onClick={() => setRevealed(true)}>
+              <Eye size={14} />
+              Hiện nội dung{post.images.length ? " và ảnh" : ""}
+            </button>
+          </div>
         </div>
       ) : (
         <>

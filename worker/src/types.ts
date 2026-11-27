@@ -203,6 +203,7 @@ export interface LibrarySyncResponse {
   stats: LibrarySyncStats;
   syncEpoch?: number;
   authoritativePull?: boolean;
+  delta?: boolean;
 }
 
 export interface GameCoverRecord {

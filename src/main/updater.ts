@@ -23,6 +23,28 @@ function broadcast(next: AppUpdateStatus): void {
   }
 }
 
+function formatUpdateError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  const lower = raw.toLowerCase();
+
+  if (lower.includes('latest.yml') && (lower.includes('404') || lower.includes('cannot find'))) {
+    return 'Bản cập nhật mới đang được phát hành trên máy chủ. Vui lòng thử lại sau vài phút.';
+  }
+  if (
+    lower.includes('err_internet_disconnected') ||
+    lower.includes('enotfound') ||
+    lower.includes('etimedout') ||
+    lower.includes('econnrefused') ||
+    lower.includes('net::')
+  ) {
+    return 'Không thể kết nối tới máy chủ cập nhật. Vui lòng kiểm tra kết nối mạng.';
+  }
+
+  const firstLine = raw.split(/\r?\n/)[0]?.trim();
+  if (!firstLine) return 'Không thể kiểm tra cập nhật.';
+  return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
+}
+
 export function getUpdateStatus(): AppUpdateStatus {
   return currentStatus;
 }
@@ -47,7 +69,7 @@ export async function checkForUpdates(): Promise<AppUpdateStatus> {
     broadcast({
       state: 'error',
       currentVersion: app.getVersion(),
-      message: err?.message || 'Không thể kiểm tra cập nhật.',
+      message: formatUpdateError(err),
     });
   }
   return currentStatus;
@@ -132,7 +154,7 @@ export function initAutoUpdater(
     broadcast({
       state: 'error',
       currentVersion: app.getVersion(),
-      message: err?.message || 'Lỗi khi kiểm tra cập nhật.',
+      message: formatUpdateError(err),
     });
   });
 

@@ -613,7 +613,10 @@ test("community images require ownership, become visible only on a live post, an
   const { id } = await (
     await f.call("/posts", "POST", { ...post, imageKeys: [key] }, "alice")
   ).json();
-  assert.equal((await f.call(`/images/${key}`)).status, 200);
+  const image = await f.call(`/images/${key}`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("Content-Type"), "image/png");
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
   // Private storage keys cannot be reached through the legacy generic image route.
   assert.equal(
     (
@@ -628,6 +631,54 @@ test("community images require ownership, become visible only on a live post, an
   assert.equal((await f.call(`/images/${key}`)).status, 404);
   assert.equal(f.r2._store.size, 0);
 });
+test("community images stored in D1 are served as original bytes, not a comma-separated array", async () => {
+  const f = await fixture();
+  delete f.env.IMAGES_BUCKET;
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const upload = await worker.fetch(
+    new Request("https://example.com/api/community/uploads", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${f.tokens.alice}`,
+        "Content-Type": "image/png",
+      },
+      body: png,
+    }),
+    f.env,
+  );
+  assert.equal(upload.status, 201);
+  const { key } = await upload.json();
+  const created = await f.call("/posts", "POST", { ...post, imageKeys: [key] }, "alice");
+  assert.equal(created.status, 201);
+
+  // Production D1 serializes BLOBs as number[], unlike node:sqlite's Uint8Array.
+  const db = f.env.DB;
+  f.env.DB = {
+    ...db,
+    prepare(query) {
+      const statement = db.prepare(query);
+      if (!query.includes("SELECT i.* FROM community_images")) return statement;
+      return {
+        bind: (...values) => ({
+          async first() {
+            const row = await statement.bind(...values).first();
+            return row ? { ...row, data: Array.from(row.data) } : null;
+          },
+        }),
+      };
+    },
+  };
+
+  const image = await f.call(`/images/${key}`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get("Content-Type"), "image/png");
+  assert.equal(image.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), png);
+});
+
 test("reports are admin-only and hidden content is unavailable", async () => {
   const f = await fixture();
   const { id } = await (await f.call("/posts", "POST", post, "alice")).json();

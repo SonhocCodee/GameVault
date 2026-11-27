@@ -52,6 +52,17 @@ export interface PlayerRanking {
   totalGames: number;
   topGames?: SharedLibraryGame[];
 }
+export interface MonthlyPlayerRankings {
+  month: string;
+  currentMonth: string;
+  firstMonth: string;
+  timezone: string;
+  state: "live" | "ended";
+  updatedAt: string;
+  items: PlayerRanking[];
+  hasMore: boolean;
+  nextOffset: number;
+}
 export interface GamePlayer {
   uid: string;
   nickname: string;

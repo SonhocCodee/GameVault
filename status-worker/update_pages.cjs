@@ -6,50 +6,8 @@ const svgIcon20 = `<svg class="w-5 h-5 shrink-0 inline-block" fill="none" stroke
 const svgBack14 = `<svg class="w-3.5 h-3.5 inline-block" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>`;
 const svgBack16 = `<svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>`;
 
-// --- 1. UPDATE public-web/index.html ---
-let indexHtml = fs.readFileSync('public-web/index.html', 'utf8');
-
-// Replace header nav download button and add Login link
-indexHtml = indexHtml.replace(
-  /<nav class="flex items-center gap-6 text-sm font-medium text-slate-300">[\s\S]*?<\/nav>/,
-`<nav class="flex items-center gap-5 text-sm font-medium text-slate-300">
-        <a href="#features" class="hover:text-white transition-colors">Features</a>
-        <a href="/privacy" class="hover:text-white transition-colors">Privacy Policy</a>
-        <a href="/terms" class="hover:text-white transition-colors">Terms of Service</a>
-        <a href="/dashboard?tab=profile" class="px-3.5 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 hover:text-white font-semibold transition-all flex items-center gap-1.5">
-          <span>🔑</span> Đăng nhập / Profile
-        </a>
-        <a href="#download" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-all shadow-md shadow-indigo-600/30 flex items-center gap-1.5">
-          ${svgIcon16}
-          <span>Download</span>
-        </a>
-      </nav>`
-);
-
-// Replace hero download button
-indexHtml = indexHtml.replace(
-  /<a href="#download" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-all shadow-lg shadow-indigo-600\/25 flex items-center gap-2">[\s\S]*?<\/a>/,
-`<a href="#download" class="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2">
-          ${svgIcon16}
-          <span>Download GameVault for Windows</span>
-        </a>`
-);
-
-// Replace download section button
-indexHtml = indexHtml.replace(
-  /<a href="#" onclick="alert\('GameVault installer download will start shortly\. Thank you for using GameVault!'\); return false;" class="w-full sm:w-auto px-8 py-3\.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600\/30 flex items-center justify-center gap-2">[\s\S]*?<\/a>/,
-`<a href="#" onclick="alert('GameVault installer download will start shortly. Thank you for using GameVault!'); return false;" class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2">
-            ${svgIcon20}
-            <span>Download Installer (.exe)</span>
-          </a>`
-);
-
-// Add profile link to footer if not present
-if (!indexHtml.includes('/dashboard?tab=profile')) {
-  indexHtml = indexHtml.replace('<a href="/privacy"', '<a href="/dashboard?tab=profile" class="hover:text-slate-300 transition-colors">Đăng nhập / Profile</a>\n        <a href="/privacy"');
-}
-fs.writeFileSync('public-web/index.html', indexHtml);
-console.log('Updated public-web/index.html');
+// --- 1. public-web/index.html is maintained directly ---
+console.log('Skipped overwriting public-web/index.html');
 
 
 // --- 2. UPDATE public-web/privacy.html ---

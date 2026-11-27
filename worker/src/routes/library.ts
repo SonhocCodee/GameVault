@@ -90,12 +90,50 @@ function isValidStoredCoverUrl(url: unknown): url is string {
   return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/api/images/');
 }
 
-async function getUserSyncEpoch(env: Env, uid: string): Promise<number> {
+function normalizeSinceTimestamp(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().replace('T', ' ').slice(0, 19);
+}
+
+async function getUserSyncState(
+  env: Env,
+  uid: string
+): Promise<{ syncEpoch: number; updatedAt: string | null }> {
   try {
-    const row = await env.DB.prepare('SELECT sync_epoch FROM user_sync_state WHERE uid = ?').bind(uid).first<any>();
-    return Number(row?.sync_epoch) || 0;
+    const row = await env.DB.prepare('SELECT sync_epoch, updated_at FROM user_sync_state WHERE uid = ?')
+      .bind(uid)
+      .first<any>();
+    return {
+      syncEpoch: Number(row?.sync_epoch) || 0,
+      updatedAt: typeof row?.updated_at === 'string' && row.updated_at.trim() ? row.updated_at.trim() : null,
+    };
   } catch {
-    return 0;
+    return { syncEpoch: 0, updatedAt: null };
+  }
+}
+
+async function getUserSyncEpoch(env: Env, uid: string): Promise<number> {
+  const state = await getUserSyncState(env, uid);
+  return state.syncEpoch;
+}
+
+async function touchUserSyncState(env: Env, uid: string): Promise<void> {
+  try {
+    await env.DB.prepare(`
+      INSERT INTO user_sync_state (uid, sync_epoch, updated_at)
+      VALUES (?, 0, datetime('now'))
+      ON CONFLICT(uid) DO UPDATE SET
+        updated_at = datetime('now')
+    `).bind(uid).run();
+  } catch {
+    // Graceful fallback if user_sync_state is not yet migrated in an isolated test DB
   }
 }
 
@@ -117,43 +155,75 @@ async function bumpUserSyncEpoch(env: Env, uid: string): Promise<number> {
 async function fetchUserLibraryResponse(
   env: Env,
   uid: string,
-  extra?: { authoritativePull?: boolean }
+  extra?: { authoritativePull?: boolean; since?: string | null }
 ): Promise<LibrarySyncResponse> {
-  const query = `
-    SELECT ul.game_key, ul.title, ul.steam_id,
-           COALESCE(gc.cover_url, ul.cover_url) AS cover_url,
-           COALESCE(gc.banner_url, ul.banner_url) AS banner_url,
-           gc.updated_at AS master_cover_updated_at,
-           ul.status, ul.playtime_minutes, ul.recorded_playtime_minutes, ul.last_played, ul.completed_at, ul.user_score, ul.user_notes,
-           ul.is_deleted, ul.client_updated_at, ul.server_updated_at
-    FROM user_library ul
-    LEFT JOIN game_covers gc ON gc.game_key = LOWER(ul.game_key)
-    WHERE ul.uid = ? AND ul.is_deleted = 0
-    ORDER BY ul.server_updated_at DESC
-  `;
+  const since = !extra?.authoritativePull ? normalizeSinceTimestamp(extra?.since) : null;
+  const isDelta = Boolean(since);
 
-  const { results } = await env.DB.prepare(query).bind(uid).all<any>();
+  const query = isDelta
+    ? `
+      SELECT ul.game_key, ul.title, ul.steam_id,
+             COALESCE(gc.cover_url, ul.cover_url) AS cover_url,
+             COALESCE(gc.banner_url, ul.banner_url) AS banner_url,
+             gc.updated_at AS master_cover_updated_at,
+             ul.status, ul.playtime_minutes, ul.recorded_playtime_minutes, ul.last_played, ul.completed_at, ul.user_score, ul.user_notes,
+             ul.is_deleted, ul.client_updated_at, ul.server_updated_at
+      FROM user_library ul
+      LEFT JOIN game_covers gc ON gc.game_key = LOWER(ul.game_key)
+      WHERE ul.uid = ? AND ul.server_updated_at >= ?
+      ORDER BY ul.server_updated_at DESC
+    `
+    : `
+      SELECT ul.game_key, ul.title, ul.steam_id,
+             COALESCE(gc.cover_url, ul.cover_url) AS cover_url,
+             COALESCE(gc.banner_url, ul.banner_url) AS banner_url,
+             gc.updated_at AS master_cover_updated_at,
+             ul.status, ul.playtime_minutes, ul.recorded_playtime_minutes, ul.last_played, ul.completed_at, ul.user_score, ul.user_notes,
+             ul.is_deleted, ul.client_updated_at, ul.server_updated_at
+      FROM user_library ul
+      LEFT JOIN game_covers gc ON gc.game_key = LOWER(ul.game_key)
+      WHERE ul.uid = ? AND ul.is_deleted = 0
+      ORDER BY ul.server_updated_at DESC
+    `;
+
+  const stmt = isDelta ? env.DB.prepare(query).bind(uid, since) : env.DB.prepare(query).bind(uid);
+  const { results } = await stmt.all<any>();
   const games = (results || []).map(mapRowToItem);
-  const stats = computeStats(games);
+  const stats = computeStats(games.filter((g) => !g.isDeleted));
 
   let sessions: CloudSessionItem[] = [];
-  try {
-    const sRes = await env.DB.prepare(`
-      SELECT game_key, source, start_time, end_time, duration_minutes
-      FROM user_sessions
-      WHERE uid = ?
-      ORDER BY start_time DESC
-      LIMIT 5000
-    `).bind(uid).all<any>();
-    sessions = (sRes.results || []).map((r: any) => ({
-      gameKey: r.game_key,
-      source: r.source,
-      startTime: r.start_time,
-      endTime: r.end_time || null,
-      durationMinutes: Number(r.duration_minutes) || 0,
-    }));
-  } catch {
-    // Graceful fallback if user_sessions table is not yet migrated in an isolated test DB
+  if (!isDelta || games.length > 0) {
+    try {
+      let sRes: { results?: any[] };
+      if (isDelta && games.length <= 50) {
+        const changedKeys = Array.from(new Set(games.map((g) => g.gameKey)));
+        const placeholders = changedKeys.map(() => '?').join(', ');
+        sRes = await env.DB.prepare(`
+          SELECT game_key, source, start_time, end_time, duration_minutes
+          FROM user_sessions
+          WHERE uid = ? AND game_key IN (${placeholders})
+          ORDER BY start_time DESC
+          LIMIT 500
+        `).bind(uid, ...changedKeys).all<any>();
+      } else {
+        sRes = await env.DB.prepare(`
+          SELECT game_key, source, start_time, end_time, duration_minutes
+          FROM user_sessions
+          WHERE uid = ?
+          ORDER BY start_time DESC
+          LIMIT 5000
+        `).bind(uid).all<any>();
+      }
+      sessions = (sRes.results || []).map((r: any) => ({
+        gameKey: r.game_key,
+        source: r.source,
+        startTime: r.start_time,
+        endTime: r.end_time || null,
+        durationMinutes: Number(r.duration_minutes) || 0,
+      }));
+    } catch {
+      // Graceful fallback if user_sessions table is not yet migrated in an isolated test DB
+    }
   }
 
   const syncEpoch = await getUserSyncEpoch(env, uid);
@@ -165,6 +235,7 @@ async function fetchUserLibraryResponse(
     stats,
     syncEpoch,
     ...(extra?.authoritativePull ? { authoritativePull: true } : {}),
+    ...(isDelta ? { delta: true } : {}),
   };
 }
 
@@ -174,7 +245,31 @@ export const handleGetLibrary: RouteHandler = async (request, env) => {
     return errorResponse('Unauthorized', 401);
   }
 
-  return jsonResponse(await fetchUserLibraryResponse(env, user.uid));
+  const url = new URL(request.url);
+  const since = normalizeSinceTimestamp(url.searchParams.get('since'));
+  const rawEpoch = url.searchParams.get('clientSyncEpoch');
+  const clientSyncEpoch = rawEpoch != null && Number.isFinite(Number(rawEpoch))
+    ? Math.max(0, Math.floor(Number(rawEpoch)))
+    : null;
+
+  if (since) {
+    const syncState = await getUserSyncState(env, user.uid);
+    if (clientSyncEpoch !== null && syncState.syncEpoch > 0 && clientSyncEpoch < syncState.syncEpoch) {
+      return jsonResponse(await fetchUserLibraryResponse(env, user.uid, { authoritativePull: true }));
+    }
+    if (syncState.updatedAt && syncState.updatedAt < since) {
+      return jsonResponse({
+        games: [],
+        sessions: [],
+        syncedAt: new Date().toISOString(),
+        stats: computeStats([]),
+        syncEpoch: syncState.syncEpoch,
+        delta: true,
+      });
+    }
+  }
+
+  return jsonResponse(await fetchUserLibraryResponse(env, user.uid, { since }));
 };
 
 export const handleSyncLibrary: RouteHandler = async (request, env) => {
@@ -196,6 +291,8 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
   }
 
   const syncMode = body?.mode === 'overwrite' ? 'overwrite' : 'merge';
+  const isDelta = body?.delta === true && syncMode !== 'overwrite';
+  const since = isDelta ? normalizeSinceTimestamp(body?.since) : null;
   const clientSyncEpoch = Number.isFinite(Number(body?.clientSyncEpoch))
     ? Math.max(0, Math.floor(Number(body.clientSyncEpoch)))
     : 0;
@@ -225,15 +322,41 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
 
   const existingByKey = new Map<string, any>();
   if (syncMode !== 'overwrite') {
-    const existingRes = await env.DB.prepare(`
-      SELECT game_key, title, steam_id, cover_url, banner_url, status,
-             playtime_minutes, recorded_playtime_minutes, last_played, completed_at, user_score, user_notes,
-             is_deleted, client_updated_at
-      FROM user_library
-      WHERE uid = ?
-    `).bind(user.uid).all<any>();
-    for (const row of existingRes.results || []) {
-      existingByKey.set(row.game_key, row);
+    const targetKeys = isDelta
+      ? Array.from(
+          new Set(
+            items
+              .map((it: any) => (typeof it?.gameKey === 'string' ? it.gameKey.trim() : ''))
+              .filter(Boolean)
+          )
+        )
+      : [];
+
+    if (isDelta && targetKeys.length === 0) {
+      // Nothing to look up in user_library
+    } else if (isDelta && targetKeys.length <= 50) {
+      const placeholders = targetKeys.map(() => '?').join(', ');
+      const existingRes = await env.DB.prepare(`
+        SELECT game_key, title, steam_id, cover_url, banner_url, status,
+               playtime_minutes, recorded_playtime_minutes, last_played, completed_at, user_score, user_notes,
+               is_deleted, client_updated_at
+        FROM user_library
+        WHERE uid = ? AND game_key IN (${placeholders})
+      `).bind(user.uid, ...targetKeys).all<any>();
+      for (const row of existingRes.results || []) {
+        existingByKey.set(row.game_key, row);
+      }
+    } else {
+      const existingRes = await env.DB.prepare(`
+        SELECT game_key, title, steam_id, cover_url, banner_url, status,
+               playtime_minutes, recorded_playtime_minutes, last_played, completed_at, user_score, user_notes,
+               is_deleted, client_updated_at
+        FROM user_library
+        WHERE uid = ?
+      `).bind(user.uid).all<any>();
+      for (const row of existingRes.results || []) {
+        existingByKey.set(row.game_key, row);
+      }
     }
   }
 
@@ -447,10 +570,12 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
   }
 
   const rawSessions = Array.isArray(body?.sessions) ? body.sessions : [];
+  let sessionStmtsCount = 0;
   if (rawSessions.length > 0) {
     try {
       const existingSessions = new Map<string, { endTime: string | null; durationMinutes: number }>();
-      if (syncMode !== 'overwrite') {
+      const skipSessionPreload = isDelta && rawSessions.length <= 100;
+      if (syncMode !== 'overwrite' && !skipSessionPreload) {
         const sRows = await env.DB.prepare(`
           SELECT game_key, source, start_time, end_time, duration_minutes
           FROM user_sessions
@@ -488,22 +613,25 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
         const durationMinutes = Math.max(0, Math.floor(Number(s.durationMinutes) || 0));
         if (durationMinutes <= 0) continue;
 
-        const sKey = `${gameKey}\0${source}\0${startTime}`;
-        const prev = existingSessions.get(sKey);
-        if (prev) {
-          const endChanged = Boolean(endTime && (!prev.endTime || endTime > prev.endTime));
-          const durChanged = durationMinutes > prev.durationMinutes;
-          if (!endChanged && !durChanged) continue;
-          existingSessions.set(sKey, {
-            endTime: endChanged ? endTime : prev.endTime,
-            durationMinutes: Math.max(prev.durationMinutes, durationMinutes),
-          });
-        } else {
-          existingSessions.set(sKey, { endTime, durationMinutes });
+        if (!skipSessionPreload) {
+          const sKey = `${gameKey}\0${source}\0${startTime}`;
+          const prev = existingSessions.get(sKey);
+          if (prev) {
+            const endChanged = Boolean(endTime && (!prev.endTime || endTime > prev.endTime));
+            const durChanged = durationMinutes > prev.durationMinutes;
+            if (!endChanged && !durChanged) continue;
+            existingSessions.set(sKey, {
+              endTime: endChanged ? endTime : prev.endTime,
+              durationMinutes: Math.max(prev.durationMinutes, durationMinutes),
+            });
+          } else {
+            existingSessions.set(sKey, { endTime, durationMinutes });
+          }
         }
 
         stmts.push(sessionUpsert.bind(user.uid, gameKey, source, startTime, endTime, durationMinutes));
       }
+      sessionStmtsCount = stmts.length;
       for (let i = 0; i < stmts.length; i += 80) {
         await env.DB.batch(stmts.slice(i, i + 80));
       }
@@ -514,7 +642,9 @@ export const handleSyncLibrary: RouteHandler = async (request, env) => {
 
   if (syncMode === 'overwrite') {
     await bumpUserSyncEpoch(env, user.uid);
+  } else if (libStmts.length > 0 || sessionStmtsCount > 0) {
+    await touchUserSyncState(env, user.uid);
   }
 
-  return jsonResponse(await fetchUserLibraryResponse(env, user.uid));
+  return jsonResponse(await fetchUserLibraryResponse(env, user.uid, { since }));
 };

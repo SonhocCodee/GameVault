@@ -2,8 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { CommunityAdapter } from "../../src/shared/community.ts";
 import { CommunityHub } from "../../src/renderer/community/CommunityHub.tsx";
+import { LandingHeader } from "./LandingHeader.tsx";
+import { translations, type Lang } from "./i18n.ts";
 import "./index.css";
+
 const tokenKey = "gamevault.community.session";
+const langKey = "gamevault.web.lang";
+
 async function request<T>(
   path: string,
   method = "GET",
@@ -31,22 +36,38 @@ async function request<T>(
     throw new Error(result.error || `Request failed (${response.status})`);
   return result as T;
 }
+
 function App() {
+  const [lang, setLang] = useState<Lang>(() => {
+    const saved = localStorage.getItem(langKey);
+    return saved === "en" ? "en" : "vi";
+  });
+  const t = translations[lang];
+
+  const handleChangeLang = (next: Lang) => {
+    setLang(next);
+    localStorage.setItem(langKey, next);
+    document.documentElement.lang = next;
+  };
+
   const [clientId, setClientId] = useState<string | null>(null),
     [ready, setReady] = useState(false),
     [loginOpen, setLoginOpen] = useState(false),
     [error, setError] = useState("");
   const [hasToken, setHasToken] = useState(!!localStorage.getItem(tokenKey));
+
   useEffect(() => {
     const changed = () => setHasToken(!!localStorage.getItem(tokenKey));
     window.addEventListener("community-auth-changed", changed);
     return () => window.removeEventListener("community-auth-changed", changed);
   }, []);
+
   const target = useRef<HTMLDivElement>(null),
     pending = useRef<{
       resolve: () => void;
       reject: (e: Error) => void;
     } | null>(null);
+
   useEffect(() => {
     let active = true;
     void request<{
@@ -60,6 +81,7 @@ function App() {
       active = false;
     };
   }, []);
+
   useEffect(() => {
     if (!clientId) return;
     if ((window as any).google?.accounts?.id) {
@@ -70,15 +92,13 @@ function App() {
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
     script.onload = () => setReady(true);
-    script.onerror = () =>
-      setError(
-        "Không tải được đăng nhập Google. Hãy thử lại hoặc đăng nhập trong ứng dụng.",
-      );
+    script.onerror = () => setError(t.googleLoadError);
     document.head.appendChild(script);
     return () => {
       script.remove();
     };
-  }, [clientId]);
+  }, [clientId, t.googleLoadError]);
+
   useEffect(() => {
     if (!loginOpen || !ready || !clientId || !target.current) return;
     const google = (window as any).google;
@@ -105,7 +125,7 @@ function App() {
           pending.current = null;
           window.dispatchEvent(new Event("community-auth-changed"));
         } catch {
-          setError("Đăng nhập không thành công. Hãy thử lại.");
+          setError(t.signInFailed);
           pending.current?.reject(new Error("Google sign-in failed"));
           pending.current = null;
         }
@@ -116,9 +136,10 @@ function App() {
       theme: "outline",
       size: "large",
       text: "signin_with",
-      locale: "vi",
+      locale: lang,
     });
-  }, [loginOpen, ready, clientId]);
+  }, [loginOpen, ready, clientId, lang, t.signInFailed]);
+
   const api = useMemo<CommunityAdapter>(
     () => ({
       publicBase: window.location.origin,
@@ -143,9 +164,7 @@ function App() {
       },
       signIn: () => {
         if (!clientId) {
-          setError(
-            "Đăng nhập web chưa được cấu hình. Bạn vẫn có thể đọc nội dung và tương tác từ ứng dụng GameVault.",
-          );
+          setError(t.oauthMissing);
           return Promise.reject(
             new Error("Web OAuth configuration is missing"),
           );
@@ -160,97 +179,71 @@ function App() {
         });
       },
     }),
-    [clientId],
+    [clientId, t.oauthMissing],
   );
+
   return (
     <>
-      <div
-        className="gv-community"
-        style={{
-          paddingBottom: 0,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            padding: "10px 14px",
-            marginBottom: 12,
-            borderRadius: 12,
-            border: "1px solid rgba(255,42,68,0.35)",
-            background: "rgba(255,42,68,0.08)",
-          }}
-        >
-          <span style={{ fontSize: 13 }}>
-            <strong>GameVault Desktop (Windows)</strong> — Cài đặt để tự động đếm giờ chơi, chụp màn hình và đồng bộ thư viện.
-          </span>
-          <a
-            href="/community/downloads/GameVault-Web-Setup-1.0.0.exe"
-            download="GameVault-Web-Setup-1.0.0.exe"
-            style={{
-              display: "inline-block",
-              padding: "7px 14px",
-              borderRadius: 8,
-              background: "#ff2a44",
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: 13,
-              textDecoration: "none",
-            }}
-          >
-            Tải bản cài đặt (.exe)
-          </a>
+      <LandingHeader lang={lang} onChangeLang={handleChangeLang} />
+
+      <section id="community" className="gv-web-container gv-community-divider">
+        <div className="gv-section-head">
+          <h2 className="gv-section-title">{t.communitySectionTitle}</h2>
+          <p className="gv-section-sub">{t.communitySectionDesc}</p>
         </div>
-      </div>
-      {(loginOpen || error || hasToken) && (
-        <div
-          className="gv-community"
-          style={{
-            paddingBottom: 0,
-          }}
-        >
-          {error && (
-            <p className="gv-error" role="alert">
-              {error}
-            </p>
-          )}
-          {loginOpen && (
-            <div>
-              <p>Đăng nhập Google để đăng bài và tương tác.</p>
-              <div ref={target} />
-              {!ready && <p>Đang nạp Google…</p>}
+
+        {(loginOpen || error || hasToken) && (
+          <div className="gv-auth-card">
+            {error && (
+              <p className="gv-error" role="alert" style={{ margin: 0 }}>
+                {error}
+              </p>
+            )}
+            {loginOpen && (
+              <div>
+                <p style={{ margin: "0 0 10px" }}>{t.signInPrompt}</p>
+                <div ref={target} />
+                {!ready && (
+                  <p style={{ margin: "8px 0 0", color: "var(--gv-muted)" }}>
+                    {t.loadingGoogle}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="gv-btn-secondary"
+                  style={{ marginTop: 12 }}
+                  onClick={() => {
+                    setLoginOpen(false);
+                    pending.current?.reject(new Error("Sign-in cancelled"));
+                    pending.current = null;
+                  }}
+                >
+                  {t.cancelSignIn}
+                </button>
+              </div>
+            )}
+            {hasToken && (
               <button
-                style={{
-                  marginTop: 12,
-                }}
+                type="button"
+                className="gv-btn-secondary"
                 onClick={() => {
-                  setLoginOpen(false);
-                  pending.current?.reject(new Error("Sign-in cancelled"));
-                  pending.current = null;
+                  localStorage.removeItem(tokenKey);
+                  window.dispatchEvent(new Event("community-auth-changed"));
+                  setError("");
                 }}
               >
-                Hủy đăng nhập
+                {t.signOut}
               </button>
-            </div>
-          )}
-          {hasToken && (
-            <button
-              onClick={() => {
-                localStorage.removeItem(tokenKey);
-                window.dispatchEvent(new Event("community-auth-changed"));
-                setError("");
-              }}
-            >
-              Đăng xuất
-            </button>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </section>
+
       <CommunityHub api={api} />
+
+      <footer className="gv-web-footer">{t.footerText}</footer>
     </>
   );
 }
+
 createRoot(document.getElementById("root")!).render(<App />);

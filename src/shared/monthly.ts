@@ -1,4 +1,5 @@
 export const FIRST_RANKING_MONTH = "2026-11";
+export const FIRST_PLAYER_RANKING_MONTH = "2026-12";
 export const MONTHLY_TIMEZONE = "Asia/Ho_Chi_Minh";
 export const RATING_PRIOR_SCORE = 7;
 export const RATING_PRIOR_WEIGHT = 5;
@@ -17,11 +18,11 @@ export function rankingMonthBounds(month: string) {
   };
 }
 
-export function rankingMonths(current: string): string[] {
-  if (!rankingMonthBounds(current) || current < FIRST_RANKING_MONTH) return [];
+export function rankingMonths(current: string, firstMonth = FIRST_RANKING_MONTH): string[] {
+  if (!rankingMonthBounds(current) || current < firstMonth) return [];
   const result: string[] = [];
   let month = current;
-  while (month >= FIRST_RANKING_MONTH) {
+  while (month >= firstMonth) {
     result.push(month);
     const [year, number] = month.split("-").map(Number);
     month = `${number === 1 ? year - 1 : year}-${String(number === 1 ? 12 : number - 1).padStart(2, "0")}`;

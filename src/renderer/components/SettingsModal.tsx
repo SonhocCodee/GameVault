@@ -1269,7 +1269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {activeTab === 'tracker' && (
                   <div className="space-y-4">
                     {/* Close to tray */}
-                    <div className="flex items-center justify-between rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
                       <div>
                         <span className="font-bold text-xs text-white">Đóng cửa sổ = Ẩn xuống khay hệ thống</span>
                         <p className="mt-1 text-[11px] text-[#8e95a5]">
@@ -1278,7 +1278,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <button
                         onClick={() => setCloseToTray(!closeToTray)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                           closeToTray ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
                         }`}
                       >
@@ -1300,7 +1300,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <button
                         onClick={() => setAppStartupEnabled(!appStartupEnabled)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                           appStartupEnabled ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
                         }`}
                       >
@@ -1313,7 +1313,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
 
                     {/* Playtime watchdog (independent background counter) */}
-                    <div className="flex items-center justify-between rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
                       <div>
                         <span className="font-bold text-xs text-white">Watchdog giờ chơi (chạy ngầm kể cả khi app tắt)</span>
                         <p className="mt-1 text-[11px] text-[#8e95a5]">
@@ -1322,7 +1322,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <button
                         onClick={() => setPlaytimeWatchEnabled(!playtimeWatchEnabled)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                           playtimeWatchEnabled ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
                         }`}
                       >
@@ -1383,7 +1383,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <button
                         onClick={() => setAutoDetectGames(!autoDetectGames)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                           autoDetectGames ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
                         }`}
                       >
@@ -1405,7 +1405,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <button
                         onClick={() => setAmdWatcherEnabled(!amdWatcherEnabled)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                           amdWatcherEnabled ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
                         }`}
                       >
@@ -1444,7 +1444,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {activeTab === 'covers' && (
                   <div className="space-y-4">
                     {/* Steam Auto Enrichment */}
-                    <div className="flex items-center justify-between rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
                       <div>
                         <span className="font-bold text-xs text-white">Tự động làm giàu ảnh bìa từ Steam CDN</span>
                         <p className="mt-1 text-[11px] text-[#8e95a5]">
@@ -1454,7 +1454,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                       <button
                         onClick={() => setAutoEnrichCovers(!autoEnrichCovers)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
                           autoEnrichCovers ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
                         }`}
                       >

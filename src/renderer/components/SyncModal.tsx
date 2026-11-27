@@ -155,9 +155,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     }
   }, [isOpen, activeTab, authStatus?.loggedIn]);
 
-  if (!isOpen) return null;
-
   const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
+
+  if (!isOpen) return null;
 
   // Handler: Sync Library with Cloudflare D1
   const handleSyncLibrary = async (mode: 'merge' | 'overwrite' = 'merge', confirmedOverwrite = false) => {

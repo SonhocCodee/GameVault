@@ -180,7 +180,7 @@ export default function App() {
   const fetchGamesRef = useRef(fetchGames);
   fetchGamesRef.current = fetchGames;
 
-  // Auto-sync library with Cloudflare D1 once on launch if logged in
+  // Auto-sync library with Cloudflare D1 once on launch and every 1 hour (Delta Sync)
   useEffect(() => {
     const autoSync = async () => {
       try {
@@ -197,7 +197,11 @@ export default function App() {
         console.warn('Auto library sync skipped:', err);
       }
     };
-    autoSync();
+    void autoSync();
+    const hourlyTimer = setInterval(() => {
+      void autoSync();
+    }, 60 * 60 * 1000);
+    return () => clearInterval(hourlyTimer);
   }, []);
 
   // One-time setup wizard: Step 1 mandatory Google login, Step 2 storage + screenshot setup

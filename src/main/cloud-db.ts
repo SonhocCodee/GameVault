@@ -683,8 +683,15 @@ export async function getUserDoc(uid: string): Promise<Record<string, any> | nul
   };
 }
 
-export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
-  const resp = await apiFetch('/api/library', { method: 'GET' }, true);
+export async function getCloudLibrary(options?: {
+  since?: string;
+  clientSyncEpoch?: number;
+}): Promise<LibrarySyncResponse> {
+  const params = new URLSearchParams();
+  if (options?.since) params.set('since', options.since);
+  if (options?.clientSyncEpoch !== undefined) params.set('clientSyncEpoch', String(options.clientSyncEpoch));
+  const qs = params.toString();
+  const resp = await apiFetch(qs ? `/api/library?${qs}` : '/api/library', { method: 'GET' }, true);
   if (!resp.ok) {
     throw new Error(`Lấy danh sách thư viện từ cloud thất bại: HTTP ${resp.status}`);
   }
@@ -699,6 +706,24 @@ export async function getCloudLibrary(): Promise<LibrarySyncResponse> {
 
 const SYNC_EPOCH_SETTING_KEY = 'library_sync_epoch';
 const SYNC_HASH_SETTING_KEY = 'library_sync_hash';
+const SYNC_LAST_AT_SETTING_KEY = 'library_last_synced_at';
+const SYNC_LAST_SCOPE_SETTING_KEY = 'library_last_sync_scope';
+const SYNC_ITEM_HASHES_KEY = 'library_synced_item_hashes';
+const SYNC_SESSION_HASHES_KEY = 'library_synced_session_hashes';
+
+function shortHash(value: unknown): string {
+  return crypto.createHash('sha1').update(JSON.stringify(value)).digest('base64url').slice(0, 12);
+}
+
+function parseHashMap(raw: string | null | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 let inFlightLibrarySync: Promise<LibrarySyncResult> | null = null;
 let inFlightLibraryDb: ReturnType<typeof getDb> | null = null;
@@ -906,11 +931,45 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
     Boolean(payloadFingerprint) &&
     payloadFingerprint === (getSetting(SYNC_HASH_SETTING_KEY) || '');
 
+  const currentSyncScope = `${sessionUid}|${workerBase}`;
+  const lastSyncScope = getSetting(SYNC_LAST_SCOPE_SETTING_KEY) || '';
+  const sameScope = lastSyncScope === currentSyncScope;
+  const rawLastSyncedAt = sameScope ? (getSetting(SYNC_LAST_AT_SETTING_KEY) || '') : '';
+  const prevItemHashes = sameScope ? parseHashMap(getSetting(SYNC_ITEM_HASHES_KEY)) : {};
+  const prevSessionHashes = sameScope ? parseHashMap(getSetting(SYNC_SESSION_HASHES_KEY)) : {};
+  const hasPrevSnapshot = sameScope && Boolean(rawLastSyncedAt) && Object.keys(prevItemHashes).length > 0;
+  const canDelta = syncMode !== 'overwrite' && hasPrevSnapshot;
+
+  const nextItemHashes: Record<string, string> = {};
+  for (const it of items) {
+    nextItemHashes[it.gameKey] = shortHash({
+      ...it,
+      clientUpdatedAt: it.isDeleted ? '' : it.clientUpdatedAt,
+    });
+  }
+  const nextSessionHashes: Record<string, string> = {};
+  for (const s of sessionsPayload) {
+    const sKey = `${s.gameKey}\0${s.source}\0${s.startTime}`;
+    nextSessionHashes[sKey] = `${s.endTime || ''}|${s.durationMinutes}`;
+  }
+
+  let itemsToPush = items;
+  let sessionsToPush = sessionsPayload;
+  if (canDelta) {
+    itemsToPush = items.filter((it) => prevItemHashes[it.gameKey] !== nextItemHashes[it.gameKey]);
+    sessionsToPush = sessionsPayload.filter((s) => {
+      const sKey = `${s.gameKey}\0${s.source}\0${s.startTime}`;
+      return prevSessionHashes[sKey] !== nextSessionHashes[sKey];
+    });
+  }
+
   let result: LibrarySyncResponse;
   let pushedCount = 0;
 
   if (skipPostUpload) {
-    result = await getCloudLibrary();
+    result = await getCloudLibrary(
+      canDelta ? { since: rawLastSyncedAt, clientSyncEpoch: localSyncEpoch } : undefined
+    );
   } else {
     const resp = await apiFetch(
       '/api/library/sync',
@@ -918,9 +977,11 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
         method: 'POST',
         body: JSON.stringify({
           mode: syncMode,
+          delta: canDelta,
+          ...(canDelta ? { since: rawLastSyncedAt } : {}),
           clientSyncEpoch: localSyncEpoch,
-          items,
-          sessions: sessionsPayload,
+          items: itemsToPush,
+          sessions: sessionsToPush,
         }),
       },
       true
@@ -931,7 +992,7 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
     }
 
     result = await resp.json();
-    pushedCount = items.length;
+    pushedCount = itemsToPush.length;
   }
 
   assertContext();
@@ -945,7 +1006,22 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
   const matchedLocalGameIds = new Set<number>();
 
   for (const remote of result.games) {
-    if (remote.isDeleted) continue;
+    if (remote.isDeleted) {
+      if (result.delta) {
+        const row = remote.steamId && remote.steamId > 0
+          ? (db.prepare('SELECT id, updated_at FROM games WHERE steam_id = ?').get(remote.steamId) as any)
+          : (getGameByTitle(remote.title));
+        if (row) {
+          const remoteMs = parseTimestampMs(remote.clientUpdatedAt);
+          const localMs = parseTimestampMs(row.updated_at);
+          if (!Number.isFinite(remoteMs) || !Number.isFinite(localMs) || remoteMs >= localMs) {
+            db.prepare('DELETE FROM games WHERE id = ?').run(row.id);
+            updated++;
+          }
+        }
+      }
+      continue;
+    }
     if (NON_GAME_TITLE_REGEX.test((remote.title || '').trim())) continue;
 
     const rTitleNorm = (remote.title || '').toLowerCase().trim();
@@ -1220,16 +1296,30 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
   if (serverSyncEpoch > 0) {
     setSetting(SYNC_EPOCH_SETTING_KEY, String(serverSyncEpoch));
   }
+  if (result.syncedAt) {
+    setSetting(SYNC_LAST_AT_SETTING_KEY, result.syncedAt);
+    setSetting(SYNC_LAST_SCOPE_SETTING_KEY, currentSyncScope);
+    setSetting(SYNC_ITEM_HASHES_KEY, JSON.stringify(nextItemHashes));
+    setSetting(SYNC_SESSION_HASHES_KEY, JSON.stringify(nextSessionHashes));
+  }
   if (!skipPostUpload && !isAuthoritativePull && pulled === 0 && updated === 0 && payloadFingerprint) {
     setSetting(SYNC_HASH_SETTING_KEY, payloadFingerprint);
+  }
+
+  let completedCount = result.stats.completed;
+  let totalCount = result.stats.total;
+  if (result.delta) {
+    const localSnapshot = getGames();
+    totalCount = localSnapshot.length;
+    completedCount = localSnapshot.filter((g) => g.status === 'completed').length;
   }
 
   return {
     pushed: pushedCount,
     pulled,
     updated,
-    completedCount: result.stats.completed,
-    totalCount: result.stats.total,
+    completedCount,
+    totalCount,
     timestamp: result.syncedAt,
     stats: result.stats,
     syncEpoch: serverSyncEpoch,

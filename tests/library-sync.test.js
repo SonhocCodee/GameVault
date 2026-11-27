@@ -819,5 +819,80 @@ describe('Multi-Device Game Library Sync Suite (Cloudflare D1 + Worker)', () => 
       assert.equal(directRes.status, 200);
       assert.equal(d1WriteQueries, 0, 'Worker POST with unchanged items and sessions must do 0 D1 writes');
     });
+
+    test('delta sync only pushes changed games and skips full user_sessions reads on worker', async () => {
+      createGame({
+        title: 'Game One',
+        steam_id: 1001,
+        status: 'playing',
+        playtime_minutes: 60,
+        cover_url: 'https://cdn/1.jpg',
+        banner_url: 'https://cdn/1b.jpg',
+      });
+      const game2 = createGame({
+        title: 'Game Two',
+        steam_id: 1002,
+        status: 'backlog',
+        playtime_minutes: 0,
+        cover_url: 'https://cdn/2.jpg',
+        banner_url: 'https://cdn/2b.jpg',
+      });
+
+      // Backdate both games so the subsequent update is strictly newer than initial sync timestamp
+      getDb().prepare("UPDATE games SET updated_at = '2020-01-01 00:00:00'").run();
+
+      const requests = [];
+      let fullSessionTableReads = 0;
+      const origPrepare = d1.prepare.bind(d1);
+      d1.prepare = (sql) => {
+        if (/SELECT\b[\s\S]*\bFROM\s+user_sessions\b/i.test(sql) && !/game_key\s+IN\s*\(/i.test(sql)) {
+          fullSessionTableReads++;
+        }
+        return origPrepare(sql);
+      };
+
+      configureCloudDb({
+        workerApiUrl: 'http://localhost',
+        userDataDir,
+        fetchImpl: async (url, init = {}) => {
+          const parsedUrl = new URL(url);
+          const body = init.body ? JSON.parse(init.body) : null;
+          requests.push({ method: init.method || 'GET', path: parsedUrl.pathname, search: parsedUrl.search, body });
+          return worker.fetch(new Request(url, init), env);
+        },
+      });
+
+      // 1st sync: full sync pushes both games
+      const first = await syncLibraryWithCloud();
+      assert.equal(first.pushed, 2);
+      assert.equal(first.totalCount, 2);
+
+      // Modify only game2
+      updateGame(game2.id, { status: 'completed', completed_at: '2026-11-27T10:00:00Z' });
+      requests.length = 0;
+      fullSessionTableReads = 0;
+
+      // 2nd sync: delta sync should push only 1 game and never do a full user_sessions scan
+      const second = await syncLibraryWithCloud();
+      assert.equal(second.pushed, 1);
+      assert.equal(second.totalCount, 2);
+      assert.equal(second.completedCount, 1);
+      assert.equal(fullSessionTableReads, 0, 'Delta sync must never run full user_sessions scan');
+      const postReq = requests.find((r) => r.method === 'POST' && r.path === '/api/library/sync');
+      assert.ok(postReq);
+      assert.equal(postReq.body.delta, true);
+      assert.equal(postReq.body.items.length, 1);
+      assert.equal(postReq.body.items[0].gameKey, '1002');
+
+      // 3rd sync: unchanged -> GET /api/library?since=... with 0 full session reads
+      requests.length = 0;
+      fullSessionTableReads = 0;
+      const third = await syncLibraryWithCloud();
+      assert.equal(third.pushed, 0);
+      assert.equal(third.totalCount, 2);
+      assert.equal(fullSessionTableReads, 0);
+      const getReq = requests.find((r) => r.method === 'GET' && r.path === '/api/library');
+      assert.ok(getReq && getReq.search.includes('since='));
+    });
   });
 });

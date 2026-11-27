@@ -637,6 +637,47 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+.gv-post-identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.gv-post-identity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.gv-post-identity-row > .gv-link {
+  overflow-wrap: anywhere;
+}
+
+.gv-community button.gv-post-game {
+  padding: 2px 8px 2px 4px;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(100%, 280px);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.gv-community .gv-post-game img {
+  width: 18px;
+  height: 24px;
+  border-radius: 3px;
+}
+
+.gv-post-game span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gv-game-chip {
@@ -684,6 +725,66 @@
   background: rgba(245, 158, 11, 0.08);
   border: 1px dashed rgba(245, 158, 11, 0.4);
   color: #fde68a;
+}
+
+.gv-spoiler-warning {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gv-spoiler-warning > span {
+  max-width: 40ch;
+}
+
+.gv-spoiler-warning > button {
+  margin-top: 8px;
+}
+
+.gv-spoiler-preview {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  min-height: 260px;
+  overflow: hidden;
+  padding: 0;
+  border-style: solid;
+  isolation: isolate;
+}
+
+.gv-spoiler-media {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  pointer-events: none;
+  filter: blur(24px);
+  transform: scale(1.15);
+}
+
+.gv-spoiler-media img {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gv-spoiler-preview .gv-spoiler-warning {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(14, 16, 21, 0.8);
+  text-align: center;
+}
+
+.gv-spoiler-option {
+  flex: 1 1 280px;
+  max-width: 60ch;
 }
 
 .gv-images {
@@ -804,7 +905,8 @@
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.gv-dropzone:hover {
+.gv-dropzone:hover,
+.gv-dropzone-active {
   border-color: var(--gv-cyan);
   background: rgba(56, 189, 248, 0.05);
 }

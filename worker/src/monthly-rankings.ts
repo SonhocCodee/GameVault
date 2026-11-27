@@ -1,9 +1,15 @@
-import type { MonthlyGameRanking, MonthlyRankings } from "../../src/shared/community.ts";
+import type {
+  MonthlyGameRanking,
+  MonthlyPlayerRankings,
+  MonthlyRankings,
+  PlayerRanking,
+  SharedLibraryGame,
+} from "../../src/shared/community.ts";
 import {
-  currentRankingMonth, FIRST_RANKING_MONTH, MONTHLY_TIMEZONE,
+  currentRankingMonth, FIRST_PLAYER_RANKING_MONTH, FIRST_RANKING_MONTH, MONTHLY_TIMEZONE,
   monthlyRatingScore, rankingMonthBounds, RATING_PRIOR_SCORE, RATING_PRIOR_WEIGHT,
 } from "../../src/shared/monthly.ts";
-import { CommunityError, publicUrl } from "./community-common.ts";
+import { communityAvatar, CommunityError, publicUrl, safeName, visibleTo } from "./community-common.ts";
 import type { Env } from "./types.ts";
 import { IDLE_APP_KEYS, IDLE_APP_TITLES } from "./ranking-eligibility.ts";
 
@@ -154,8 +160,8 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
     a.title.localeCompare(b.title, "vi") || a.gameKey.localeCompare(b.gameKey);
   const online = candidates.filter(g => g.classification === "online" && g.totalMinutes > 0)
     .sort((a, b) => b.totalMinutes - a.totalMinutes || b.players - a.players || titleOrder(a, b));
-  const singlePlayer = candidates.filter(g => (g.classification === "offline" || g.classification === "hybrid") && g.reviewCount > 0)
-    .sort((a, b) => b.rankingScore! - a.rankingScore! || b.reviewCount - a.reviewCount || b.averageScore! - a.averageScore! || titleOrder(a, b));
+  const singlePlayer = candidates.filter(g => (g.classification === "offline" || g.classification === "hybrid") && g.totalMinutes > 0 && g.reviewCount > 0)
+    .sort((a, b) => b.averageScore! - a.averageScore! || b.reviewCount - a.reviewCount || titleOrder(a, b));
   return {
     month, currentMonth, firstMonth: FIRST_RANKING_MONTH, timezone: MONTHLY_TIMEZONE,
     state: month === currentMonth ? "live" : "ended", updatedAt: now.toISOString(),
@@ -163,5 +169,208 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
     online: online.slice(0, limit), singlePlayer: singlePlayer.slice(0, limit),
     onlineCount: online.length, singlePlayerCount: singlePlayer.length,
     unclassifiedCount: candidates.filter(g => g.classification === "unknown").length,
+  };
+}
+
+type PlayerSessionRow = {
+  uid: string;
+  nickname: string | null;
+  bio: string | null;
+  avatarUrl: string | null;
+  gameKey: string;
+  title: string;
+  steamId: number | null;
+  coverUrl: string | null;
+  bannerUrl: string | null;
+  status: string;
+  startTime: string;
+  endTime: string | null;
+  durationMinutes: number;
+};
+
+export async function getMonthlyPlayerRankings(
+  env: Env,
+  month: string,
+  options: {
+    limit?: number;
+    offset?: number;
+    includeTopGames?: boolean;
+    viewerUid?: string;
+    request?: Request;
+  } = {},
+  now = new Date(),
+): Promise<MonthlyPlayerRankings> {
+  const currentMonth = currentRankingMonth(now);
+  const bounds = rankingMonthBounds(month);
+  if (!bounds || month < FIRST_PLAYER_RANKING_MONTH || month > currentMonth) {
+    throw new CommunityError("Invalid monthly player ranking month; choose December 2026 or a later completed/current month");
+  }
+  const limit = options.limit ?? 20;
+  const offset = options.offset ?? 0;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new CommunityError("Ranking limit must be between 1 and 50");
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new CommunityError("Ranking offset must be 0 or greater");
+  }
+
+  const viewerUid = options.viewerUid || "";
+  const includeTopGames = !!options.includeTopGames;
+  const start = new Date(bounds.start).toISOString();
+  const end = new Date(Math.min(bounds.end, now.getTime() + 1)).toISOString();
+
+  const sessions = await env.DB.prepare(`
+    SELECT s.uid, cp.nickname, cp.bio,
+      COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg', u.photo_url) AS avatarUrl,
+      l.game_key AS gameKey, l.title, l.steam_id AS steamId,
+      COALESCE(gc.cover_url, l.cover_url) AS coverUrl, gc.banner_url AS bannerUrl,
+      l.status, s.start_time AS startTime, s.end_time AS endTime, s.duration_minutes AS durationMinutes
+    FROM user_sessions s
+    LEFT JOIN user_library ul ON ul.uid=s.uid AND ul.game_key=s.game_key
+    LEFT JOIN game_covers alias ON alias.game_key=s.game_key
+    JOIN community_library l ON l.uid=s.uid AND l.game_key=${canonical("s.game_key")}
+    JOIN community_profiles cp ON cp.uid=s.uid
+    LEFT JOIN users u ON u.uid=s.uid
+    LEFT JOIN game_covers gc ON gc.game_key=l.game_key
+    WHERE cp.share_library=1 AND cp.suspended=0 AND ${visibleTo("cp")}
+      AND s.source IN ('tracker','amd_import') AND s.duration_minutes>0
+      AND LOWER(l.game_key) NOT IN ${IDLE_APP_KEYS}
+      AND LOWER(TRIM(l.title)) NOT IN ${IDLE_APP_TITLES}
+      AND julianday(s.start_time)<julianday(?,'+1 day')
+      AND julianday(s.start_time,'+' || s.duration_minutes || ' minutes')>julianday(?,'-1 day')
+  `).bind(viewerUid, viewerUid, end, start).all<PlayerSessionRow>();
+
+  type PlayerBucket = {
+    uid: string;
+    nickname: string | null;
+    bio: string | null;
+    avatarUrl: string | null;
+    allIntervals: Interval[];
+    games: Map<string, {
+      gameKey: string;
+      title: string;
+      steamId: number | null;
+      coverUrl: string | null;
+      bannerUrl: string | null;
+      status: string;
+      intervals: Interval[];
+    }>;
+  };
+
+  const byPlayer = new Map<string, PlayerBucket>();
+  for (const row of sessions.results || []) {
+    const interval = recordedInterval(row, now.getTime());
+    if (!interval) continue;
+    const clipped: Interval = [Math.max(interval[0], bounds.start), Math.min(interval[1], bounds.end)];
+    if (clipped[1] <= clipped[0]) continue;
+
+    let bucket = byPlayer.get(row.uid);
+    if (!bucket) {
+      bucket = {
+        uid: row.uid,
+        nickname: row.nickname,
+        bio: row.bio,
+        avatarUrl: row.avatarUrl,
+        allIntervals: [],
+        games: new Map(),
+      };
+      byPlayer.set(row.uid, bucket);
+    }
+    bucket.allIntervals.push(clipped);
+    let game = bucket.games.get(row.gameKey);
+    if (!game) {
+      game = {
+        gameKey: row.gameKey,
+        title: row.title,
+        steamId: row.steamId,
+        coverUrl: row.coverUrl,
+        bannerUrl: row.bannerUrl,
+        status: row.status,
+        intervals: [],
+      };
+      bucket.games.set(row.gameKey, game);
+    }
+    game.intervals.push(clipped);
+  }
+
+  const ranked = [...byPlayer.values()]
+    .map((bucket) => {
+      const recordedMinutes = Math.round(mergedMinutes(bucket.allIntervals) * 1000) / 1000;
+      return { bucket, recordedMinutes };
+    })
+    .filter((entry) => entry.recordedMinutes > 0)
+    .sort((a, b) => b.recordedMinutes - a.recordedMinutes || a.bucket.uid.localeCompare(b.bucket.uid));
+
+  const slice = ranked.slice(offset, offset + limit);
+  const completedByUid = new Map<string, number>();
+  if (slice.length > 0) {
+    const uids = slice.map((s) => s.bucket.uid);
+    const placeholders = uids.map(() => "?").join(",");
+    const completedRows = (await env.DB.prepare(`
+      SELECT uid, SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completedGames
+      FROM community_library
+      WHERE uid IN (${placeholders})
+      GROUP BY uid
+    `).bind(...uids).all<{ uid: string; completedGames: number }>()).results || [];
+    for (const r of completedRows) {
+      completedByUid.set(r.uid, Number(r.completedGames) || 0);
+    }
+  }
+
+  const items: PlayerRanking[] = slice.map(({ bucket, recordedMinutes }) => {
+    const avatar = options.request
+      ? communityAvatar(options.request, bucket.avatarUrl)
+      : publicUrl(bucket.avatarUrl);
+    let topGames: SharedLibraryGame[] | undefined;
+    let bannerUrl: string | null | undefined;
+    if (includeTopGames) {
+      const sortedGames = [...bucket.games.values()]
+        .map((g) => {
+          const mins = Math.round(mergedMinutes(g.intervals) * 1000) / 1000;
+          return {
+            gameKey: g.gameKey,
+            title: g.title,
+            steamId: g.steamId,
+            coverUrl: publicUrl(g.coverUrl),
+            bannerUrl: publicUrl(g.bannerUrl),
+            status: g.status,
+            playtimeMinutes: mins,
+            recordedPlaytimeMinutes: mins,
+          };
+        })
+        .filter((g) => g.playtimeMinutes > 0)
+        .sort((a, b) => b.playtimeMinutes - a.playtimeMinutes || a.title.localeCompare(b.title, "vi"))
+        .slice(0, 3);
+      topGames = sortedGames;
+      const topBanner = sortedGames.find((g) => g.bannerUrl || g.coverUrl);
+      bannerUrl = topBanner?.bannerUrl || topBanner?.coverUrl || null;
+    }
+
+    return {
+      uid: bucket.uid,
+      nickname: safeName(bucket.nickname),
+      ...(avatar ? { avatarUrl: avatar } : {}),
+      ...(includeTopGames ? {
+        bio: bucket.bio || "",
+        bannerUrl,
+        topGames,
+      } : {}),
+      totalGames: bucket.games.size,
+      completedGames: completedByUid.get(bucket.uid) || 0,
+      totalMinutes: recordedMinutes,
+      recordedMinutes,
+    };
+  });
+
+  return {
+    month,
+    currentMonth,
+    firstMonth: FIRST_PLAYER_RANKING_MONTH,
+    timezone: MONTHLY_TIMEZONE,
+    state: month === currentMonth ? "live" : "ended",
+    updatedAt: now.toISOString(),
+    items,
+    hasMore: ranked.length > offset + limit,
+    nextOffset: offset + items.length,
   };
 }

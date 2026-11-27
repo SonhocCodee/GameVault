@@ -83,14 +83,13 @@ export function MonthlyRankings({ api, onGame, month, onMonthChange }: {
             <span className="gv-monthly-game-title">{game.title}</span>
             <span className="gv-muted">
               {online ? <><Users size={12} /> {game.players} người chơi</> :
-                <><Star size={12} /> {decimal(game.averageScore!)}/10 · {game.reviewCount} đánh giá</>}
+                <><Star size={12} /> {game.reviewCount} đánh giá · Bấm để xem chi tiết</>}
             </span>
-            {!online && game.reviewCount < 5 && <span className="gv-monthly-few-reviews">Ít đánh giá</span>}
             {online && game.averageScore !== null && <span className="gv-muted">{decimal(game.averageScore)}/10 · {game.reviewCount} đánh giá</span>}
           </span>
           <span className="gv-monthly-metric">
-            <strong>{online ? decimal(game.totalMinutes / 60) : decimal(game.rankingScore!, 2)}</strong>
-            <span>{online ? "giờ trong tháng" : "điểm xếp hạng"}</span>
+            <strong>{online ? decimal(game.totalMinutes / 60) : decimal(game.averageScore!)}</strong>
+            <span>{online ? "giờ trong tháng" : "/ 10"}</span>
           </span>
         </button>
       </li>
@@ -144,14 +143,6 @@ export function MonthlyRankings({ api, onGame, month, onMonthChange }: {
               </section>
             </div>
             {data.unclassifiedCount > 0 && <p className="gv-notice" role="status">{data.unclassifiedCount} game đang chờ xác định chế độ chơi nên chưa được xếp vào hai bảng. Bạn có thể làm mới sau khi dữ liệu phân loại được cập nhật.</p>}
-            <details className="gv-monthly-rules">
-              <summary>Cách tính xếp hạng và lịch sử</summary>
-              <div className="gv-stack-sm gv-muted">
-                <p>Điểm xếp hạng = (điểm trung bình × số lượt chấm + {data.scoring.priorScore} × {data.scoring.priorWeight}) / (số lượt chấm + {data.scoring.priorWeight}). Điểm nền {data.scoring.priorScore}/10 có trọng số tương đương {data.scoring.priorWeight} lượt chấm để cân bằng game còn ít đánh giá. Mỗi người có một điểm cho mỗi game.</p>
-                <p>Chỉ tính người có phiên chơi hoặc đánh giá trong tháng. Lịch sử dùng điểm được lưu tại thời điểm cuối tháng; thay đổi điểm ở tháng sau không ghi đè điểm cũ. Với đánh giá có từ trước khi bật tính năng, chỉ khôi phục được phiên bản gần nhất còn lưu.</p>
-                <p>Giờ chơi được chia theo thời gian của từng tháng, gộp phiên trùng và loại giờ nhập tay. Phiên đồng bộ muộn được cộng về tháng đã chơi. Tổng giờ tích lũy không được chia ngược cho các tháng trước.</p>
-              </div>
-            </details>
           </>}
         </div>
       </div>

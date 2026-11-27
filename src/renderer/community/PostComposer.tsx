@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useState } from "react";
 import {
   Camera,
   EyeOff,
@@ -20,6 +20,9 @@ import {
   qualifyCommunityUrl,
   uploadPostImages,
 } from "./client.ts";
+import { ConfirmModal } from "./CommunityWidgets.tsx";
+
+const SPOILER_REMINDER_KEY = "gamevault.community.spoiler-reminder.v1";
 
 const COMPOSER_KINDS: Array<{
   id: PostKind;
@@ -60,6 +63,16 @@ export function PostComposer({
   const [files, setFiles] = useState<File[]>(initialFiles);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const [showSpoilerReminder, setShowSpoilerReminder] = useState(false);
+  const spoilerHelpId = useId();
+  const [reminderSeen, setReminderSeen] = useState(() => {
+    try {
+      return localStorage.getItem(SPOILER_REMINDER_KEY) === "seen";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     if (game) {
@@ -107,6 +120,7 @@ export function PostComposer({
   }, [previews]);
 
   const addFiles = (incoming: File[]) => {
+    if (busy) return;
     const valid = incoming.filter((f) =>
       ["image/jpeg", "image/png", "image/webp"].includes(f.type),
     );
@@ -125,9 +139,8 @@ export function PostComposer({
     }
   };
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selected || !body.trim()) return;
+  const publish = async () => {
+    if (busy || !selected || !body.trim()) return;
     setBusy(true);
     setError("");
     let keys: string[] = [];
@@ -140,6 +153,12 @@ export function PostComposer({
         spoiler,
         imageKeys: keys,
       });
+      setReminderSeen(true);
+      try {
+        localStorage.setItem(SPOILER_REMINDER_KEY, "seen");
+      } catch {
+        // Posting still works when browser storage is unavailable.
+      }
       setBody("");
       setFiles([]);
       onPosted();
@@ -151,6 +170,16 @@ export function PostComposer({
     } finally {
       setBusy(false);
     }
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy || !selected || !body.trim()) return;
+    if (!reminderSeen) {
+      setShowSpoilerReminder(true);
+      return;
+    }
+    void publish();
   };
 
   return (
@@ -277,7 +306,27 @@ export function PostComposer({
       </label>
 
       <div className="gv-stack-sm">
-        <label className="gv-dropzone">
+        <label
+          className={`gv-dropzone${dragOver ? " gv-dropzone-active" : ""}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = busy ? "none" : "copy";
+            setDragOver(!busy);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              setDragOver(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(false);
+            addFiles(Array.from(e.dataTransfer.files));
+          }}
+        >
           <ImagePlus size={20} />
           <span>
             Chọn hoặc kéo thả tối đa 3 ảnh (tự động nén gọn trước khi đăng)
@@ -286,6 +335,7 @@ export function PostComposer({
             type="file"
             accept="image/jpeg,image/png,image/webp"
             multiple
+            disabled={busy}
             style={{ display: "none" }}
             onChange={(e) => {
               addFiles(Array.from(e.target.files || []));
@@ -316,15 +366,23 @@ export function PostComposer({
       </div>
 
       <div className="gv-top">
-        <label className="gv-check">
-          <input
-            type="checkbox"
-            checked={spoiler}
-            onChange={(e) => setSpoiler(e.target.checked)}
-          />
-          <EyeOff size={14} />
-          Cảnh báo tiết lộ nội dung (Spoiler)
-        </label>
+        <div className="gv-stack-sm gv-spoiler-option">
+          <label className="gv-check">
+            <input
+              type="checkbox"
+              checked={spoiler}
+              disabled={busy}
+              aria-describedby={spoilerHelpId}
+              onChange={(e) => setSpoiler(e.target.checked)}
+            />
+            <EyeOff size={14} />
+            Cảnh báo tiết lộ nội dung (Spoiler)
+          </label>
+          <p id={spoilerHelpId} className="gv-muted">
+            Có tình tiết, cốt truyện hoặc kết thúc game? Hãy đánh dấu spoiler.
+            Ảnh sẽ được làm mờ; người xem phải bấm để mở nội dung và ảnh.
+          </p>
+        </div>
 
         <div className="gv-actions">
           {onCancel && (
@@ -341,6 +399,18 @@ export function PostComposer({
           </button>
         </div>
       </div>
+      <ConfirmModal
+        open={showSpoilerReminder}
+        title="Nhớ đánh dấu spoiler trước khi đăng"
+        message="Nếu bài viết hoặc ảnh tiết lộ tình tiết, cốt truyện hay kết thúc game, hãy bật cảnh báo Spoiler. Ảnh sẽ được làm mờ và người xem phải bấm để mở. Có spoiler mà không đánh dấu thì bạn là con quất!"
+        confirmLabel="Đã kiểm tra, đăng bài"
+        busy={busy}
+        onCancel={() => setShowSpoilerReminder(false)}
+        onConfirm={() => {
+          setShowSpoilerReminder(false);
+          void publish();
+        }}
+      />
     </form>
   );
 }

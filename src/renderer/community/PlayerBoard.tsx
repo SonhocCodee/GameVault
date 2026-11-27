@@ -1,24 +1,30 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Award,
-  CheckCircle2,
-  Clock,
-  Gamepad2,
+  CalendarDays,
   RefreshCw,
   Sparkles,
   Trophy,
 } from "lucide-react";
 import type {
   CommunityAdapter,
+  MonthlyPlayerRankings,
   Page,
   PlayerRanking,
   PublicGame,
 } from "../../shared/community.ts";
 import {
+  currentRankingMonth,
+  FIRST_PLAYER_RANKING_MONTH,
+  rankingMonths,
+} from "../../shared/monthly.ts";
+import {
   communityError,
   qualifyCommunityUrl,
 } from "./client.ts";
 import { Avatar, PlaytimeDisplay } from "./CommunityWidgets.tsx";
+
+const monthLabel = (month: string) => `${Number(month.slice(5))}/${month.slice(0, 4)}`;
 
 export function PlayerBoard({
   api,
@@ -33,6 +39,21 @@ export function PlayerBoard({
   onGame?: (g: PublicGame) => void;
   onShareLibrary: () => void;
 }) {
+  const [currentMonth, setCurrentMonth] = useState(currentRankingMonth);
+  const availableMonths = useMemo(
+    () => rankingMonths(currentMonth, FIRST_PLAYER_RANKING_MONTH),
+    [currentMonth],
+  );
+  const monthlyReady = availableMonths.length > 0;
+  const [mode, setMode] = useState<"monthly" | "all">(() =>
+    currentRankingMonth() >= FIRST_PLAYER_RANKING_MONTH ? "monthly" : "all",
+  );
+  const [month, setMonth] = useState(() =>
+    currentRankingMonth() >= FIRST_PLAYER_RANKING_MONTH
+      ? currentRankingMonth()
+      : FIRST_PLAYER_RANKING_MONTH,
+  );
+  const [monthState, setMonthState] = useState<"live" | "ended">("live");
   const [sort, setSort] = useState("completed");
   const [board, setBoard] = useState<Page<PlayerRanking>>({
     items: [],
@@ -43,19 +64,52 @@ export function PlayerBoard({
   const [error, setError] = useState("");
   const ticket = useRef(0);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = currentRankingMonth();
+      if (next !== currentMonth) {
+        setCurrentMonth(next);
+        if (next >= FIRST_PLAYER_RANKING_MONTH && (month === currentMonth || currentMonth < FIRST_PLAYER_RANKING_MONTH)) {
+          setMonth(next);
+        }
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [currentMonth, month]);
+
   const load = async (more = false) => {
+    if (mode === "monthly" && !monthlyReady) {
+      setBoard({ items: [], hasMore: false, nextOffset: 0 });
+      setLoading(false);
+      setError("");
+      return;
+    }
     const current = ++ticket.current;
     setLoading(true);
     setError("");
     try {
-      const data = await api.request<Page<PlayerRanking>>(
-        `/players?sort=${sort}&includeTopGames=1&offset=${more ? board.nextOffset : 0}`,
-      );
-      if (current !== ticket.current) return;
-      setBoard((previous) => ({
-        ...data,
-        items: more ? [...previous.items, ...data.items] : data.items,
-      }));
+      if (mode === "monthly") {
+        const data = await api.request<MonthlyPlayerRankings>(
+          `/players/monthly?month=${encodeURIComponent(month)}&includeTopGames=1&offset=${more ? board.nextOffset : 0}`,
+        );
+        if (current !== ticket.current) return;
+        setCurrentMonth(data.currentMonth);
+        setMonthState(data.state);
+        setBoard((previous) => ({
+          items: more ? [...previous.items, ...data.items] : data.items,
+          hasMore: data.hasMore,
+          nextOffset: data.nextOffset,
+        }));
+      } else {
+        const data = await api.request<Page<PlayerRanking>>(
+          `/players?sort=${sort}&includeTopGames=1&offset=${more ? board.nextOffset : 0}`,
+        );
+        if (current !== ticket.current) return;
+        setBoard((previous) => ({
+          ...data,
+          items: more ? [...previous.items, ...data.items] : data.items,
+        }));
+      }
     } catch (e) {
       if (current === ticket.current) setError(communityError(e));
     } finally {
@@ -69,7 +123,7 @@ export function PlayerBoard({
     return () => {
       ++ticket.current;
     };
-  }, [api, sort, myUid]);
+  }, [api, mode, month, sort, myUid, monthlyReady]);
 
   return (
     <section className="gv-stack">
@@ -77,7 +131,9 @@ export function PlayerBoard({
         <div>
           <h2>Top người chơi GameVault</h2>
           <p className="gv-muted">
-            Xếp hạng giờ chơi chỉ tính giờ app ghi nhận. Di chuột vào dấu ! để xem phần giờ tự thêm.
+            {mode === "monthly"
+              ? "Xếp hạng theo giờ app ghi nhận trong từng tháng (GMT+7). Bắt đầu từ tháng 12/2026."
+              : "Xếp hạng giờ chơi chỉ tính giờ app ghi nhận. Di chuột vào dấu ! để xem phần giờ tự thêm."}
           </p>
         </div>
         <div className="gv-actions">
@@ -85,29 +141,90 @@ export function PlayerBoard({
             <Award size={15} />
             Hồ sơ của tôi
           </button>
-          <button type="button" disabled={loading} onClick={() => void load()}>
+          <button type="button" disabled={loading || (mode === "monthly" && !monthlyReady)} onClick={() => void load()}>
             <RefreshCw size={15} />
             Làm mới
           </button>
         </div>
       </div>
 
-      <div className="gv-chip-row" aria-label="Sắp xếp người chơi">
-        {[
-          ["completed", "Game đã phá đảo"],
-          ["hours", "Giờ app ghi nhận"],
-          ["games", "Tổng số game"],
-        ].map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            className={`gv-chip ${sort === value ? "active" : ""}`}
-            onClick={() => setSort(value)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="gv-chip-row" role="tablist" aria-label="Chế độ bảng xếp hạng người chơi">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "monthly"}
+          className={`gv-chip ${mode === "monthly" ? "active" : ""}`}
+          onClick={() => setMode("monthly")}
+        >
+          <CalendarDays size={13} style={{ display: "inline", verticalAlign: "-2px", marginRight: 5 }} />
+          Theo tháng
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "all"}
+          className={`gv-chip ${mode === "all" ? "active" : ""}`}
+          onClick={() => setMode("all")}
+        >
+          <Trophy size={13} style={{ display: "inline", verticalAlign: "-2px", marginRight: 5 }} />
+          All time
+        </button>
       </div>
+
+      {mode === "monthly" ? (
+        monthlyReady ? (
+          <div className="gv-stack-sm">
+            <div className="gv-chip-row" aria-label="Chọn tháng xếp hạng người chơi">
+              {availableMonths.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={`gv-chip ${month === item ? "active" : ""}`}
+                  onClick={() => setMonth(item)}
+                >
+                  Tháng {monthLabel(item)}
+                  {item === currentMonth ? " (Hiện tại)" : ""}
+                </button>
+              ))}
+            </div>
+            <div className="gv-actions" style={{ fontSize: 12 }}>
+              <span className={`gv-pill ${monthState === "live" ? "gv-pill-emerald" : ""}`}>
+                {monthState === "live" ? "Đang cập nhật" : "Đã kết thúc"}
+              </span>
+              <span className="gv-muted">
+                Tháng {monthLabel(month)} · Xếp theo giờ app ghi nhận trong tháng (GMT+7)
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="gv-empty">
+            <h3>Bảng xếp hạng theo tháng sắp mở</h3>
+            <p>
+              Bảng xếp hạng người chơi theo tháng sẽ bắt đầu xuất hiện từ tháng 12/2026. Hiện tại bạn có thể xem bảng xếp hạng All time.
+            </p>
+            <button type="button" className="gv-primary" onClick={() => setMode("all")}>
+              Xem bảng All time
+            </button>
+          </div>
+        )
+      ) : (
+        <div className="gv-chip-row" aria-label="Sắp xếp người chơi">
+          {[
+            ["completed", "Game đã phá đảo"],
+            ["hours", "Giờ app ghi nhận"],
+            ["games", "Tổng số game"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`gv-chip ${sort === value ? "active" : ""}`}
+              onClick={() => setSort(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div className="gv-error" role="alert">
@@ -209,7 +326,9 @@ export function PlayerBoard({
                       </span>
                     </div>
                     <div className="gv-stat-mini">
-                      <span className="gv-stat-mini-label">Giờ tính top</span>
+                      <span className="gv-stat-mini-label">
+                        {mode === "monthly" ? "Giờ chơi tháng" : "Giờ tính top"}
+                      </span>
                       <span className="gv-stat-mini-value gv-text-cyan">
                         <PlaytimeDisplay
                           totalMinutes={player.totalMinutes}
@@ -219,7 +338,9 @@ export function PlayerBoard({
                       </span>
                     </div>
                     <div className="gv-stat-mini">
-                      <span className="gv-stat-mini-label">Thư viện</span>
+                      <span className="gv-stat-mini-label">
+                        {mode === "monthly" ? "Game tháng này" : "Thư viện"}
+                      </span>
                       <span className="gv-stat-mini-value">
                         {player.totalGames} game
                       </span>
@@ -241,7 +362,7 @@ export function PlayerBoard({
                     }}
                   >
                     <Sparkles size={12} className="gv-text-amber" />
-                    Top game chơi nhiều giờ nhất
+                    {mode === "monthly" ? "Top game tháng này" : "Top game chơi nhiều giờ nhất"}
                   </div>
                   {topGames.length > 0 ? (
                     <div className="gv-player-topgames-list">
@@ -306,12 +427,17 @@ export function PlayerBoard({
         </div>
       )}
 
-      {!loading && !error && board.items.length === 0 && (
+      {!loading && !error && board.items.length === 0 && (mode === "all" || monthlyReady) && (
         <div className="gv-empty">
-          <h3>Chưa có người chơi trên bảng xếp hạng</h3>
+          <h3>
+            {mode === "monthly"
+              ? `Chưa có người chơi trong tháng ${monthLabel(month)}`
+              : "Chưa có người chơi trên bảng xếp hạng"}
+          </h3>
           <p>
-            Đồng bộ thư viện để số game phá đảo và giờ chơi của
-            bạn góp mặt trên bảng xếp hạng.
+            {mode === "monthly"
+              ? "Chơi game và đồng bộ phiên chơi từ app để góp mặt trên bảng xếp hạng tháng này."
+              : "Đồng bộ thư viện để số game phá đảo và giờ chơi của bạn góp mặt trên bảng xếp hạng."}
           </p>
           <button type="button" className="gv-primary" onClick={onShareLibrary}>
             Hồ sơ của tôi
