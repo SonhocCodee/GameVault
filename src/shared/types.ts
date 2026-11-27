@@ -760,6 +760,15 @@ export interface ElectronAPI {
   checkForUpdates?(): Promise<AppUpdateStatus>;
   installUpdate?(): Promise<boolean>;
   onUpdateStatus?(callback: (status: AppUpdateStatus) => void): () => void;
+  getPostUpdateInfo?(): Promise<PostUpdateInfo>;
+  acknowledgePostUpdate?(version: string): Promise<boolean>;
+  fetchRemoteReleases?(): Promise<RemoteReleaseNote[]>;
+
+  // Bug Reports & Diagnostic Logs
+  submitBugReport?(payload: CreateBugReportPayload): Promise<CreateBugReportResult>;
+  getBugReports?(scope?: 'mine' | 'all'): Promise<{ ok: boolean; bugs: BugReportItem[]; error?: string }>;
+  sendDiagnosticLog?(note?: string): Promise<{ ok: boolean; id?: number; error?: string }>;
+  openLogFolder?(): Promise<string>;
 }
 
 export interface AppUpdateStatus {
@@ -768,6 +777,54 @@ export interface AppUpdateStatus {
   latestVersion?: string;
   percent?: number;
   message?: string;
+  releaseNotes?: string;
+}
+
+export interface PostUpdateInfo {
+  justUpdated: boolean;
+  previousVersion: string | null;
+  currentVersion: string;
+}
+
+export interface RemoteReleaseNote {
+  version: string;
+  name: string;
+  body: string;
+  publishedAt: string;
+  url: string;
+}
+
+export type BugCategory = 'ui' | 'tracker' | 'sync' | 'updater' | 'other';
+export type BugSeverity = 'low' | 'medium' | 'high';
+export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix';
+
+export interface BugReportItem {
+  id: number;
+  title: string;
+  category: BugCategory;
+  severity: BugSeverity;
+  description: string;
+  app_version: string;
+  status: BugStatus;
+  fixed_in_version: string;
+  admin_note: string;
+  created_at: string;
+  updated_at: string;
+  is_mine?: boolean;
+}
+
+export interface CreateBugReportPayload {
+  title: string;
+  category: BugCategory;
+  severity: BugSeverity;
+  description: string;
+  includeLogs?: boolean;
+}
+
+export interface CreateBugReportResult {
+  ok: boolean;
+  bug?: BugReportItem;
+  error?: string;
 }
 
 declare global {

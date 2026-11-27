@@ -132,8 +132,17 @@ import {
   ensurePlaytimeWatch,
   type AppStartupLaunchInfo,
 } from './settings.js';
-import { initAutoUpdater, getUpdateStatus, checkForUpdates, installUpdate } from './updater.js';
+import {
+  initAutoUpdater,
+  getUpdateStatus,
+  checkForUpdates,
+  installUpdate,
+  getPostUpdateInfo,
+  acknowledgePostUpdate,
+  fetchGitHubReleases,
+} from './updater.js';
 import { initLogger, getLogFilePath, sendDiagnosticLogToServer } from './logger.js';
+import { submitBugReport, getBugReports } from './bugs.js';
 import type { GameFilter, Game, Session, AddWishlistPayload, AppSettings } from '../shared/types.js';
 
 // Register privileged scheme before app ready
@@ -1068,6 +1077,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle('updater:getStatus', () => getUpdateStatus());
   ipcMain.handle('updater:check', () => checkForUpdates());
   ipcMain.handle('updater:install', () => installUpdate());
+  ipcMain.handle('updater:getPostUpdateInfo', () => getPostUpdateInfo());
+  ipcMain.handle('updater:acknowledgePostUpdate', (_event, version?: string) => acknowledgePostUpdate(version));
+  ipcMain.handle('updater:fetchRemoteReleases', () => fetchGitHubReleases());
+
+  // Bug Reports
+  ipcMain.handle('bugs:submit', async (_event, payload) => {
+    return submitBugReport(payload);
+  });
+  ipcMain.handle('bugs:list', async (_event, scope?: 'mine' | 'all') => {
+    return getBugReports(scope);
+  });
 
   // Diagnostic Logs
   ipcMain.handle('logs:sendToServer', async (_event, note?: string) => {

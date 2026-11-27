@@ -15,6 +15,13 @@ import { handleImageUpload, handleImageGet } from './routes/images.ts';
 import { handleGetLibrary, handleSyncLibrary } from './routes/library.ts';
 import { handleSubmitClientLog, handleAdminGetClientLogs } from './routes/logs.ts';
 import {
+  handleCreateBugReport,
+  handleGetBugReports,
+  handleAdminGetBugReports,
+  handleAdminGetBugReportDetail,
+  handleAdminUpdateBugReport,
+} from './routes/bugs.ts';
+import {
   handleGetCover,
   handleCacheCover,
   handleUploadCover,
@@ -66,6 +73,13 @@ router.post('/api/library/sync', handleSyncLibrary);
 // Client diagnostic logs
 router.post('/api/logs', handleSubmitClientLog);
 router.get('/api/admin/logs', handleAdminGetClientLogs);
+
+// Bug reports
+router.get('/api/bugs', handleGetBugReports);
+router.post('/api/bugs', handleCreateBugReport);
+router.get('/api/admin/bugs', handleAdminGetBugReports);
+router.get('/api/admin/bugs/:id', handleAdminGetBugReportDetail);
+router.put('/api/admin/bugs/:id', handleAdminUpdateBugReport);
 
 // Images (R2 / D1)
 router.post('/api/images/upload', handleImageUpload);

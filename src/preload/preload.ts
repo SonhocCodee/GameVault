@@ -434,6 +434,23 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.removeListener('updater:status', handler);
     };
   },
+  getPostUpdateInfo: () => {
+    return ipcRenderer.invoke('updater:getPostUpdateInfo');
+  },
+  acknowledgePostUpdate: (version: string): Promise<boolean> => {
+    return ipcRenderer.invoke('updater:acknowledgePostUpdate', version);
+  },
+  fetchRemoteReleases: () => {
+    return ipcRenderer.invoke('updater:fetchRemoteReleases');
+  },
+
+  // Bug Reports
+  submitBugReport: (payload: any) => {
+    return ipcRenderer.invoke('bugs:submit', payload);
+  },
+  getBugReports: (scope?: 'mine' | 'all') => {
+    return ipcRenderer.invoke('bugs:list', scope);
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);

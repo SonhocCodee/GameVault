@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { AuthStatus, Game, TrackerStatus, WishlistSearchResult } from '../shared/types.js';
+import type { AuthStatus, Game, PostUpdateInfo, TrackerStatus, WishlistSearchResult } from '../shared/types.js';
 import type { PublicGame, CommunitySearchRequest } from '../shared/community.ts';
 import { Navbar } from './components/Navbar.js';
 import { GameCard } from './components/GameCard.js';
@@ -15,6 +15,7 @@ import { AddGameModal } from './components/AddGameModal.js';
 import { GameRowSection } from './components/GameRowSection.js';
 import { TimelineView } from './components/TimelineView.js';
 import { ConfirmModal } from './components/ConfirmModal.js';
+import { BugAndUpdateModal } from './components/BugAndUpdateModal.js';
 import {
   Plus,
   Gamepad2,
@@ -153,6 +154,21 @@ export default function App() {
   const [wishlistModalOpen, setWishlistModalOpen] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [adminCoversModalOpen, setAdminCoversModalOpen] = useState<boolean>(false);
+  const [bugModalOpen, setBugModalOpen] = useState<boolean>(false);
+  const [bugModalTab, setBugModalTab] = useState<'bugs' | 'updates'>('bugs');
+  const [postUpdateInfo, setPostUpdateInfo] = useState<PostUpdateInfo | null>(null);
+
+  useEffect(() => {
+    window.electronAPI?.getPostUpdateInfo?.().then((info) => {
+      if (info) {
+        setPostUpdateInfo(info);
+        if (info.justUpdated) {
+          setBugModalTab('updates');
+          setBugModalOpen(true);
+        }
+      }
+    }).catch(() => {});
+  }, []);
 
   // Fetch games from SQLite backend
   const fetchGames = useCallback(async () => {
@@ -700,6 +716,11 @@ export default function App() {
         onOpenWishlistModal={() => setWishlistModalOpen(true)}
         onOpenSettingsModal={() => setSettingsModalOpen(true)}
         onOpenAdminModal={() => setAdminCoversModalOpen(true)}
+        onOpenBugAndUpdateModal={(tab = 'bugs') => {
+          setBugModalTab(tab);
+          setBugModalOpen(true);
+        }}
+        hasUpdateBadge={updateBanner?.state === 'downloaded' || Boolean(postUpdateInfo?.justUpdated)}
         onEnrichCovers={handleEnrichCovers}
         onOpenCommunity={() => {
           setCommunitySearch(undefined);
@@ -1130,6 +1151,19 @@ export default function App() {
         onCoversChanged={() => fetchGames()}
       />
 
+      {/* Bug Report & Changelog Modal */}
+      <BugAndUpdateModal
+        isOpen={bugModalOpen}
+        initialTab={bugModalTab}
+        postUpdateInfo={postUpdateInfo}
+        onAcknowledgePostUpdate={(version) => {
+          void window.electronAPI?.acknowledgePostUpdate?.(version);
+          setPostUpdateInfo((prev) => (prev ? { ...prev, justUpdated: false } : null));
+        }}
+        onClose={() => setBugModalOpen(false)}
+        onToast={showToast}
+      />
+
       {/* Mandatory 2-step first-run onboarding */}
       {firstRunOpen && (
         <FirstRunSetupModal
@@ -1199,13 +1233,25 @@ export default function App() {
             </button>
           </div>
           {updateBanner.state === 'downloaded' && (
-            <button
-              type="button"
-              onClick={() => window.electronAPI?.installUpdate?.()}
-              className="mt-2.5 w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
-            >
-              Cập nhật & Khởi động lại
-            </button>
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.electronAPI?.installUpdate?.()}
+                className="flex-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition-colors"
+              >
+                Cập nhật &amp; Khởi động lại
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBugModalTab('updates');
+                  setBugModalOpen(true);
+                }}
+                className="rounded-lg border border-[#2a2e3d] bg-[#202433] px-2.5 py-1.5 text-xs font-semibold text-[#cbd5e1] hover:text-white transition-colors"
+              >
+                Đã fix gì?
+              </button>
+            </div>
           )}
         </div>
       )}

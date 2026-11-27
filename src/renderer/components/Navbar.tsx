@@ -20,6 +20,7 @@ import {
   Loader2,
   Sparkles,
   FolderSync,
+  Bug,
 } from 'lucide-react';
 import type { AuthStatus, GameStatus, TrackerStatus } from '../../shared/types.js';
 import { AuthBadge } from './AuthBadge.js';
@@ -48,6 +49,8 @@ export interface NavbarProps {
   onOpenWishlistModal?: () => void;
   onOpenSettingsModal?: () => void;
   onOpenAdminModal?: () => void;
+  onOpenBugAndUpdateModal?: (tab?: 'bugs' | 'updates') => void;
+  hasUpdateBadge?: boolean;
   onOpenCommunity?: () => void;
   onOpenProfile?: () => void;
   onEnrichCovers?: () => void | Promise<void>;
@@ -93,6 +96,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenWishlistModal,
   onOpenSettingsModal,
   onOpenAdminModal,
+  onOpenBugAndUpdateModal,
+  hasUpdateBadge = false,
   onOpenCommunity,
   onOpenProfile,
   onEnrichCovers,
@@ -376,9 +381,42 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   </button>
                 )}
+
+                {onOpenBugAndUpdateModal && (
+                  <button
+                    onClick={() => {
+                      setToolsOpen(false);
+                      onOpenBugAndUpdateModal('updates');
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] group"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-black transition-colors">
+                      <Sparkles className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white group-hover:text-emerald-400">Cập nhật &amp; Đã fix gì</div>
+                      <div className="text-[10px] text-[#8e95a5]">Xem nhật ký bản mới &amp; kiểm tra update</div>
+                    </div>
+                  </button>
+                )}
               </div>
             )}
           </div>
+
+          {/* Bug Report & Changelog Quick Button */}
+          {onOpenBugAndUpdateModal && (
+            <button
+              onClick={() => onOpenBugAndUpdateModal('bugs')}
+              className="relative flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#161821] px-2.5 py-2 text-xs font-semibold text-[#f1f3f7] transition-all hover:border-[#ff2a44] hover:bg-[#1f2230] hover:text-[#ff2a44] shrink-0 whitespace-nowrap"
+              title="Báo lỗi (Bug) & Xem nhật ký cập nhật"
+            >
+              <Bug className="h-3.5 w-3.5 text-[#ff2a44]" />
+              <span className="hidden md:inline">Báo lỗi</span>
+              {hasUpdateBadge && (
+                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#0e1015]" />
+              )}
+            </button>
+          )}
 
           {/* Primary Action Button: Thêm game */}
           <button

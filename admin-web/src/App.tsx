@@ -14,6 +14,7 @@ import {
   X,
   Loader2,
   Layers,
+  Bug,
 } from 'lucide-react';
 import {
   type AdminCoverItem,
@@ -36,6 +37,7 @@ import {
 } from './api.ts';
 import { LoginView } from './components/LoginView.tsx';
 import { CoverEditorPanel } from './components/CoverEditorPanel.tsx';
+import { BugReportsPanel } from './components/BugReportsPanel.tsx';
 
 export default function App() {
   const [user, setUser] = useState<AdminUserInfo | null>(null);
@@ -54,6 +56,7 @@ export default function App() {
   const [healthMap, setHealthMap] = useState<Record<string, HealthCheckItem>>({});
 
   const [bannerMsg, setBannerMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [adminTab, setAdminTab] = useState<'covers' | 'bugs'>('covers');
 
   // Add new game modal
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -299,6 +302,26 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            <div className="flex items-center rounded-lg border border-[#262b3d] bg-[#161a26] p-0.5">
+              <button
+                onClick={() => setAdminTab('covers')}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  adminTab === 'covers' ? 'bg-amber-500 text-black' : 'text-[#8e95a5] hover:text-white'
+                }`}
+              >
+                <Layers className="h-3.5 w-3.5" />
+                <span>Ảnh bìa</span>
+              </button>
+              <button
+                onClick={() => setAdminTab('bugs')}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  adminTab === 'bugs' ? 'bg-red-500 text-white' : 'text-[#8e95a5] hover:text-white'
+                }`}
+              >
+                <Bug className="h-3.5 w-3.5" />
+                <span>Báo lỗi (Bugs)</span>
+              </button>
+            </div>
             <div className="hidden sm:flex flex-col items-end text-right">
               <span className="text-xs font-semibold text-white">{user.displayName || 'Admin'}</span>
               <span className="text-[10px] text-[#8e95a5]">{user.email}</span>
@@ -326,6 +349,10 @@ export default function App() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 space-y-5">
+        {adminTab === 'bugs' ? (
+          <BugReportsPanel />
+        ) : (
+        <>
         {/* Overview Stats */}
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -598,6 +625,8 @@ export default function App() {
             />
           </div>
         </div>
+        </>
+        )}
       </main>
 
       {/* Add New Game Modal */}

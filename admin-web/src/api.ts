@@ -278,3 +278,43 @@ export async function searchIgdbCovers(query: string, steamId?: number | null): 
     body: JSON.stringify({ query, steamId }),
   }, true);
 }
+
+export interface AdminBugReportItem {
+  id: number;
+  uid: string;
+  email: string;
+  display_name: string;
+  title: string;
+  category: string;
+  severity: string;
+  description: string;
+  app_version: string;
+  platform: string;
+  gpu_summary: string;
+  log_length?: number;
+  log_text?: string;
+  status: 'open' | 'in_progress' | 'fixed' | 'wontfix';
+  fixed_in_version: string;
+  admin_note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchAdminBugs(status: string = ''): Promise<{ bugs: AdminBugReportItem[] }> {
+  const q = status ? `?status=${encodeURIComponent(status)}&limit=60` : '?limit=60';
+  return apiRequest(`/api/admin/bugs${q}`, { method: 'GET' }, true);
+}
+
+export async function fetchAdminBugDetail(id: number): Promise<{ bug: AdminBugReportItem }> {
+  return apiRequest(`/api/admin/bugs/${id}`, { method: 'GET' }, true);
+}
+
+export async function updateAdminBug(
+  id: number,
+  payload: { status: AdminBugReportItem['status']; fixed_in_version: string; admin_note: string }
+): Promise<{ ok: boolean; bug: AdminBugReportItem }> {
+  return apiRequest(`/api/admin/bugs/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }, true);
+}

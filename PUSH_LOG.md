@@ -6,6 +6,39 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-27 17:31] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Thêm mục Báo lỗi (Bug Report) trực tiếp trong app & Admin Web**:
+  - Thêm D1 migration `worker/migrations/0012_bug_reports.sql` và route `worker/src/routes/bugs.ts` (`/api/bugs`, `/api/admin/bugs`, `/api/admin/bugs/:id`) có xác thực, rate-limit và index D1.
+  - Thêm `src/main/bugs.ts` tự động đính kèm `gamevault.log` và thông tin OS/GPU khi người dùng gửi báo lỗi.
+  - Thêm `src/renderer/components/BugAndUpdateModal.tsx` (tab **Báo lỗi (Bug)** với form gửi lỗi & danh sách theo dõi trạng thái `Mới` / `Đang sửa` / `Đã fix`) và tích hợp nút **Báo lỗi** vào `Navbar.tsx` & `App.tsx`.
+  - Thêm `admin-web/src/components/BugReportsPanel.tsx` (tab **Báo lỗi (Bugs)** trong Admin Web) để đọc log đính kèm, cập nhật trạng thái, gắn phiên bản đã fix và viết ghi chú phản hồi.
+- **Thêm mục Cập nhật & Nhật ký thay đổi (Changelog / Post-Update What's New)**:
+  - Thêm `src/shared/changelog.ts` (`CHANGELOG_ENTRIES`) và cập nhật `src/main/updater.ts` (theo dõi `last_seen_version` trong SQLite, trích xuất `releaseNotes` từ `electron-updater` và fetch GitHub Releases).
+  - Tự động bật tab **Cập nhật & Đã fix gì** khi người dùng vừa cập nhật lên phiên bản mới, kèm nút **Đã fix gì?** trên banner auto-update.
+- **Bump version `1.0.7` & Deploy Worker/D1**:
+  - Đã chạy `npx wrangler d1 migrations apply game-vault-d1 --remote` (`0012_bug_reports.sql`) và `npm run deploy:worker`.
+  - Tăng `version` trong `package.json` lên `1.0.7` để GitHub Actions `.github/workflows/release.yml` tự động build & phát hành bản cài đặt Windows.
+
+### File chính đã thay đổi
+- `worker/migrations/0012_bug_reports.sql`, `worker/src/routes/bugs.ts`, `worker/src/index.ts`
+- `src/shared/types.ts`, `src/shared/changelog.ts`
+- `src/main/bugs.ts`, `src/main/updater.ts`, `src/main/main.ts`, `src/preload/preload.ts`
+- `src/renderer/components/BugAndUpdateModal.tsx`, `src/renderer/components/Navbar.tsx`, `src/renderer/App.tsx`
+- `admin-web/src/components/BugReportsPanel.tsx`, `admin-web/src/api.ts`, `admin-web/src/App.tsx`
+- `package.json`, `PUSH_LOG.md`, `PENDING_PUSH.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm run build` & `npm run build:admin`: Pass.
+- `npm test`: Pass `545/549` (4 skipped, 0 failed).
+- `npx wrangler d1 migrations apply game-vault-d1 --remote` & `npm run deploy:worker`: Thành công.
+
+### Bàn giao cho máy kia (Notes / Next)
+- GitHub Actions `.github/workflows/release.yml` sẽ tự động build & publish bản `v1.0.7` lên GitHub Releases sau khi push `main`.
+
 ## [2026-11-27 16:39] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc

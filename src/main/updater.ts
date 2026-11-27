@@ -1,6 +1,7 @@
 import { app, type BrowserWindow } from 'electron';
 import { createRequire } from 'node:module';
-import type { AppUpdateStatus } from '../shared/types.js';
+import { getSetting, setSetting } from './db.js';
+import type { AppUpdateStatus, PostUpdateInfo, RemoteReleaseNote } from '../shared/types.js';
 
 const require = createRequire(import.meta.url);
 const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
@@ -43,6 +44,82 @@ function formatUpdateError(err: unknown): string {
   const firstLine = raw.split(/\r?\n/)[0]?.trim();
   if (!firstLine) return 'Không thể kiểm tra cập nhật.';
   return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
+}
+
+function extractReleaseNotes(notes: unknown): string | undefined {
+  if (!notes) return undefined;
+  if (typeof notes === 'string') {
+    const cleaned = notes.replace(/<[^>]+>/g, '').trim();
+    return cleaned || undefined;
+  }
+  if (Array.isArray(notes)) {
+    const joined = notes
+      .map((item: any) => {
+        const noteStr = typeof item?.note === 'string' ? item.note.replace(/<[^>]+>/g, '').trim() : '';
+        return item?.version && noteStr ? `v${item.version}: ${noteStr}` : noteStr;
+      })
+      .filter(Boolean)
+      .join('\n\n');
+    return joined || undefined;
+  }
+  return undefined;
+}
+
+export function getPostUpdateInfo(): PostUpdateInfo {
+  const currentVersion = app.getVersion();
+  const lastSeen = getSetting('last_seen_version');
+  if (lastSeen === null) {
+    setSetting('last_seen_version', currentVersion);
+    return {
+      justUpdated: false,
+      previousVersion: null,
+      currentVersion,
+    };
+  }
+  if (lastSeen !== currentVersion) {
+    return {
+      justUpdated: true,
+      previousVersion: lastSeen,
+      currentVersion,
+    };
+  }
+  return {
+    justUpdated: false,
+    previousVersion: lastSeen,
+    currentVersion,
+  };
+}
+
+export function acknowledgePostUpdate(version?: string): boolean {
+  const target = (version || app.getVersion()).replace(/^v/i, '').trim() || app.getVersion();
+  setSetting('last_seen_version', target);
+  return true;
+}
+
+export async function fetchGitHubReleases(): Promise<RemoteReleaseNote[]> {
+  try {
+    const res = await fetch('https://api.github.com/repos/SonhocCodee/GameVault/releases?per_page=8', {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': `GameVault/${app.getVersion()}`,
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as any[];
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((r) => !r.draft)
+      .map((r) => ({
+        version: String(r.tag_name || '').replace(/^v/i, ''),
+        name: String(r.name || r.tag_name || ''),
+        body: String(r.body || '').trim(),
+        publishedAt: String(r.published_at || r.created_at || ''),
+        url: String(r.html_url || ''),
+      }));
+  } catch {
+    return [];
+  }
 }
 
 export function getUpdateStatus(): AppUpdateStatus {
@@ -117,6 +194,7 @@ export function initAutoUpdater(
       state: 'available',
       currentVersion: app.getVersion(),
       latestVersion: info.version,
+      releaseNotes: extractReleaseNotes((info as any)?.releaseNotes),
       message: `Có bản mới v${info.version}, đang tải xuống...`,
     });
   });
@@ -135,6 +213,7 @@ export function initAutoUpdater(
       state: 'downloading',
       currentVersion: app.getVersion(),
       latestVersion: currentStatus.latestVersion,
+      releaseNotes: currentStatus.releaseNotes,
       percent: Math.round(progress.percent),
       message: `Đang tải bản cập nhật (${Math.round(progress.percent)}%)...`,
     });
@@ -145,6 +224,7 @@ export function initAutoUpdater(
       state: 'downloaded',
       currentVersion: app.getVersion(),
       latestVersion: info.version,
+      releaseNotes: extractReleaseNotes((info as any)?.releaseNotes) ?? currentStatus.releaseNotes,
       percent: 100,
       message: `Bản v${info.version} đã tải xong. Khởi động lại để cài đặt!`,
     });
