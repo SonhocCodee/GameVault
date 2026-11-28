@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GraphicsConfigBlock } from "./GraphicsConfigBlock.tsx";
 import {
   ArrowLeft,
   BookmarkPlus,
@@ -973,15 +974,7 @@ export function GameHub({
                           <span className="gv-pill">RT: {r.graphics.rayTracing}</span>
                         )}
                       </div>
-                      {r.graphics.details && Object.keys(r.graphics.details).length > 0 && (
-                        <div className="gv-actions" style={{ gap: 5, flexWrap: "wrap", marginTop: 2 }}>
-                          {Object.entries(r.graphics.details).slice(0, 12).map(([k, v]) => (
-                            <span className="gv-pill" key={k} style={{ fontSize: 11, opacity: 0.9 }}>
-                              {k}: {v}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <GraphicsConfigBlock graphics={r.graphics} localGameId={localGame?.localGameId} />
                     </div>
                     <div className="gv-fps-box">
                       <div className="gv-fps-big">{r.fpsAverage.toFixed(1)}</div>
@@ -1185,15 +1178,7 @@ export function GameHub({
                           {r.graphics.frameGeneration && <span className="gv-pill">FG: {r.graphics.frameGeneration}</span>}
                           {r.graphics.rayTracing && <span className="gv-pill">RT: {r.graphics.rayTracing}</span>}
                         </div>
-                        {r.graphics.details && Object.keys(r.graphics.details).length > 0 && (
-                          <div className="gv-actions" style={{ gap: 5, flexWrap: "wrap", marginTop: 2 }}>
-                            {Object.entries(r.graphics.details).slice(0, 12).map(([k, v]) => (
-                              <span className="gv-pill" key={k} style={{ fontSize: 11, opacity: 0.9 }}>
-                                {k}: {v}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <GraphicsConfigBlock graphics={r.graphics} localGameId={localGame?.localGameId} />
                       </div>
                       <div className="gv-fps-box">
                         <div className="gv-fps-big">{r.fpsAverage.toFixed(1)}</div>
@@ -1400,15 +1385,7 @@ export function GameHub({
                         )}
                       </div>
 
-                      {r.graphics.details && Object.keys(r.graphics.details).length > 0 && (
-                        <div className="gv-actions" style={{ gap: 5, flexWrap: "wrap", marginTop: 2 }}>
-                          {Object.entries(r.graphics.details).slice(0, 12).map(([k, v]) => (
-                            <span className="gv-pill" key={k} style={{ fontSize: 11, opacity: 0.9 }}>
-                              {k}: {v}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <GraphicsConfigBlock graphics={r.graphics} localGameId={localGame?.localGameId} />
 
                       {r.notes && <p className="gv-muted">{r.notes}</p>}
 

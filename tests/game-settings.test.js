@@ -20,6 +20,8 @@ import {
   detectGameConfigs,
   discoverGameConfigsAsync,
   extractPcgwConfigPathsFromWikitext,
+  toPortableFolderHint,
+  importSharedConfigFile,
   exportGameSettings,
   makeSettingsZip,
 } from "../src/main/game-settings.ts";
@@ -396,5 +398,42 @@ test("discoverGameConfigsAsync extracts PCGamingWiki config paths and caches the
   } finally {
     if (!prevExisted) fs.rmSync(targetDir, { recursive: true, force: true });
     else fs.rmSync(targetFile, { force: true });
+  }
+});
+
+test("parseGraphicsConfig extracts arbitrary safe graphics keys and importSharedConfigFile backs up existing file", () => {
+  const parsed = parseGraphicsConfig(
+    "[Performance]\nCharacterQuality=3\nEnvironmentQuality=2\nCrowdDensity=High\nAccountToken=SECRET\n",
+  );
+  assert.equal(parsed.details?.Characterquality, "3");
+  assert.equal(parsed.details?.Environmentquality, "2");
+  assert.equal(parsed.details?.Crowddensity, "High");
+  assert.equal(JSON.stringify(parsed).includes("SECRET"), false);
+
+  const localBase = process.env.LOCALAPPDATA || dir;
+  const sub = path.join(localBase, "GVImportTest");
+  const prevExisted = fs.existsSync(sub);
+  try {
+    fs.mkdirSync(sub, { recursive: true });
+    const targetFile = path.join(sub, "settings.ini");
+    fs.writeFileSync(targetFile, "Old=1\n", "utf8");
+    const hint = toPortableFolderHint(targetFile);
+    assert.ok(hint.includes("%LOCALAPPDATA%") || hint.includes("GVImportTest"));
+
+    const res = importSharedConfigFile(hint, "settings.ini", "New=2\n");
+    assert.equal(fs.readFileSync(res.importedPath, "utf8"), "New=2\n");
+    assert.ok(res.backupPath && fs.existsSync(res.backupPath));
+    assert.equal(fs.readFileSync(res.backupPath, "utf8"), "Old=1\n");
+
+    assert.throws(
+      () => importSharedConfigFile(hint, "../evil.ini", "x=1"),
+      /Invalid configuration/,
+    );
+    assert.throws(
+      () => importSharedConfigFile(hint, "settings.ini", "Password=123"),
+      /credential/,
+    );
+  } finally {
+    if (!prevExisted) fs.rmSync(sub, { recursive: true, force: true });
   }
 });

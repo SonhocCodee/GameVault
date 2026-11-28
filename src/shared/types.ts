@@ -633,6 +633,8 @@ export interface ElectronAPI {
   syncAllPerformance?(): Promise<{ synced: number }>;
   discoverGameConfigs?(gameId: number, forceRefresh?: boolean): Promise<import('./community.ts').ConfigCandidate[]>;
   chooseGameConfig?(gameId: number): Promise<import('./community.ts').ConfigCandidate[]>;
+  openConfigFolder?(folderHint: string, gameId?: number): Promise<{ opened: boolean; resolvedPath: string }>;
+  importSharedConfig?(folderHint: string, fileName: string, content: string, gameId?: number): Promise<{ importedPath: string; backupPath?: string }>;
   exportGameSettings?(gameId: number, selectedPaths: string[]): Promise<{ files: number; destination: string } | null>;
   // Database Operations
   getGames(filter?: GameFilter): Promise<Game[]>;

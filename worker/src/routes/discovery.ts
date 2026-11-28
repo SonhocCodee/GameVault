@@ -182,14 +182,37 @@ export function validatePerformanceReport(input: any): PerformanceReport {
       frameGeneration: text(graphics.frameGeneration, 80),
       rayTracing: text(graphics.rayTracing, 80),
       source: graphics.source,
+      ...(graphics.gameVersion ? { gameVersion: text(graphics.gameVersion, 40) } : {}),
       ...(graphics.details && typeof graphics.details === "object" && !Array.isArray(graphics.details)
         ? {
             details: Object.fromEntries(
               Object.entries(graphics.details)
-                .slice(0, 24)
-                .map(([k, v]) => [text(k, 40), text(String(v ?? ""), 60)])
+                .slice(0, 80)
+                .map(([k, v]) => [text(k, 50), text(String(v ?? ""), 80)])
                 .filter(([k, v]) => k.length > 0 && v.length > 0),
             ),
+          }
+        : {}),
+      ...(Array.isArray(graphics.configFiles)
+        ? {
+            configFiles: graphics.configFiles
+              .slice(0, 2)
+              .filter(
+                (f: any) =>
+                  f &&
+                  typeof f.fileName === "string" &&
+                  typeof f.folderHint === "string" &&
+                  typeof f.content === "string" &&
+                  f.content.length > 0 &&
+                  f.content.length <= 65536,
+              )
+              .map((f: any) => ({
+                fileName: text(f.fileName, 80, true),
+                folderHint: text(f.folderHint, 240, true),
+                adapter: text(f.adapter || "config", 40),
+                content: f.content.slice(0, 65536),
+                size: number(f.size ?? f.content.length, 1, 65536, true),
+              })),
           }
         : {}),
     },

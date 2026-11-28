@@ -6,6 +6,32 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 14:56] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Full setting đồ họa, phiên bản game, tải/import file setting gốc & hướng dẫn thư mục**:
+  - Nâng cấp `parseGraphicsConfig` (`src/main/game-settings.ts`): trích xuất toàn bộ key đồ họa/hiển thị an toàn (tối đa 80 mục), lọc bỏ credential/keybind/đường dẫn cá nhân.
+  - Bổ sung `getGameExecutableVersion` (đọc ProductVersion/FileVersion từ `.exe` trên Windows), `collectSharedConfigFiles` (đính kèm tối đa 2 file setting gốc <= 64 KB đã khử đường dẫn user thành `%LOCALAPPDATA%` / `%APPDATA%` / `%USERPROFILE%` / `<Thư mục cài game>`), `openConfigFolderHint` & `importSharedConfigFile` (backup `.bak` trước khi ghi đè).
+  - Cập nhật `src/shared/community.ts`, `src/shared/types.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/main/performance-context.ts`, `src/main/cloud-db.ts` (signature `'v3'`), và `worker/src/routes/discovery.ts` để lưu & validate `gameVersion`, `details` (80 mục) và `configFiles`.
+  - Tạo `src/renderer/community/GraphicsConfigBlock.tsx` và tích hợp vào `src/renderer/community/GameHub.tsx`: hiển thị badge phiên bản game, nút **Xem tất cả (N)** / **Thu gọn**, và mục **File setting gốc & Hướng dẫn thư mục** (Tải file, Copy đường dẫn, Mở thư mục, Áp dụng vào máy).
+  - Bổ sung unit test trong `tests/game-settings.test.js`, deploy Worker (`d731fd09-9d83-4491-89d5-3e0d18532a32`), và chạy sync toàn bộ (`SYNC_RESULT: {"synced":39}`).
+
+### File chính đã thay đổi
+- `src/main/game-settings.ts`, `src/main/performance-context.ts`, `src/main/cloud-db.ts`, `src/main/main.ts`, `src/preload/preload.ts`
+- `src/shared/community.ts`, `src/shared/types.ts`
+- `src/renderer/community/GraphicsConfigBlock.tsx`, `src/renderer/community/GameHub.tsx`
+- `worker/src/routes/discovery.ts`, `tests/game-settings.test.js`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass `563/563` (103 suites, 0 fail, 0 skipped).
+- `npx wrangler deploy`: Pass (`d731fd09-9d83-4491-89d5-3e0d18532a32`).
+- Electron sync (`son6232000@gmail.com`): Pass (`SYNC_RESULT: {"synced":39}`).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Pull `main` về và chạy `npm run build` để có UI mới (`GraphicsConfigBlock.tsx`) trên máy kia.
+
 ## [2026-11-28 14:49] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

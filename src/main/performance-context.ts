@@ -1,10 +1,15 @@
 import { getDb, getGameById } from "./db.ts";
 import { getHardwareInfo } from "./hardware.ts";
-import { detectGameConfigs } from "./game-settings.ts";
+import {
+  collectSharedConfigFiles,
+  detectGameConfigs,
+  getGameExecutableVersion,
+} from "./game-settings.ts";
 import type {
   GraphicsContext,
   PerformancePreview,
   PerformanceReport,
+  SharedConfigFile,
 } from "../shared/community.ts";
 import type { HardwareInfo } from "../shared/types.ts";
 export const EMPTY_GRAPHICS: GraphicsContext = {
@@ -43,12 +48,35 @@ export function validateGraphicsContext(
   };
   const details: Record<string, string> = {};
   if (input.details && typeof input.details === "object" && !Array.isArray(input.details)) {
-    for (const [k, v] of Object.entries(input.details).slice(0, 24)) {
+    for (const [k, v] of Object.entries(input.details).slice(0, 80)) {
       if (typeof k === "string" && typeof v === "string" && k.trim() && v.trim()) {
-        details[k.trim().slice(0, 40)] = v.trim().slice(0, 60);
+        details[k.trim().slice(0, 50)] = v.trim().slice(0, 80);
       }
     }
   }
+  const configFiles: SharedConfigFile[] = [];
+  if (Array.isArray(input.configFiles)) {
+    for (const f of input.configFiles.slice(0, 2)) {
+      if (
+        f &&
+        typeof f.fileName === "string" &&
+        typeof f.folderHint === "string" &&
+        typeof f.content === "string" &&
+        f.content.length > 0 &&
+        f.content.length <= 65536
+      ) {
+        configFiles.push({
+          fileName: f.fileName.trim().slice(0, 80),
+          folderHint: f.folderHint.trim().slice(0, 240),
+          adapter: typeof f.adapter === "string" ? f.adapter.trim().slice(0, 40) : "config",
+          content: f.content,
+          size: Number.isFinite(f.size) ? f.size : f.content.length,
+        });
+      }
+    }
+  }
+  const gameVersion =
+    typeof input.gameVersion === "string" ? input.gameVersion.trim().slice(0, 40) : "";
   return {
     width,
     height,
@@ -62,7 +90,9 @@ export function validateGraphicsContext(
         : input.source === "unknown"
           ? "unknown"
           : "manual",
+    ...(gameVersion ? { gameVersion } : {}),
     ...(Object.keys(details).length > 0 ? { details } : {}),
+    ...(configFiles.length > 0 ? { configFiles } : {}),
   };
 }
 export function getGameGraphics(gameId: number): GraphicsContext {
@@ -312,6 +342,9 @@ export async function buildAutoCommunityPerformanceReport(
     ...(chosen.graphics.details || {}),
   };
 
+  const gameVersion = getGameExecutableVersion(gameId);
+  const configFiles = collectSharedConfigFiles(gameId);
+
   const normalizedGraphics: GraphicsContext = {
     width: base.width ?? null,
     height: base.height ?? null,
@@ -321,7 +354,9 @@ export async function buildAutoCommunityPerformanceReport(
     rayTracing: base.rayTracing || ctx.rayTracing || "",
     source:
       base.source === "config" || ctx.source === "config" ? "config" : "unknown",
+    ...(gameVersion ? { gameVersion } : {}),
     ...(Object.keys(mergedDetails).length > 0 ? { details: mergedDetails } : {}),
+    ...(configFiles.length > 0 ? { configFiles } : {}),
   };
 
   return {

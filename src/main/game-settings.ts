@@ -1,12 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { execFileSync } from "node:child_process";
 import { deflateRawSync } from "node:zlib";
+import electronModule from "electron";
 import { getDb, getGameById, getSavePaths, getSetting, setSetting } from "./db.ts";
 import { detectSaveLocations } from "./save-manager.ts";
-import type { ConfigCandidate, GraphicsContext } from "../shared/community.ts";
+import type { ConfigCandidate, GraphicsContext, SharedConfigFile } from "../shared/community.ts";
 import type { Game } from "../shared/types.ts";
+const electron = (typeof electronModule === "object" && electronModule !== null ? electronModule : {}) as any;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_SHARED_CONFIG_BYTES = 64 * 1024;
 const PCGW_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ALLOWED_EXTENSIONS = new Set([
   ".ini",
@@ -238,13 +242,40 @@ export function parseGraphicsConfig(content: string): Partial<GraphicsContext> {
   ];
 
   const details: Record<string, string> = {};
+  const consumedKeys = new Set<string>([
+    "resolutionsizex", "resolutionsizey", "screenwidth", "screenheight",
+    "displaywidth", "displayheight", "windowwidth", "windowheight",
+    "renderwidth", "renderheight", "width", "height",
+    "resolution", "screenresolution", "displayresolution", "renderresolution",
+  ]);
   for (const [label, keys, format] of detailRules) {
+    for (const k of keys) consumedKeys.add(k);
     const raw = firstValue(values, keys);
     if (raw !== undefined) {
       const formatted = format(raw);
       if (formatted) details[label] = formatted;
     }
   }
+
+  // Collect all remaining safe graphics/display/rendering keys (up to 80 total)
+  const SENSITIVE_KEY_RE = /(password|token|secret|auth|key|email|account|userid|steamid|session|cookie|path|dir|url|adapter|guid|uuid|mac|ip|host|port|bind|hotkey|input)/i;
+  const GRAPHICS_KEY_RE = /(quality|shadow|texture|aa|aliasing|vsync|verticalsync|fps|frame|resolution|scale|fov|hdr|bloom|blur|fog|reflection|ao|occlusion|lod|foliage|grass|water|volumetric|lighting|dlss|fsr|xess|raytrac|pathtrac|anisotrop|tessellation|crowd|particle|shader|postprocess|window|fullscreen|borderless|character|environment|effect|detail|sharpen|gamma|brightness|contrast|triplebuffer|dx11|dx12|vulkan|render|preset|waitforverticalsync|framecap)/i;
+  for (const [rawKey, rawVal] of values.entries()) {
+    if (Object.keys(details).length >= 80) break;
+    if (consumedKeys.has(rawKey) || SENSITIVE_KEY_RE.test(rawKey)) continue;
+    if (!GRAPHICS_KEY_RE.test(rawKey)) continue;
+    const cleanVal = rawVal.trim().replace(/^"|"$/g, "");
+    if (!cleanVal || cleanVal.length > 60) continue;
+    const label = rawKey
+      .replace(/^(?:sg|r|b)\./i, "")
+      .replace(/[_.-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .slice(0, 48);
+    if (label && !details[label]) {
+      details[label] = cleanVal;
+    }
+  }
+
   if (Object.keys(details).length > 0) {
     result.details = details;
   }
@@ -602,6 +633,157 @@ export function detectGameConfigs(gameId: number): ConfigCandidate[] {
       graphics: parseGraphicsConfig(fs.readFileSync(v.path, "utf8")),
     }));
 }
+export function toPortableFolderHint(filePath: string, game?: Game | null): string {
+  const dir = path.dirname(path.resolve(filePath));
+  const local = process.env.LOCALAPPDATA ? path.resolve(process.env.LOCALAPPDATA) : "";
+  const roaming = process.env.APPDATA ? path.resolve(process.env.APPDATA) : "";
+  const home = os.homedir() ? path.resolve(os.homedir()) : "";
+  const docs = home ? path.join(home, "Documents") : "";
+  const gameDir = game?.exe_path ? path.dirname(path.resolve(game.exe_path)) : "";
+
+  const pairs: Array<[string, string]> = [];
+  if (gameDir) pairs.push([gameDir, "<Thư mục cài game>"]);
+  if (local) pairs.push([local, "%LOCALAPPDATA%"]);
+  if (roaming) pairs.push([roaming, "%APPDATA%"]);
+  if (docs) pairs.push([docs, "%USERPROFILE%\\Documents"]);
+  if (home) pairs.push([home, "%USERPROFILE%"]);
+
+  const lowerDir = dir.toLowerCase();
+  for (const [prefix, token] of pairs) {
+    if (lowerDir === prefix.toLowerCase()) return token;
+    if (lowerDir.startsWith(prefix.toLowerCase() + path.sep)) {
+      return token + dir.slice(prefix.length);
+    }
+  }
+  return dir.replace(/[A-Za-z]:\\Users\\[^\\]+/gi, "%USERPROFILE%");
+}
+
+export function resolvePortableFolderHint(folderHint: string, game?: Game | null): string {
+  const local = process.env.LOCALAPPDATA || "";
+  const roaming = process.env.APPDATA || "";
+  const home = os.homedir() || "";
+  const gameDir = game?.exe_path ? path.dirname(path.resolve(game.exe_path)) : "";
+  let resolved = folderHint
+    .replace(/^<Thư mục cài game>/i, gameDir)
+    .replace(/%LOCALAPPDATA%/gi, local)
+    .replace(/%APPDATA%/gi, roaming)
+    .replace(/%USERPROFILE%/gi, home);
+  return path.resolve(resolved);
+}
+
+export function sanitizeSharedConfigContent(content: string): string {
+  return content.replace(/[A-Za-z]:\\Users\\[^\\\r\n]+/gi, "%USERPROFILE%");
+}
+
+export function collectSharedConfigFiles(gameId: number): SharedConfigFile[] {
+  const game = getGameById(gameId);
+  if (!game) return [];
+  const candidates = detectGameConfigs(gameId);
+  const shared: SharedConfigFile[] = [];
+  for (const c of candidates) {
+    if (shared.length >= 2) break;
+    if (c.size <= 0 || c.size > MAX_SHARED_CONFIG_BYTES) continue;
+    try {
+      const raw = fs.readFileSync(c.path, "utf8");
+      if (hasCredentialSettings(raw)) continue;
+      const sanitized = sanitizeSharedConfigContent(raw);
+      shared.push({
+        fileName: c.name,
+        folderHint: toPortableFolderHint(c.path, game),
+        adapter: c.adapter,
+        content: sanitized,
+        size: Buffer.byteLength(sanitized, "utf8"),
+      });
+    } catch {}
+  }
+  return shared;
+}
+
+export function getGameExecutableVersion(gameId: number): string {
+  const game = getGameById(gameId);
+  if (!game?.exe_path || process.platform !== "win32") return "";
+  const cacheKey = `exe_version_${gameId}`;
+  try {
+    const stat = fs.statSync(game.exe_path);
+    const cachedRaw = getSetting(cacheKey);
+    if (cachedRaw) {
+      const cached = JSON.parse(cachedRaw);
+      if (cached?.mtimeMs === stat.mtimeMs && typeof cached.version === "string") {
+        return cached.version;
+      }
+    }
+    const out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Get-Item -LiteralPath '${game.exe_path.replace(/'/g, "''")}').VersionInfo | ForEach-Object { if ($_.ProductVersion) { $_.ProductVersion } elseif ($_.FileVersion) { $_.FileVersion } }`,
+      ],
+      { timeout: 2500, encoding: "utf8", windowsHide: true },
+    ).trim();
+    const version = out.split(/\r?\n/)[0]?.trim().slice(0, 40) || "";
+    setSetting(cacheKey, JSON.stringify({ mtimeMs: stat.mtimeMs, version }));
+    return version;
+  } catch {
+    return "";
+  }
+}
+
+export async function openConfigFolderHint(
+  folderHint: string,
+  gameId?: number,
+): Promise<{ opened: boolean; resolvedPath: string }> {
+  const game = gameId ? getGameById(gameId) : null;
+  let target = resolvePortableFolderHint(folderHint, game);
+  while (target && !fs.existsSync(target)) {
+    const parent = path.dirname(target);
+    if (parent === target) break;
+    target = parent;
+  }
+  if (!target || !fs.existsSync(target)) {
+    return { opened: false, resolvedPath: target };
+  }
+  const err = await electron?.shell?.openPath?.(target);
+  return { opened: !err, resolvedPath: target };
+}
+
+export function importSharedConfigFile(
+  folderHint: string,
+  fileName: string,
+  content: string,
+  gameId?: number,
+): { importedPath: string; backupPath?: string } {
+  const baseName = path.basename(fileName || "").trim();
+  if (
+    !baseName ||
+    baseName !== fileName.trim() ||
+    !ALLOWED_EXTENSIONS.has(path.extname(baseName).toLowerCase())
+  ) {
+    throw new Error("Invalid configuration file name or extension");
+  }
+  if (!content || content.length > MAX_SHARED_CONFIG_BYTES) {
+    throw new Error("Configuration content is empty or exceeds 64 KB");
+  }
+  if (hasCredentialSettings(content)) {
+    throw new Error("Configuration contains credential keys and cannot be imported");
+  }
+  if (folderHint.includes("<Thư mục cài game>") && (!gameId || !getGameById(gameId)?.exe_path)) {
+    throw new Error("Game install folder is not configured on this machine yet");
+  }
+  const game = gameId ? getGameById(gameId) : null;
+  const targetDir = resolvePortableFolderHint(folderHint, game);
+  fs.mkdirSync(targetDir, { recursive: true });
+  const targetFile = path.join(targetDir, baseName);
+  let backupPath: string | undefined;
+  if (fs.existsSync(targetFile)) {
+    backupPath = `${targetFile}.bak.${Date.now()}`;
+    fs.copyFileSync(targetFile, backupPath);
+  }
+  fs.writeFileSync(targetFile, content, "utf8");
+  return { importedPath: targetFile, backupPath };
+}
+
 function crc32(bytes: Buffer): number {
   let crc = 0xffffffff;
   for (const byte of bytes) {

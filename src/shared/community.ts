@@ -130,6 +130,13 @@ export interface CommunityReview {
   dropped: boolean;
   updatedAt: string;
 }
+export interface SharedConfigFile {
+  fileName: string;
+  folderHint: string;
+  adapter: string;
+  content: string;
+  size: number;
+}
 export interface GraphicsContext {
   width: number | null;
   height: number | null;
@@ -138,7 +145,9 @@ export interface GraphicsContext {
   frameGeneration: string;
   rayTracing: string;
   source: "manual" | "config" | "unknown";
+  gameVersion?: string;
   details?: Record<string, string>;
+  configFiles?: SharedConfigFile[];
 }
 export interface PerformanceReport extends PublicGame {
   id?: string;

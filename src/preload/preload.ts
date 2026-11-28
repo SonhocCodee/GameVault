@@ -65,6 +65,8 @@ const electronAPI: ElectronAPI = {
   syncGamePerformance: (gameId) => ipcRenderer.invoke('performance:syncGame', gameId),
   syncAllPerformance: () => ipcRenderer.invoke('performance:syncAll'),
   discoverGameConfigs: (gameId, forceRefresh) => ipcRenderer.invoke('gameSettings:discover', gameId, forceRefresh),
+  openConfigFolder: (folderHint, gameId) => ipcRenderer.invoke('gameSettings:openFolder', folderHint, gameId),
+  importSharedConfig: (folderHint, fileName, content, gameId) => ipcRenderer.invoke('gameSettings:importShared', folderHint, fileName, content, gameId),
   chooseGameConfig: (gameId) => ipcRenderer.invoke('gameSettings:choose', gameId),
   exportGameSettings: (gameId, selectedPaths) => ipcRenderer.invoke('gameSettings:export', gameId, selectedPaths),
   // Database Operations

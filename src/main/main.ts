@@ -29,7 +29,14 @@ import {
   updateCommunityNotificationsConfig,
 } from './community-notifications.js';
 import { capturePerformanceContext, getPerformancePreview, prepareMeasuredReport, saveGameGraphics } from './performance-context.js';
-import { detectGameConfigs, discoverGameConfigsAsync, exportGameSettings, registerManualConfig } from './game-settings.js';
+import {
+  detectGameConfigs,
+  discoverGameConfigsAsync,
+  exportGameSettings,
+  importSharedConfigFile,
+  openConfigFolderHint,
+  registerManualConfig,
+} from './game-settings.js';
 import { getFpsMonitor } from './fps-monitor.js';
 import { getHardwareInfo } from './hardware.js';
 import {
@@ -414,6 +421,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle('performance:syncGame', (_event, gameId: number) => syncSingleGamePerformanceToCommunity(gameId));
   ipcMain.handle('performance:syncAll', () => syncLocalPerformanceToCommunity({ maxUploads: 4 }));
   ipcMain.handle('gameSettings:discover', (_event, gameId: number, forceRefresh?: boolean) => discoverGameConfigsAsync(gameId, { forceRefresh: !!forceRefresh }));
+  ipcMain.handle('gameSettings:openFolder', (_event, folderHint: string, gameId?: number) => openConfigFolderHint(folderHint, gameId));
+  ipcMain.handle('gameSettings:importShared', (_event, folderHint: string, fileName: string, content: string, gameId?: number) => importSharedConfigFile(folderHint, fileName, content, gameId));
   ipcMain.handle('gameSettings:choose', async (_event, gameId) => {
     const chosen = await dialog.showOpenDialog({ title: 'Choose a game configuration file', properties: ['openFile'], filters: [{ name: 'Game configuration', extensions: ['ini','cfg','json','xml','settings'] }] });
     if (!chosen.canceled && chosen.filePaths[0]) registerManualConfig(gameId, chosen.filePaths[0]);

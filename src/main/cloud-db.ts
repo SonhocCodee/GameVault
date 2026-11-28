@@ -1390,7 +1390,9 @@ function computePerformanceSignature(report: {
     upscaling?: string;
     frameGeneration?: string;
     rayTracing?: string;
+    gameVersion?: string;
     details?: Record<string, string>;
+    configFiles?: Array<{ fileName: string; size: number }>;
   };
 }): string {
   const detailsKey = report.graphics.details
@@ -1399,8 +1401,11 @@ function computePerformanceSignature(report: {
         .map(([k, v]) => `${k}=${v}`)
         .join(';')
     : '';
+  const filesKey = report.graphics.configFiles
+    ? report.graphics.configFiles.map((f) => `${f.fileName}:${f.size}`).join(',')
+    : '';
   return [
-    'v2',
+    'v3',
     report.gameKey,
     report.completionStatus,
     report.fpsAverage,
@@ -1416,7 +1421,9 @@ function computePerformanceSignature(report: {
     report.graphics.upscaling || '',
     report.graphics.frameGeneration || '',
     report.graphics.rayTracing || '',
+    report.graphics.gameVersion || '',
     detailsKey,
+    filesKey,
   ].join('|');
 }
 
