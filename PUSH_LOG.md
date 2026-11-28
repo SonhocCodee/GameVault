@@ -6,6 +6,20 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 14:43] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Bổ sung file bị thiếu khi commit trước đó**: `git add src/main/community-notifications.ts` (file mới được import bởi `src/main/main.ts:30`).
+
+### File chính đã thay đổi
+- `src/main/community-notifications.ts`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit` & `npm run build` đã pass với file này trên `CNTT-PM6`.
+
+### Bàn giao cho máy kia (Notes / Next)
+- Pull `main` về và chạy `npm run build` lại là được.
+
 ## [2026-11-28 14:30] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc
