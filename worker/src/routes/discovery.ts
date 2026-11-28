@@ -23,6 +23,8 @@ import {
 import type {
   PerformanceReport,
   SteamRequirements,
+  SteamTopGame,
+  SteamTopResponse,
   PublicGame,
 } from "../../../src/shared/community.ts";
 let steamFetch: typeof fetch | undefined;
@@ -294,6 +296,163 @@ export function registerDiscoveryRoutes(router: Router) {
         });
       throw error;
     }
+  });
+  add("GET", "/steam-top", async (request, env) => {
+    await discoveryRate(request, env);
+    const data = await cached<SteamTopResponse>(
+      env,
+      "steam-top-offline:v2",
+      async () => {
+        let rawRanks: any[] = [];
+        try {
+          const concurrent = await steamJson(
+            "https://api.steampowered.com/ISteamChartsService/GetGamesByConcurrentPlayers/v1/",
+          );
+          if (Array.isArray(concurrent?.response?.ranks)) {
+            rawRanks = concurrent.response.ranks;
+          }
+        } catch {}
+        if (!rawRanks.length) {
+          const charts = await steamJson(
+            "https://api.steampowered.com/ISteamChartsService/GetMostPlayedGames/v1/",
+          );
+          if (Array.isArray(charts?.response?.ranks)) {
+            rawRanks = charts.response.ranks;
+          }
+        }
+        const ranks: Array<{
+          rank: number;
+          appid: number;
+          concurrent_in_game: number;
+          peak_in_game: number;
+        }> = rawRanks
+          .filter((r: any) => Number.isInteger(r?.appid) && r.appid > 0)
+          .slice(0, 60)
+          .map((r: any, idx: number) => ({
+            rank: Number(r.rank) || idx + 1,
+            appid: Number(r.appid),
+            concurrent_in_game: Number(r.concurrent_in_game) || 0,
+            peak_in_game: Number(r.peak_in_game) || 0,
+          }));
+        if (!ranks.length) {
+          return { items: [], updatedAt: Math.floor(Date.now() / 1000) };
+        }
+        const now = Math.floor(Date.now() / 1000);
+        const metaKeys = ranks.map((r) => `steam-app-meta:${r.appid}`);
+        const placeholders = metaKeys.map(() => "?").join(",");
+        const cachedRows =
+          (
+            await env.DB.prepare(
+              `SELECT key, value, expires_at FROM community_steam_cache WHERE key IN (${placeholders})`,
+            )
+              .bind(...metaKeys)
+              .all<{ key: string; value: string; expires_at: number }>()
+          ).results || [];
+        type SteamAppMeta = {
+          title: string;
+          isOffline: boolean;
+          coverUrl: string | null;
+        };
+        const metaByAppId = new Map<number, SteamAppMeta>();
+        const freshIds = new Set<number>();
+        for (const row of cachedRows) {
+          const appId = Number(row.key.replace("steam-app-meta:", ""));
+          try {
+            const parsed = JSON.parse(row.value) as SteamAppMeta;
+            metaByAppId.set(appId, parsed);
+            if (row.expires_at > now) freshIds.add(appId);
+          } catch {}
+        }
+        const missingIds = ranks
+          .map((r) => r.appid)
+          .filter((id) => !freshIds.has(id))
+          .slice(0, 30);
+        if (missingIds.length) {
+          const fetched = await Promise.allSettled(
+            missingIds.map(async (appid) => {
+              const res = await steamJson(
+                `https://store.steampowered.com/api/appdetails?appids=${appid}&l=english&cc=us&filters=basic,categories`,
+              );
+              const entry = res?.[String(appid)];
+              if (!entry?.success || !entry.data) {
+                return {
+                  appid,
+                  ttl: 86400,
+                  meta: {
+                    title: String(appid),
+                    isOffline: false,
+                    coverUrl: null,
+                  } as SteamAppMeta,
+                };
+              }
+              const d = entry.data;
+              const catIds = new Set<number>(
+                Array.isArray(d.categories)
+                  ? d.categories.map((c: any) => Number(c?.id))
+                  : [],
+              );
+              const isOffline =
+                d.type === "game" &&
+                catIds.has(2) &&
+                !catIds.has(20) &&
+                !(
+                  d.is_free === true &&
+                  (catIds.has(1) || catIds.has(36) || catIds.has(38))
+                );
+              const title =
+                typeof d.name === "string" && d.name.trim()
+                  ? d.name.trim().slice(0, 160)
+                  : String(appid);
+              const coverUrl =
+                publicUrl(d.header_image) ||
+                `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg`;
+              return {
+                appid,
+                ttl: 1209600,
+                meta: { title, isOffline, coverUrl } as SteamAppMeta,
+              };
+            }),
+          );
+          const batchStmts: Array<ReturnType<typeof env.DB.prepare>> = [];
+          for (const item of fetched) {
+            if (item.status !== "fulfilled") continue;
+            const { appid, ttl, meta } = item.value;
+            metaByAppId.set(appid, meta);
+            batchStmts.push(
+              env.DB.prepare(
+                "INSERT INTO community_steam_cache(key,value,expires_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,expires_at=excluded.expires_at",
+              ).bind(
+                `steam-app-meta:${appid}`,
+                JSON.stringify(meta),
+                now + ttl,
+              ),
+            );
+          }
+          if (batchStmts.length) await env.DB.batch(batchStmts);
+        }
+        const items: SteamTopGame[] = [];
+        for (const r of ranks) {
+          const meta = metaByAppId.get(r.appid);
+          if (!meta?.isOffline) continue;
+          items.push({
+            rank: items.length + 1,
+            steamRank: Number(r.rank) || items.length + 1,
+            steamId: r.appid,
+            gameKey: String(r.appid),
+            title: meta.title,
+            coverUrl: meta.coverUrl,
+            currentPlayers: Number(r.concurrent_in_game || r.peak_in_game) || 0,
+            peakPlayers: Number(r.peak_in_game) || 0,
+          });
+          if (items.length >= 10) break;
+        }
+        return { items, updatedAt: now };
+      },
+      (v) => (v.items.length >= 10 ? 1800 : 120),
+    );
+    return jsonResponse(data, 200, {
+      "Cache-Control": "public, max-age=300",
+    });
   });
   add("GET", "/games/:gameKey/requirements", async (request, env, ctx) => {
     const gameKey = key(ctx.params?.gameKey);

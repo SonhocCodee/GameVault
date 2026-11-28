@@ -59,3 +59,7 @@ bloodborne_*.png
 # Local browser review and isolated preview artifacts
 .impeccable/review/
 .wrangler/
+
+# Local runtime data & worker asset backups
+.config/
+worker/admin-assets.bak/

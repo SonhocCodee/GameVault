@@ -268,3 +268,17 @@ export interface PerformancePreview {
   candidates: ConfigCandidate[];
   supported: boolean;
 }
+export interface SteamTopGame {
+  rank: number;
+  steamRank: number;
+  steamId: number;
+  gameKey: string;
+  title: string;
+  coverUrl: string | null;
+  currentPlayers: number;
+  peakPlayers: number;
+}
+export interface SteamTopResponse {
+  items: SteamTopGame[];
+  updatedAt: number;
+}

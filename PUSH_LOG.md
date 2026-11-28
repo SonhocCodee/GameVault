@@ -394,6 +394,29 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 
 <!-- LATEST_FIRST -->
 
+## [2026-11-28 17:48] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Phát hành `v1.0.14` — Top 10 Game Offline (Steam) ở Bảng tin + logo app mới + sửa sidebar sticky**:
+  - Thêm `GET /api/community/steam-top` trong `worker/src/routes/discovery.ts`: lấy Top 50 từ Steam `ISteamChartsService/GetMostPlayedGames/v1/`, lọc game Offline/Single-player qua `store.steampowered.com/api/appdetails`, cache metadata 14 ngày và kết quả Top 10 trong `community_steam_cache` 30 phút (Worker đã deploy từ session trước).
+  - Bảng tin Cộng đồng (`CommunityHub.tsx`, `community.css`): layout 2 cột `.gv-feed-layout` với sidebar sticky bên phải hiển thị Top 10 Game Offline kèm số người đang chơi; sidebar giãn kín chiều dọc khi sticky, 10 dòng giãn đều, hết tràn ngang gây scrollbar (đã verify trên preview harness 5175 + mock 8787).
+  - Đổi logo app: `assets/icon.png` (1024×1024 RGBA) + `assets/icon.ico` (7 kích thước 16→256) — icon đỏ bóng với tay cầm trắng, đồng hồ, biểu đồ cột; không đổi code (main.ts/community-notifications.ts/build.win.icon trỏ sẵn).
+  - `status-worker/index.js`: đổi `lang="en"` → `lang="vi"` cho trang Privacy & Terms.
+  - Tăng `version` lên `1.0.14` trong `package.json`, thêm changelog `1.0.14` trong `src/shared/changelog.ts`, làm sạch `PENDING_PUSH.md`, thêm `.config/` và `worker/admin-assets.bak/` vào `.gitignore`.
+
+### File chính đã thay đổi
+- `worker/src/routes/discovery.ts`, `src/shared/community.ts`, `src/renderer/community/CommunityHub.tsx`, `src/renderer/community/community.css`
+- `assets/icon.png`, `assets/icon.ico`, `status-worker/index.js`
+- `package.json`, `src/shared/changelog.ts`, `PENDING_PUSH.md`, `PUSH_LOG.md`, `.gitignore`, `AI_WORKFLOW_GUIDE.md` (mới)
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`, `npx tsc --noEmit -p worker/tsconfig.json`, `npm run build` — PASS.
+- `npm test` — PASS 566/570 (0 fail, 4 skipped).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Cloudflare Worker đã deploy trước đó cho endpoint steam-top, không cần deploy lại.
+- GitHub Actions `release.yml` sẽ tự build và phát hành `v1.0.14` (exe nhúng icon mới qua electron-builder); Windows có thể cache icon cũ ở Explorer/taskbar khi chạy dev trực tiếp.
+
 ## [2026-11-27 16:18] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

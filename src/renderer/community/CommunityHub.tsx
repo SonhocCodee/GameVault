@@ -40,6 +40,8 @@ import type {
   PublicGame,
   PublicProfile,
   SharedLibraryGame,
+  SteamTopGame,
+  SteamTopResponse,
 } from "../../shared/community.ts";
 import type { AuthStatus, Game } from "../../shared/types.ts";
 import { TimelineView } from "../components/TimelineView.tsx";
@@ -170,6 +172,10 @@ export function CommunityHub({
   const feedSequence = useRef(0);
   const [kind, setKind] = useState("");
   const [loading, setLoading] = useState(false);
+  const [steamTop, setSteamTop] = useState<SteamTopGame[]>([]);
+  const [steamTopLoading, setSteamTopLoading] = useState(false);
+  const [steamTopError, setSteamTopError] = useState(false);
+  const steamTopLoadedRef = useRef(false);
   const [composer, setComposer] = useState(false);
   const [composerKind, setComposerKind] = useState<"thought" | "photo" | "question" | "completed">("thought");
 
@@ -265,6 +271,19 @@ export function CommunityHub({
     return () => window.removeEventListener("popstate", pop);
   }, [embedded]);
 
+  useEffect(() => {
+    if (!route.game && !route.post && !route.profile) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"], .gv-modal-backdrop, .lightbox-overlay')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      navigate({});
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [route.game, route.post, route.profile]);
+
   const signIn = async () => {
     setError("");
     try {
@@ -274,6 +293,30 @@ export function CommunityHub({
       setError(communityError(e));
     }
   };
+
+  const loadSteamTop = useCallback(
+    async (force = false) => {
+      if (steamTopLoadedRef.current && !force) return;
+      steamTopLoadedRef.current = true;
+      setSteamTopLoading(true);
+      setSteamTopError(false);
+      try {
+        const res = await api.request<SteamTopResponse>("/steam-top");
+        setSteamTop(Array.isArray(res?.items) ? res.items : []);
+      } catch {
+        setSteamTopError(true);
+      } finally {
+        setSteamTopLoading(false);
+      }
+    },
+    [api],
+  );
+
+  useEffect(() => {
+    if (tab === "feed" && !route.post) {
+      void loadSteamTop();
+    }
+  }, [tab, route.post, loadSteamTop]);
 
   const loadFeed = useCallback(
     async (more = false) => {
@@ -1519,63 +1562,153 @@ export function CommunityHub({
             </div>
           )}
 
-          {loading && feed.items.length === 0 && (
-            <p role="status" className="gv-muted">
-              Đang tải bài viết…
-            </p>
-          )}
+          <div className={!route.post ? "gv-feed-layout" : "gv-feed-main"}>
+            <div className="gv-feed-main">
+              {loading && feed.items.length === 0 && (
+                <p role="status" className="gv-muted">
+                  Đang tải bài viết…
+                </p>
+              )}
 
-          {!loading && feed.items.length === 0 && (
-            <div className="gv-empty">
-              <h3>
-                {postQuery ? "Không tìm thấy bài viết phù hợp" : following ? "Chưa có bài viết từ người bạn theo dõi" : saved ? "Chưa có bài viết đã lưu" : "Chưa có bài viết nào"}
-              </h3>
-              <p>
-                {following ? "Tìm người chơi ở thanh trên rồi nhấn Theo dõi để xem bài mới của họ tại đây." : postQuery ? "Hãy thử tên game khác hoặc xóa tìm kiếm." : "Hãy chọn một game từ thư viện hoặc Top game để chia sẻ khoảnh khắc, cảm nhận đầu tiên!"}
-              </p>
-              <div className="gv-actions">
-                {me && (
-                  <button
-                    type="button"
-                    className="gv-primary"
-                    onClick={() => setComposer(true)}
-                  >
-                    <Plus size={15} /> Đăng bài đầu tiên
-                  </button>
-                )}
-                <button type="button" onClick={() => switchTab("discover")}>
-                  Khám phá Top game
-                </button>
+              {!loading && feed.items.length === 0 && (
+                <div className="gv-empty">
+                  <h3>
+                    {postQuery ? "Không tìm thấy bài viết phù hợp" : following ? "Chưa có bài viết từ người bạn theo dõi" : saved ? "Chưa có bài viết đã lưu" : "Chưa có bài viết nào"}
+                  </h3>
+                  <p>
+                    {following ? "Tìm người chơi ở thanh trên rồi nhấn Theo dõi để xem bài mới của họ tại đây." : postQuery ? "Hãy thử tên game khác hoặc xóa tìm kiếm." : "Hãy chọn một game từ thư viện hoặc Top game để chia sẻ khoảnh khắc, cảm nhận đầu tiên!"}
+                  </p>
+                  <div className="gv-actions">
+                    {me && (
+                      <button
+                        type="button"
+                        className="gv-primary"
+                        onClick={() => setComposer(true)}
+                      >
+                        <Plus size={15} /> Đăng bài đầu tiên
+                      </button>
+                    )}
+                    <button type="button" onClick={() => switchTab("discover")}>
+                      Khám phá Top game
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="gv-feed-grid">
+                {feed.items.map((p) => (
+                  <PostCard
+                    key={p.id}
+                    post={p}
+                    api={api}
+                    me={me}
+                    onChanged={() => void refreshPost(p.id)}
+                    onGame={onGame}
+                    onProfile={onProfile}
+                    onToast={showToast}
+                    expanded={!!route.post}
+                  />
+                ))}
               </div>
+
+              {feed.hasMore && (
+                <button
+                  type="button"
+                  className="gv-pager"
+                  disabled={loading}
+                  onClick={() => void loadFeed(true)}
+                >
+                  Xem thêm bài viết
+                </button>
+              )}
             </div>
-          )}
 
-          <div className="gv-feed-grid">
-            {feed.items.map((p) => (
-              <PostCard
-                key={p.id}
-                post={p}
-                api={api}
-                me={me}
-                onChanged={() => void refreshPost(p.id)}
-                onGame={onGame}
-                onProfile={onProfile}
-                onToast={showToast}
-                expanded={!!route.post}
-              />
-            ))}
+            {!route.post && (
+              <aside className="gv-feed-sidebar" aria-label="Top 10 game Offline Steam">
+                <div className="gv-steam-top-card">
+                  <div className="gv-steam-top-header">
+                    <div>
+                      <h3 className="gv-steam-top-title">
+                        <Gamepad2 size={16} /> Top 10 Game Offline
+                      </h3>
+                      <p className="gv-steam-top-sub">
+                        Đang chơi nhiều nhất trên Steam
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="gv-steam-top-refresh"
+                      title="Làm mới bảng xếp hạng Steam"
+                      disabled={steamTopLoading}
+                      onClick={() => void loadSteamTop(true)}
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                  </div>
+
+                  {steamTopLoading && steamTop.length === 0 ? (
+                    <div className="gv-steam-top-list">
+                      {Array.from({ length: 6 }).map((_, idx) => (
+                        <div key={idx} className="gv-steam-top-skeleton" />
+                      ))}
+                    </div>
+                  ) : steamTopError && steamTop.length === 0 ? (
+                    <div className="gv-stack">
+                      <p className="gv-muted">Không tải được bảng xếp hạng Steam.</p>
+                      <button
+                        type="button"
+                        onClick={() => void loadSteamTop(true)}
+                      >
+                        Thử lại
+                      </button>
+                    </div>
+                  ) : steamTop.length === 0 ? (
+                    <p className="gv-muted">Chưa có dữ liệu bảng xếp hạng.</p>
+                  ) : (
+                    <div className="gv-steam-top-list">
+                      {steamTop.map((g) => (
+                        <button
+                          type="button"
+                          key={g.steamId}
+                          className="gv-steam-top-item"
+                          title={`${g.title} — ${g.currentPlayers.toLocaleString()} người đang chơi`}
+                          onClick={() =>
+                            onGame({
+                              gameKey: g.gameKey,
+                              title: g.title,
+                              steamId: g.steamId,
+                              coverUrl: g.coverUrl,
+                            })
+                          }
+                        >
+                          <span className={`gv-steam-top-rank ${g.rank <= 3 ? `top-${g.rank}` : ""}`}>
+                            #{g.rank}
+                          </span>
+                          {g.coverUrl ? (
+                            <img
+                              src={g.coverUrl}
+                              alt=""
+                              className="gv-steam-top-thumb"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="gv-steam-top-thumb" />
+                          )}
+                          <span className="gv-steam-top-name">{g.title}</span>
+                          <span className="gv-steam-top-players">
+                            <span className="gv-steam-top-dot" />
+                            {g.currentPlayers >= 1000
+                              ? `${(g.currentPlayers / 1000).toFixed(1)}K`
+                              : g.currentPlayers}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </aside>
+            )}
           </div>
-
-          {feed.hasMore && (
-            <button
-              type="button"
-              className="gv-pager"
-              disabled={loading}
-              onClick={() => void loadFeed(true)}
-            >
-              Xem thêm bài viết
-            </button>
-          )}
         </section>
       ) : tab === "players" ? (
         /* TAB: TOP NGƯỜI CHƠI */

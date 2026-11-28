@@ -14,6 +14,19 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '1.0.14',
+    date: '2026-11-28',
+    summary:
+      'Bảng tin Cộng đồng thêm Top 10 Game Offline đang hot trên Steam, bộ logo ứng dụng mới và sửa sidebar sticky.',
+    features: [
+      'Bảng tin Cộng đồng hiển thị cột phải "Top 10 Game Offline" lấy từ bảng xếp hạng Steam, kèm số người đang chơi cập nhật liên tục.',
+      'Bộ logo ứng dụng mới (icon cửa sổ, taskbar, tray và file cài đặt).',
+    ],
+    fixes: [
+      'Sửa card Top 10 Game Offline khi sticky không chiếm kín chiều dọc: 10 dòng giờ giãn đều và hết tràn ngang gây scrollbar.',
+    ],
+  },
+  {
     version: '1.0.13',
     date: '2026-11-28',
     summary: 'Sửa cắt viền khi hover thẻ game ở hàng ngang và đồng bộ giao diện 2 tab Dòng thời gian.',
