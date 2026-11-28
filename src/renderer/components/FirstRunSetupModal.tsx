@@ -12,6 +12,7 @@ import {
   Keyboard,
   Power,
   CheckCircle2,
+  Gauge,
 } from 'lucide-react';
 
 const HOTKEY_CHOICES = ['F6', 'F8', 'F9', 'F10', 'F11', 'F12', 'PrintScreen'] as const;
@@ -26,10 +27,14 @@ export interface FirstRunSetupModalProps {
   screenshotEnabled: boolean;
   screenshotHotkey: string;
   appStartupEnabled: boolean;
+  fpsAutoCaptureEnabled: boolean;
+  fpsAutoShareEnabled: boolean;
   onHddModeChange: (enabled: boolean) => void;
   onScreenshotEnabledChange: (enabled: boolean) => void;
   onScreenshotHotkeyChange: (hotkey: string) => void;
   onAppStartupChange: (enabled: boolean) => void;
+  onFpsAutoCaptureChange: (enabled: boolean) => void;
+  onFpsAutoShareChange: (enabled: boolean) => void;
   onFieldChange: (field: 'media' | 'screenshots' | 'vault', value: string) => void;
   onBrowseFolder: (field: 'media' | 'screenshots' | 'vault') => Promise<void>;
   onGoogleLogin: () => Promise<void>;
@@ -51,10 +56,14 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
   screenshotEnabled,
   screenshotHotkey,
   appStartupEnabled,
+  fpsAutoCaptureEnabled,
+  fpsAutoShareEnabled,
   onHddModeChange,
   onScreenshotEnabledChange,
   onScreenshotHotkeyChange,
   onAppStartupChange,
+  onFpsAutoCaptureChange,
+  onFpsAutoShareChange,
   onFieldChange,
   onBrowseFolder,
   onGoogleLogin,
@@ -410,12 +419,74 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
               </div>
             </div>
 
+            <div className="mt-3.5 rounded-xl border border-[#2a2e3d] bg-[#161822] p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <Gauge className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                  <div>
+                    <span className="text-xs font-bold text-white">Tự động đo FPS</span>
+                    <p className="mt-1 text-[11px] text-[#8e95a5]">
+                      Ghi FPS trung bình, 1% low và cấu hình máy theo từng phiên chơi.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={fpsAutoCaptureEnabled}
+                  aria-label="Tự động đo FPS"
+                  onClick={() => onFpsAutoCaptureChange(!fpsAutoCaptureEnabled)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 ${
+                    fpsAutoCaptureEnabled ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      fpsAutoCaptureEnabled ? 'translate-x-4.5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 border-t border-[#2a2e3d]/70 pt-3">
+                <div className="pl-6">
+                  <span className="text-xs font-bold text-white">Tự chia sẻ kết quả lên Cộng đồng</span>
+                  <p className="mt-1 text-[11px] text-[#8e95a5]">
+                    Công khai tên hồ sơ, FPS, CPU/GPU/RAM và thiết lập game sau phiên đo hợp lệ.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={fpsAutoShareEnabled}
+                  aria-label="Tự chia sẻ kết quả FPS lên Cộng đồng"
+                  disabled={!fpsAutoCaptureEnabled}
+                  onClick={() => onFpsAutoShareChange(!fpsAutoShareEnabled)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400 disabled:cursor-not-allowed disabled:opacity-40 ${
+                    fpsAutoShareEnabled ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      fpsAutoShareEnabled ? 'translate-x-4.5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {fpsAutoCaptureEnabled && (
+                <p className="pl-6 text-[11px] text-amber-300/90">
+                  Windows cần xác nhận UAC một lần để bật đo nền. Những phiên sau không hỏi lại.
+                </p>
+              )}
+            </div>
+
             {error && <p className="mt-3 text-xs font-semibold text-[#ff2a44]">{error}</p>}
 
             {/* Footer */}
             <div className="mt-5 flex items-center justify-between pt-3 border-t border-[#2a2e3d]/60">
               <p className="text-[11px] text-[#8e95a5]">
-                Có thể đổi lại bất cứ lúc nào trong Cài đặt → Thư viện &amp; Lưu trữ.
+                Có thể đổi lại các tùy chọn này trong Cài đặt.
               </p>
               <button
                 type="button"
@@ -423,7 +494,7 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
                 disabled={saving}
                 className="flex items-center gap-2 rounded-xl bg-[#ff2a44] px-6 py-2.5 text-sm font-black text-white shadow-lg shadow-[#ff2a44]/30 transition hover:bg-[#ff2a44]/90 disabled:opacity-60"
               >
-                {saving ? 'Đang lưu...' : 'Hoàn tất & Bắt đầu'}
+                {saving ? 'Đang hoàn tất...' : 'Hoàn tất & Bắt đầu'}
               </button>
             </div>
           </>

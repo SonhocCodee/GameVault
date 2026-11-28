@@ -1,6 +1,10 @@
 import { authenticate, isAdminUser } from "./auth.ts";
 import type { AuthUser, Env } from "./types.ts";
 import { errorResponse } from "./utils.ts";
+import {
+  canonicalNonSteamGameKeySql,
+  canonicalNonSteamGameTitleSql,
+} from "../../src/shared/game-identity.ts";
 export class CommunityError extends Error {
   status: number;
   constructor(message: string, status = 400) {
@@ -204,20 +208,23 @@ export async function rateLimit(
   }
 }
 export async function refreshSharedLibrary(env: Env, uid: string) {
+  const sharedGameKey = `CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT)
+    ELSE ${canonicalNonSteamGameKeySql("l.game_key")} END`;
+  const sharedGameTitle = canonicalNonSteamGameTitleSql(sharedGameKey, "l.title");
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM community_library WHERE uid=? AND NOT EXISTS (
       SELECT 1 FROM user_library l JOIN community_profiles p ON p.uid=l.uid
       WHERE l.uid=community_library.uid AND l.is_deleted=0 AND p.share_library=1 AND p.suspended=0
-        AND CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END=community_library.game_key
+        AND ${sharedGameKey}=community_library.game_key
     )`).bind(uid),
     env.DB.prepare(
       `INSERT INTO community_library(uid,game_key,title,steam_id,cover_url,status,playtime_minutes,recorded_playtime_minutes)
-      SELECT l.uid,CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END,
-        MAX(l.title),MAX(CASE WHEN l.steam_id>0 THEN l.steam_id ELSE NULL END),MAX(l.cover_url),
+      SELECT l.uid,${sharedGameKey},
+        MAX(${sharedGameTitle}),MAX(CASE WHEN l.steam_id>0 THEN l.steam_id ELSE NULL END),MAX(l.cover_url),
         CASE WHEN MAX(CASE WHEN l.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed' ELSE MAX(l.status) END,
         MAX(l.playtime_minutes),MAX(l.recorded_playtime_minutes) FROM user_library l
       JOIN community_profiles p ON p.uid=l.uid WHERE l.uid=? AND l.is_deleted=0 AND p.share_library=1 AND p.suspended=0
-      GROUP BY l.uid,CASE WHEN l.steam_id>0 THEN CAST(l.steam_id AS TEXT) ELSE l.game_key END
+      GROUP BY l.uid,${sharedGameKey}
       ON CONFLICT(uid,game_key) DO UPDATE SET
         title=excluded.title,steam_id=excluded.steam_id,cover_url=excluded.cover_url,
         status=excluded.status,playtime_minutes=excluded.playtime_minutes,

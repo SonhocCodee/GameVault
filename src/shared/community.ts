@@ -37,6 +37,9 @@ export interface SharedLibraryGame extends PublicGame {
   status: string;
   playtimeMinutes: number;
   recordedPlaytimeMinutes?: number;
+  completedAt?: string | null;
+  lastPlayed?: string | null;
+  userScore?: number | null;
   bannerUrl?: string | null;
   localGameId?: number;
 }
@@ -134,13 +137,13 @@ export interface GraphicsContext {
   upscaling: string;
   frameGeneration: string;
   rayTracing: string;
-  source: "manual" | "config";
+  source: "manual" | "config" | "unknown";
 }
 export interface PerformanceReport extends PublicGame {
   id?: string;
   uid?: string;
   nickname?: string;
-  completionStatus: "completed";
+  completionStatus: "played" | "completed";
   cpu: string;
   gpu: string;
   ramGb: number;

@@ -5,11 +5,13 @@ import {
   Bookmark,
   CalendarDays,
   CheckCircle2,
+  ChevronRight,
   Clock,
   Compass,
   ExternalLink,
   Gamepad2,
   MessageCircle,
+  MessageSquareText,
   Pencil,
   Plus,
   RefreshCw,
@@ -23,6 +25,8 @@ import {
   Trophy,
   UserRound,
   Users,
+  Wifi,
+  WifiOff,
   X,
 } from "lucide-react";
 import type {
@@ -37,7 +41,8 @@ import type {
   PublicProfile,
   SharedLibraryGame,
 } from "../../shared/community.ts";
-import type { AuthStatus } from "../../shared/types.ts";
+import type { AuthStatus, Game } from "../../shared/types.ts";
+import { TimelineView } from "../components/TimelineView.tsx";
 import {
   communityError,
   formatRelativeTime,
@@ -55,7 +60,7 @@ import { CommunitySearch } from "./CommunitySearch.tsx";
 import { FollowButton } from "./FollowButton.tsx";
 import { MonthlyRankings } from "./MonthlyRankings.tsx";
 import { currentRankingMonth } from "../../shared/monthly.ts";
-import { Avatar, ConfirmModal, PlaytimeDisplay, playtimeBreakdown, scoreTierClass } from "./CommunityWidgets.tsx";
+import { Avatar, ConfirmModal, formatScore, getMetacriticTier, PlaytimeDisplay, playtimeBreakdown, scoreTierClass } from "./CommunityWidgets.tsx";
 import "./community.css";
 
 type Tab =
@@ -158,6 +163,12 @@ export function CommunityHub({
 
   const [query, setQuery] = useState("");
   const [gameQuery, setGameQuery] = useState("");
+  const [quickGameQuery, setQuickGameQuery] = useState("");
+  const [quickGameResults, setQuickGameResults] = useState<GameRanking[]>([]);
+  const [quickGameLoading, setQuickGameLoading] = useState(false);
+  const [quickGameOpen, setQuickGameOpen] = useState(false);
+  const quickSearchRef = useRef<HTMLDivElement | null>(null);
+  const quickSearchSeq = useRef(0);
   const [sort, setSort] = useState("hours");
   const [classification, setClassification] = useState<
     "all" | "offline" | "online"
@@ -169,6 +180,9 @@ export function CommunityHub({
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [profileReviews, setProfileReviews] = useState<Page<CommunityPost>>(empty());
   const [profileReviewsLoading, setProfileReviewsLoading] = useState(false);
+  const [profileComments, setProfileComments] = useState<Page<{ id: string; postId: string; body: string; createdAt: string; gameTitle?: string | null; spoiler?: boolean }>>(empty());
+  const [profileCommentsLoading, setProfileCommentsLoading] = useState(false);
+  const [collapsedTreeGroups, setCollapsedTreeGroups] = useState<Record<string, boolean>>({});
   const [blocked, setBlocked] = useState<Array<{ uid: string; nickname: string }>>([]);
   const [notifications, setNotifications] = useState<Page<CommunityNotification>>(empty());
   const [reports, setReports] = useState<Page<ModerationReport>>(empty());
@@ -177,10 +191,11 @@ export function CommunityHub({
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSubTab, setProfileSubTab] = useState<"activity" | "games">("activity");
-  const [publicProfileSubTab, setPublicProfileSubTab] = useState<"activity" | "reviews" | "games">("activity");
+  const [publicProfileSubTab, setPublicProfileSubTab] = useState<"completed" | "reviews" | "games" | "activity" | "comments">("completed");
 
   const rankingSequence = useRef(0);
   const profileReviewsSequence = useRef(0);
+  const profileCommentsSequence = useRef(0);
   const identitySequence = useRef(0);
   const [identityUnavailable, setIdentityUnavailable] = useState(false);
   const [identityExpired, setIdentityExpired] = useState(false);
@@ -327,6 +342,35 @@ export function CommunityHub({
     };
   }, [api, route.profile]);
 
+  useEffect(() => {
+    setPublicProfileSubTab("completed");
+    setCollapsedTreeGroups({});
+    if (!route.profile) {
+      setProfileComments(empty());
+      setProfileCommentsLoading(false);
+      return;
+    }
+    const ticket = ++profileCommentsSequence.current;
+    setProfileComments(empty());
+    setProfileCommentsLoading(true);
+    void api
+      .request<Page<{ id: string; postId: string; body: string; createdAt: string; gameTitle?: string | null; spoiler?: boolean }>>(
+        `/profiles/${encodeURIComponent(route.profile)}/comments`,
+      )
+      .then((next) => {
+        if (ticket === profileCommentsSequence.current) setProfileComments(next);
+      })
+      .catch(() => {
+        if (ticket === profileCommentsSequence.current) setProfileComments(empty());
+      })
+      .finally(() => {
+        if (ticket === profileCommentsSequence.current) setProfileCommentsLoading(false);
+      });
+    return () => {
+      profileCommentsSequence.current++;
+    };
+  }, [api, route.profile]);
+
   const refreshPost = async (id: string) => {
     try {
       const latest = await api.request<CommunityPost>(`/posts/${id}`);
@@ -411,6 +455,45 @@ export function CommunityHub({
       if (ticket === rankingSequence.current) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const q = quickGameQuery.trim();
+    if (q.length < 2) {
+      setQuickGameResults([]);
+      setQuickGameLoading(false);
+      return;
+    }
+    const ticket = ++quickSearchSeq.current;
+    setQuickGameLoading(true);
+    const timer = setTimeout(() => {
+      void api
+        .request<Page<GameRanking>>(
+          `/rankings?sort=score&classification=all&q=${encodeURIComponent(q)}&limit=6`,
+        )
+        .then((res) => {
+          if (ticket === quickSearchSeq.current) {
+            setQuickGameResults((res.items || []).slice(0, 6));
+          }
+        })
+        .catch(() => {
+          if (ticket === quickSearchSeq.current) setQuickGameResults([]);
+        })
+        .finally(() => {
+          if (ticket === quickSearchSeq.current) setQuickGameLoading(false);
+        });
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [api, quickGameQuery]);
+
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent) => {
+      if (quickSearchRef.current && !quickSearchRef.current.contains(e.target as Node)) {
+        setQuickGameOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, []);
 
   useEffect(() => {
     if (tab === "discover" && !route.game && !route.profile && !route.post) {
@@ -618,36 +701,39 @@ export function CommunityHub({
 
           <div className="gv-game-row-info">
             <h3 className={`gv-game-row-title ${isPodium ? "is-lg" : ""}`}>{g.title}</h3>
-            <div className="gv-actions" style={{ gap: 8 }}>
+            <div className="gv-row-meta">
               <span
-                className={`gv-pill ${
+                className={`gv-mode-tag ${
                   g.classification === "online"
-                    ? "gv-pill-cyan"
+                    ? "is-online"
                     : g.classification === "offline" || g.classification === "hybrid"
-                      ? "gv-pill-emerald"
+                      ? "is-offline"
                       : ""
                 }`}
               >
+                <span className="gv-mode-dot" />
                 {g.classification === "online"
                   ? "Online"
                   : g.classification === "offline" || g.classification === "hybrid"
                     ? "Offline"
                     : "Chưa phân loại"}
               </span>
-              <span className="gv-muted" style={{ fontSize: 12 }}>
+              <span className="gv-row-reviews">
+                <MessageSquareText size={12} />
                 {g.reviewCount > 0
-                  ? `${g.reviewCount} lượt đánh giá`
-                  : "Xem cấu hình & đánh giá"}
+                  ? `${g.reviewCount} đánh giá · Bấm để xem review`
+                  : "Bấm để xem thông tin & đánh giá"}
+                <ChevronRight size={13} />
               </span>
             </div>
           </div>
         </div>
 
         <div className="gv-game-row-right">
-          <div className="gv-game-row-stats">
-            <div className="gv-stat-mini">
-              <span className="gv-stat-mini-label">Giờ tính top</span>
-              <span className="gv-stat-mini-value gv-text-emerald">
+          <div className="gv-row-stats">
+            <div className="gv-row-stat">
+              <span className="gv-row-stat-label">Giờ tính top</span>
+              <span className="gv-row-stat-value">
                 <PlaytimeDisplay
                   totalMinutes={g.totalMinutes}
                   recordedMinutes={g.recordedMinutes}
@@ -656,21 +742,31 @@ export function CommunityHub({
                 />
               </span>
             </div>
-            <div className="gv-stat-mini">
-              <span className="gv-stat-mini-label">Người chơi</span>
-              <span className="gv-stat-mini-value">{g.players}</span>
+            <div className="gv-row-stat">
+              <span className="gv-row-stat-label">Người chơi</span>
+              <span className="gv-row-stat-value">{g.players}</span>
             </div>
-            <div className="gv-stat-mini">
-              <span className="gv-stat-mini-label">Phá đảo</span>
-              <span className="gv-stat-mini-value gv-text-cyan">{g.completedPlayers}</span>
+            <div className="gv-row-stat">
+              <span className="gv-row-stat-label">Phá đảo</span>
+              <span className="gv-row-stat-value">{g.completedPlayers}</span>
             </div>
           </div>
           {g.averageScore != null ? (
-            <span className={`gv-score-pill ${scoreTierClass(g.averageScore)}`}>
-              <Star size={12} /> {g.averageScore.toFixed(1)}/10
-            </span>
+            <div
+              className={`gv-rank-score gv-meta-${getMetacriticTier(g.averageScore)}`}
+              title="Điểm đánh giá trung bình từ cộng đồng (thang 10)"
+            >
+              <div className="gv-rank-score-value">
+                {formatScore(g.averageScore)}
+              </div>
+            </div>
           ) : (
-            <span className="gv-pill">Chưa chấm</span>
+            <div
+              className="gv-rank-score gv-meta-none"
+              title="Chưa có điểm đánh giá"
+            >
+              <div className="gv-rank-score-value">--</div>
+            </div>
           )}
         </div>
       </button>
@@ -714,29 +810,127 @@ export function CommunityHub({
           ))}
         </nav>
 
-        <div className="gv-actions">
-          {checking ? (
-            <span className="gv-muted">Đang kết nối…</span>
-          ) : me ? (
-            <button
-              type="button"
-              className="gv-card-subtle"
-              style={{ padding: "5px 12px", borderRadius: 999 }}
-              onClick={() => switchTab("profile")}
-            >
-              <Avatar name={me.nickname} url={me.avatarUrl} size={26} />
-              <span style={{ fontWeight: 700, fontSize: 13 }}>{me.nickname}</span>
-            </button>
-          ) : !embedded ? (
-            <button
-              type="button"
-              className="gv-primary"
-              onClick={() => void signIn()}
-            >
-              Đăng nhập Google
-            </button>
-          ) : null}
+        {/* Quick Game Review Search */}
+        <div className="gv-quick-game-search" ref={quickSearchRef}>
+          <form
+            className="gv-quick-game-search-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const q = quickGameQuery.trim();
+              if (!q) return;
+              if (quickGameResults.length === 1) {
+                setQuickGameOpen(false);
+                onGame(quickGameResults[0]);
+                return;
+              }
+              setQuickGameOpen(false);
+              setQuery(q);
+              setGameQuery(q);
+              setSort("score");
+              switchTab("discover");
+            }}
+          >
+            <Search size={15} className="gv-quick-game-search-icon" />
+            <input
+              type="search"
+              maxLength={80}
+              value={quickGameQuery}
+              onFocus={() => setQuickGameOpen(true)}
+              onChange={(e) => {
+                setQuickGameQuery(e.target.value);
+                setQuickGameOpen(true);
+              }}
+              placeholder="Tìm game để xem điểm & review..."
+              aria-label="Tìm nhanh game để xem điểm và đánh giá"
+            />
+            {quickGameQuery && (
+              <button
+                type="button"
+                className="gv-quick-game-clear"
+                onClick={() => {
+                  setQuickGameQuery("");
+                  setQuickGameResults([]);
+                }}
+                aria-label="Xóa tìm kiếm"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </form>
+
+          {quickGameOpen && quickGameQuery.trim().length >= 2 && (
+            <div className="gv-quick-game-dropdown" role="listbox" aria-label="Kết quả tìm game">
+              {quickGameLoading ? (
+                <div className="gv-quick-game-empty">Đang tìm game…</div>
+              ) : quickGameResults.length === 0 ? (
+                <div className="gv-quick-game-empty">
+                  Không thấy "{quickGameQuery.trim()}". Nhấn Enter để tìm trong Top game.
+                </div>
+              ) : (
+                quickGameResults.map((g) => {
+                  const thumb = g.coverUrl ? qualifyCommunityUrl(api.publicBase, g.coverUrl) : "";
+                  return (
+                    <button
+                      key={g.gameKey}
+                      type="button"
+                      className="gv-quick-game-item"
+                      onClick={() => {
+                        setQuickGameOpen(false);
+                        onGame(g);
+                      }}
+                    >
+                      {thumb ? (
+                        <img src={thumb} alt="" className="gv-quick-game-thumb" loading="lazy" />
+                      ) : (
+                        <div className="gv-quick-game-thumb" />
+                      )}
+                      <div className="gv-quick-game-meta">
+                        <span className="gv-quick-game-title">{g.title}</span>
+                        <span className="gv-quick-game-sub">
+                          {g.reviewCount > 0 ? `${g.reviewCount} đánh giá` : "Xem thông tin & đánh giá"}
+                          {g.players > 0 ? ` · ${g.players} người chơi` : ""}
+                        </span>
+                      </div>
+                      {g.averageScore != null ? (
+                        <span className={`gv-rank-score-mini gv-meta-${getMetacriticTier(g.averageScore)}`}>
+                          {formatScore(g.averageScore)}/10
+                        </span>
+                      ) : (
+                        <span className="gv-pill">Chưa chấm</span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
         </div>
+
+        {!embedded && (
+          <div className="gv-actions">
+            {checking ? (
+              <span className="gv-muted">Đang kết nối…</span>
+            ) : me ? (
+              <button
+                type="button"
+                className="gv-card-subtle"
+                style={{ padding: "5px 12px", borderRadius: 999 }}
+                onClick={() => switchTab("profile")}
+              >
+                <Avatar name={me.nickname} url={me.avatarUrl} size={26} />
+                <span style={{ fontWeight: 700, fontSize: 13 }}>{me.nickname}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="gv-primary"
+                onClick={() => void signIn()}
+              >
+                Đăng nhập Google
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       {identityUnavailable && (
@@ -883,13 +1077,13 @@ export function CommunityHub({
                 <p className="gv-muted">{profile.followersCount ?? 0} người theo dõi · Đang theo dõi {profile.followingCount ?? 0}</p>
                 {profile.shareLibrary && (
                   <div className="gv-profile-stats-row">
-                    <span className="gv-pill gv-pill-emerald">
-                      <CheckCircle2 size={13} />
+                    <span className="gv-pill gv-pill-amber">
+                      <Trophy size={13} />
                       {profile.completedGames ?? 0} đã phá đảo
                     </span>
                     <span className="gv-pill">
                       <Gamepad2 size={13} />
-                      {profile.playedGames ?? 0} game đã chơi
+                      {profile.totalGames ?? profile.games?.length ?? 0} game
                     </span>
                     <span className="gv-pill gv-pill-cyan" title="Tổng thời gian tất cả game, kể cả game treo máy">
                       <Clock size={13} />
@@ -898,23 +1092,30 @@ export function CommunityHub({
                         recordedMinutes={profile.recordedMinutes}
                       />
                     </span>
-                    <span className="gv-pill">
-                      <Gamepad2 size={13} />
-                      {profile.totalGames ?? profile.games?.length ?? 0} game
-                    </span>
                   </div>
                 )}
               </div>
             </div>
           )}
 
+          {(() => {
+            const completedGamesList = (profile?.games || []).filter((g) => g.status === "completed");
+            const treeGroups = [
+              { id: "100h", label: "100+ giờ", items: completedGamesList.filter((g) => g.playtimeMinutes >= 6000) },
+              { id: "50h", label: "50 – 100 giờ", items: completedGamesList.filter((g) => g.playtimeMinutes >= 3000 && g.playtimeMinutes < 6000) },
+              { id: "10h", label: "10 – 50 giờ", items: completedGamesList.filter((g) => g.playtimeMinutes >= 600 && g.playtimeMinutes < 3000) },
+              { id: "under10h", label: "Dưới 10 giờ", items: completedGamesList.filter((g) => g.playtimeMinutes < 600) },
+            ].filter((grp) => grp.items.length > 0);
+            return (
+              <>
           <div className="gv-chip-row">
             <button
               type="button"
-              className={`gv-chip ${publicProfileSubTab === "activity" ? "active" : ""}`}
-              onClick={() => setPublicProfileSubTab("activity")}
+              className={`gv-chip ${publicProfileSubTab === "completed" ? "active" : ""}`}
+              onClick={() => setPublicProfileSubTab("completed")}
             >
-              Bài viết ({feed.items.length})
+              <Trophy size={13} style={{ color: "#fbbf24" }} />
+              Đã phá đảo ({completedGamesList.length})
             </button>
             <button
               type="button"
@@ -930,9 +1131,56 @@ export function CommunityHub({
             >
               Thư viện game ({profile?.games?.length || 0})
             </button>
+            <button
+              type="button"
+              className={`gv-chip ${publicProfileSubTab === "activity" ? "active" : ""}`}
+              onClick={() => setPublicProfileSubTab("activity")}
+            >
+              Bài viết ({feed.items.length})
+            </button>
+            <button
+              type="button"
+              className={`gv-chip ${publicProfileSubTab === "comments" ? "active" : ""}`}
+              onClick={() => setPublicProfileSubTab("comments")}
+            >
+              Bình luận ({profileComments.items.length})
+            </button>
           </div>
 
-          {publicProfileSubTab === "activity" ? (
+          {publicProfileSubTab === "completed" ? (
+            !profile?.shareLibrary ? (
+              <div className="gv-empty">
+                <p>Người chơi này không chia sẻ thư viện game.</p>
+              </div>
+            ) : completedGamesList.length === 0 ? (
+              <div className="gv-empty">
+                <p>Người chơi này chưa có game đã phá đảo nào.</p>
+              </div>
+            ) : (
+              <TimelineView
+                games={(profile.games || []).map((g, idx): Game => ({
+                  id: idx + 1,
+                  title: g.title,
+                  status: (g.status as Game["status"]) || "completed",
+                  playtime_minutes: g.playtimeMinutes || 0,
+                  recorded_playtime_minutes: g.recordedPlaytimeMinutes || 0,
+                  completed_at: g.completedAt ?? null,
+                  last_played_at: g.lastPlayed ?? null,
+                  user_rating: g.userScore ?? undefined,
+                  cover_url: g.coverUrl ? qualifyCommunityUrl(api.publicBase, g.coverUrl) : undefined,
+                  banner_url: g.bannerUrl ? qualifyCommunityUrl(api.publicBase, g.bannerUrl) : undefined,
+                  steam_id: g.steamId ?? undefined,
+                  created_at: "",
+                  updated_at: "",
+                }))}
+                onSelectGame={(gameId) => {
+                  const target = (profile.games || [])[gameId - 1];
+                  if (target) onGame(target);
+                }}
+                publicProfileMode
+              />
+            )
+          ) : publicProfileSubTab === "activity" ? (
             <div className="gv-feed-grid">
               {feed.items.length === 0 ? (
                 <div className="gv-empty">
@@ -1054,11 +1302,61 @@ export function CommunityHub({
                 <p>Chưa có game nào được chia sẻ.</p>
               </div>
             )
+          ) : publicProfileSubTab === "comments" ? (
+            <div className="gv-stack">
+              {profileCommentsLoading && (
+                <p className="gv-muted" role="status">
+                  Đang tải bình luận…
+                </p>
+              )}
+              {!profileCommentsLoading && profileComments.items.length === 0 && (
+                <div className="gv-empty">
+                  <p>Người chơi này chưa có bình luận nào.</p>
+                </div>
+              )}
+              {profileComments.items.length > 0 && (
+                <div className="gv-stack" style={{ gap: 10 }}>
+                  {profileComments.items.map((c) => (
+                    <div
+                      key={c.id}
+                      className="gv-card"
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: 12,
+                        border: "1px solid rgba(148, 163, 184, 0.14)",
+                        background: "rgba(15, 23, 42, 0.55)",
+                      }}
+                    >
+                      <div className="gv-actions" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                        <span className="gv-muted" style={{ fontSize: 12 }}>
+                          {c.gameTitle ? `Trong bài viết về ${c.gameTitle}` : "Bình luận"} ·{" "}
+                          {new Date(c.createdAt).toLocaleDateString("vi-VN")}
+                        </span>
+                        <button
+                          type="button"
+                          className="gv-button"
+                          style={{ padding: "3px 10px", fontSize: 12 }}
+                          onClick={() => navigate({ post: c.postId })}
+                        >
+                          Xem bài viết
+                        </button>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 13.5, color: "#e2e8f0", whiteSpace: "pre-wrap" }}>
+                        {c.body}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="gv-empty">
               <p>Người chơi này đang giữ riêng tư thư viện.</p>
             </div>
           )}
+              </>
+            );
+          })()}
         </section>
       ) : tab === "search" ? (
         <section className="gv-stack">
@@ -1279,7 +1577,7 @@ export function CommunityHub({
             <div>
               <h2>Top game cộng đồng</h2>
               <p className="gv-muted">
-                Chọn bất kỳ game nào để xem cấu hình Steam, FPS thực tế của người chơi thật và đánh giá chi tiết.
+                Chọn bất kỳ game nào để xem điểm số, đánh giá từ người chơi, thông tin Steam và hiệu năng FPS.
               </p>
             </div>
             <button
@@ -1300,65 +1598,82 @@ export function CommunityHub({
                 setGameQuery(query.trim());
               }}
             >
+              <Search size={15} className="gv-topgames-search-icon" />
               <input
                 maxLength={80}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Tìm tên game trong cộng đồng..."
+                aria-label="Tìm tên game trong cộng đồng"
               />
-              <button type="submit" className="gv-primary" disabled={loading}>
-                <Search size={15} />
-                Tìm
-              </button>
               {gameQuery && (
                 <button
                   type="button"
+                  className="gv-topgames-clear"
+                  aria-label="Xóa từ khóa tìm kiếm"
                   onClick={() => {
                     setQuery("");
                     setGameQuery("");
                   }}
                 >
-                  Xóa
+                  <X size={14} />
                 </button>
               )}
             </form>
 
-            <div className="gv-chip-row">
-              {[
-                ["hours", "Giờ app ghi nhận"],
-                ["score", "Điểm đánh giá cao"],
-                ["completed", "Nhiều người phá đảo"],
-                ["players", "Nhiều người chơi"],
-              ].map(([id, label]) => (
-                <button
-                  type="button"
-                  key={id}
-                  className={`gv-chip ${sort === id ? "active" : ""}`}
-                  onClick={() => setSort(id)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <div className="gv-topgames-filters">
+              <div className="gv-filter-group">
+                <span className="gv-filter-label">Sắp xếp theo</span>
+                <div className="gv-chip-row">
+                  {(
+                    [
+                      ["hours", "Giờ app ghi nhận", Clock],
+                      ["score", "Điểm đánh giá cao", Star],
+                      ["completed", "Nhiều người phá đảo", Trophy],
+                      ["players", "Nhiều người chơi", Users],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      type="button"
+                      key={id}
+                      className={`gv-chip ${sort === id ? "active" : ""}`}
+                      aria-pressed={sort === id}
+                      onClick={() => setSort(id)}
+                    >
+                      <Icon size={13} />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <div className="gv-chip-row" aria-label="Phân loại chế độ chơi">
-              {(
-                [
-                  ["all", "Tất cả"],
-                  ["offline", "Offline"],
-                  ["online", "Online"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  type="button"
-                  key={id}
-                  className={`gv-chip ${classification === id ? "active" : ""}`}
-                  aria-pressed={classification === id}
-                  onClick={() => setClassification(id)}
+              <div className="gv-filter-group">
+                <span className="gv-filter-label">Chế độ chơi</span>
+                <div
+                  className="gv-segmented"
+                  role="group"
+                  aria-label="Phân loại chế độ chơi"
                 >
-                  {label}
-                </button>
-              ))}
+                  {(
+                    [
+                      ["all", "Tất cả", null],
+                      ["offline", "Offline", WifiOff],
+                      ["online", "Online", Wifi],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      type="button"
+                      key={id}
+                      className={`gv-segment ${classification === id ? "is-active" : ""}`}
+                      aria-pressed={classification === id}
+                      onClick={() => setClassification(id)}
+                    >
+                      {Icon && <Icon size={13} />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 

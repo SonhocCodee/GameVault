@@ -9,6 +9,7 @@ import { WishlistModal } from './components/WishlistModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { AdminCoversModal } from './components/AdminCoversModal.js';
 import { FirstRunSetupModal } from './components/FirstRunSetupModal.js';
+import { setupFpsCapture } from './fps-setup.js';
 import { CommunityView } from './components/CommunityView.js';
 import { AddGameDetailsModal, type PendingAddGame } from './components/AddGameDetailsModal.js';
 import { AddGameModal } from './components/AddGameModal.js';
@@ -229,6 +230,8 @@ export default function App() {
     screenshotEnabled: true,
     screenshotHotkey: 'F6',
     appStartupEnabled: true,
+    fpsAutoCaptureEnabled: true,
+    fpsAutoShareEnabled: true,
   });
 
   const refreshOnboardingState = useCallback(async () => {
@@ -254,6 +257,8 @@ export default function App() {
             screenshotEnabled: s.screenshotEnabled !== undefined ? s.screenshotEnabled : true,
             screenshotHotkey: s.screenshotHotkey || 'F6',
             appStartupEnabled: s.appStartupEnabled !== undefined ? s.appStartupEnabled : false,
+            fpsAutoCaptureEnabled: s.fpsAutoCaptureEnabled !== undefined ? s.fpsAutoCaptureEnabled : true,
+            fpsAutoShareEnabled: s.fpsAutoShareEnabled !== undefined ? s.fpsAutoShareEnabled : true,
           });
           setFirstRunOpen(true);
         } else {
@@ -300,6 +305,7 @@ export default function App() {
 
   const handleFirstRunComplete = async () => {
     if (!window.electronAPI?.saveSettings) return;
+    const fpsAutoCaptureEnabled = firstRunPaths.fpsAutoCaptureEnabled;
     await window.electronAPI.saveSettings({
       mediaBaseDir: firstRunPaths.mediaBaseDir.trim(),
       screenshotsDir: firstRunPaths.screenshotsDir.trim(),
@@ -308,10 +314,33 @@ export default function App() {
       screenshotEnabled: firstRunPaths.screenshotEnabled,
       screenshotHotkey: firstRunPaths.screenshotHotkey,
       appStartupEnabled: firstRunPaths.appStartupEnabled,
+      fpsAutoCaptureEnabled,
+      fpsAutoShareEnabled: fpsAutoCaptureEnabled && firstRunPaths.fpsAutoShareEnabled,
       setupCompleted: true,
     });
+
+    let fpsSetupOk = false;
+    if (fpsAutoCaptureEnabled) {
+      try {
+        const result = await setupFpsCapture();
+        fpsSetupOk = result.ok;
+        if (!result.ok) console.warn('[fps] First-run setup did not enable capture:', result.error);
+      } catch (error) {
+        console.warn('[fps] First-run setup failed:', error);
+      }
+    }
+
     setFirstRunOpen(false);
     fetchGames();
+    if (fpsAutoCaptureEnabled) {
+      showToast(
+        fpsSetupOk
+          ? firstRunPaths.fpsAutoShareEnabled
+            ? 'Đã bật đo FPS tự động. Kết quả hợp lệ sẽ được chia sẻ lên Cộng đồng.'
+            : 'Đã bật đo FPS tự động. Kết quả được lưu trên máy này.'
+          : 'Thiết lập xong; đo FPS chưa bật. Bạn có thể thử lại trong Cài đặt → Hiệu năng & Phần cứng.',
+      );
+    }
   };
 
   // Debounced external Steam search under the library grid while typing.
@@ -1176,10 +1205,14 @@ export default function App() {
           screenshotEnabled={firstRunPaths.screenshotEnabled}
           screenshotHotkey={firstRunPaths.screenshotHotkey}
           appStartupEnabled={firstRunPaths.appStartupEnabled}
+          fpsAutoCaptureEnabled={firstRunPaths.fpsAutoCaptureEnabled}
+          fpsAutoShareEnabled={firstRunPaths.fpsAutoShareEnabled}
           onHddModeChange={(enabled) => setFirstRunPaths((p) => ({ ...p, hddMode: enabled }))}
           onScreenshotEnabledChange={(enabled) => setFirstRunPaths((p) => ({ ...p, screenshotEnabled: enabled }))}
           onScreenshotHotkeyChange={(hotkey) => setFirstRunPaths((p) => ({ ...p, screenshotHotkey: hotkey }))}
           onAppStartupChange={(enabled) => setFirstRunPaths((p) => ({ ...p, appStartupEnabled: enabled }))}
+          onFpsAutoCaptureChange={(enabled) => setFirstRunPaths((p) => ({ ...p, fpsAutoCaptureEnabled: enabled }))}
+          onFpsAutoShareChange={(enabled) => setFirstRunPaths((p) => ({ ...p, fpsAutoShareEnabled: enabled }))}
           onFieldChange={(field, value) => {
             if (field === 'media') setFirstRunPaths((p) => ({ ...p, mediaBaseDir: value }));
             else if (field === 'screenshots') setFirstRunPaths((p) => ({ ...p, screenshotsDir: value }));

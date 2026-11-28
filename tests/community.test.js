@@ -704,7 +704,7 @@ test("reports are admin-only and hidden content is unavailable", async () => {
   );
   assert.equal((await f.call(`/posts/${id}`)).status, 404);
 });
-test("completed performance reports require actual context and reject non-finite or invalid values", async () => {
+test("performance reports accept played sessions and preserve unknown graphics context", async () => {
   const f = await fixture();
   assert.equal(
     (
@@ -750,6 +750,32 @@ test("completed performance reports require actual context and reject non-finite
   assert.equal(report.graphics.height, 1080);
   assert.equal(report.source, "presentmon");
   assert.ok(!("email" in report));
+  assert.equal(
+    (await f.call(
+      "/games/814380/performance",
+      "POST",
+      {
+        ...performance,
+        completionStatus: "played",
+        graphics: {
+          ...performance.graphics,
+          width: null,
+          height: null,
+          preset: "",
+          source: "unknown",
+        },
+      },
+      "alice",
+    )).status,
+    200,
+  );
+  const automaticReport = JSON.parse(
+    f.d1.sqlite.prepare("SELECT data_json FROM community_performance WHERE uid='alice' AND game_key='814380'").get().data_json,
+  );
+  assert.equal(automaticReport.completionStatus, "played");
+  assert.equal(automaticReport.graphics.width, null);
+  assert.equal(automaticReport.graphics.preset, "");
+  assert.equal(automaticReport.graphics.source, "unknown");
   assert.equal(
     (await (await f.call("/games/814380/performance?width=2560")).json()).items
       .length,

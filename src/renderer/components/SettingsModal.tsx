@@ -37,6 +37,7 @@ import type {
   GoogleDriveDesktopStatus,
   DriveStorageQuota,
 } from '../../shared/types.js';
+import { setupFpsCapture } from '../fps-setup.js';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -111,6 +112,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
   const [appStartupEnabled, setAppStartupEnabled] = useState<boolean>(false);
   const [playtimeWatchEnabled, setPlaytimeWatchEnabled] = useState<boolean>(true);
+  const [fpsAutoCaptureEnabled, setFpsAutoCaptureEnabled] = useState<boolean>(true);
+  const [fpsAutoShareEnabled, setFpsAutoShareEnabled] = useState<boolean>(false);
   const [autoEnrichCovers, setAutoEnrichCovers] = useState<boolean>(true);
   const [googleApiKey, setGoogleApiKey] = useState<string>('');
   const [googleCseId, setGoogleCseId] = useState<string>('');
@@ -150,6 +153,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setCloseToTray(data.closeToTray);
         setAppStartupEnabled(data.appStartupEnabled);
         setPlaytimeWatchEnabled(data.playtimeWatchEnabled);
+        setFpsAutoCaptureEnabled(data.fpsAutoCaptureEnabled);
+        setFpsAutoShareEnabled(data.fpsAutoShareEnabled);
         setAutoEnrichCovers(data.autoEnrichCovers);
         setGoogleApiKey(data.googleApiKey || '');
         setGoogleCseId(data.googleCseId || '');
@@ -176,24 +181,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // One-time setup: tải PresentMon nếu thiếu (máy NVIDIA) + tạo Scheduled Task (1 UAC)
   const handleSetupFps = async () => {
-    if (!window.electronAPI?.setupFpsElevation) return;
+    if (!window.electronAPI?.setupFpsElevation || !window.electronAPI.saveSettings) return;
     setSettingUpFps(true);
     try {
-      // Máy chưa có PresentMon (NVIDIA...) → tải bản chính thức trước
-      if (!fpsStatus?.presentMonFound && window.electronAPI?.downloadPresentMon) {
-        setStatusMsg({ type: 'success', text: 'Đang tải PresentMon chính thức từ GitHub...' });
-        const pmPath = await window.electronAPI.downloadPresentMon();
-        if (!pmPath) {
-          setStatusMsg({
-            type: 'error',
-            text: 'Không thể tải PresentMon (kiểm tra kết nối mạng). Bạn vẫn có thể chép PresentMon.exe thủ công.',
-          });
-          return;
-        }
-      }
-
-      const result = await window.electronAPI.setupFpsElevation();
+      const result = await setupFpsCapture();
       if (result.ok) {
+        setFpsAutoCaptureEnabled(true);
+        const updated = await window.electronAPI.saveSettings({ fpsAutoCaptureEnabled: true });
+        setSettings(updated);
         setStatusMsg({
           type: 'success',
           text: 'Đã bật đo FPS! Từ giờ mỗi phiên chơi game sẽ được PresentMon tự động đo FPS (không cần xác nhận thêm).',
@@ -332,6 +327,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           closeToTray,
           appStartupEnabled,
           playtimeWatchEnabled,
+          fpsAutoCaptureEnabled,
+          fpsAutoShareEnabled: fpsAutoCaptureEnabled && fpsAutoShareEnabled,
           autoEnrichCovers,
           googleApiKey: googleApiKey.trim(),
           googleCseId: googleCseId.trim(),
@@ -1544,17 +1541,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <span>Đo FPS tự động bằng PresentMon</span>
                             <span
                               className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${
-                                fpsStatus?.ready
+                                fpsStatus?.ready && fpsAutoCaptureEnabled
                                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
                                   : 'bg-zinc-700/40 text-zinc-400 border-zinc-600/30'
                               }`}
                             >
-                              {fpsStatus?.ready ? 'SẴN SÀNG' : 'CHƯA BẬT'}
+                              {fpsStatus?.ready && fpsAutoCaptureEnabled
+                                ? 'SẴN SÀNG'
+                                : fpsStatus?.ready
+                                  ? 'ĐANG TẮT'
+                                  : 'CHƯA BẬT'}
                             </span>
                           </span>
                           <p className="mt-1.5 text-[11px] text-[#8e95a5] leading-relaxed">
-                            Mỗi phiên chơi game sẽ được đo FPS trung bình + 1% low để làm dữ liệu cho bảng xếp hạng
-                            hiệu năng. PresentMon tìm thấy: <span className="font-mono text-[#f1f3f7]">{fpsStatus?.presentMonFound ? '✓' : '✗'}</span>
+                            Mỗi phiên được lưu FPS trung bình, 1% low và cấu hình nhận diện được. PresentMon tìm thấy: <span className="font-mono text-[#f1f3f7]">{fpsStatus?.presentMonFound ? '✓' : '✗'}</span>
                             {' · '}Scheduled Task: <span className="font-mono text-[#f1f3f7]">{fpsStatus?.taskInstalled ? '✓' : '✗'}</span>
                           </p>
                           {!fpsStatus?.ready && (
@@ -1567,7 +1567,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           )}
                         </div>
 
-                        {!fpsStatus?.ready && (
+                        {(!fpsStatus?.ready || !fpsAutoCaptureEnabled) && (
                           <button
                             onClick={handleSetupFps}
                             disabled={settingUpFps}
@@ -1578,6 +1578,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </button>
                         )}
                       </div>
+                    </div>
+
+                    <div className="rounded-xl border border-[#2a2e3d] bg-[#161822] p-4 space-y-3">
+                      <label className="flex items-start gap-3 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={fpsAutoCaptureEnabled}
+                          onChange={(e) => {
+                            setFpsAutoCaptureEnabled(e.target.checked);
+                            if (!e.target.checked) setFpsAutoShareEnabled(false);
+                          }}
+                          className="mt-0.5 accent-emerald-500"
+                        />
+                        <span>
+                          <strong className="text-white">Tự động ghi FPS và cấu hình khi chơi</strong>
+                          <span className="mt-1 block text-[11px] text-[#8e95a5]">
+                            Lưu số đo theo phiên trên máy này. Nếu chưa sẵn sàng, bấm “Bật đo FPS” phía trên.
+                          </span>
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-3 border-t border-[#2a2e3d]/70 pt-3 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={fpsAutoShareEnabled}
+                          disabled={!fpsAutoCaptureEnabled}
+                          onChange={(e) => setFpsAutoShareEnabled(e.target.checked)}
+                          className="mt-0.5 accent-emerald-500 disabled:opacity-40"
+                        />
+                        <span>
+                          <strong className="text-white">Tự chia sẻ báo cáo lên Cộng đồng</strong>
+                          <span className="mt-1 block text-[11px] text-[#8e95a5]">
+                            Công khai tên hồ sơ, FPS, CPU/GPU/RAM và cấu hình đồ họa nhận diện được sau phiên đo hợp lệ.
+                          </span>
+                        </span>
+                      </label>
                     </div>
 
                     {/* Hardware snapshot */}

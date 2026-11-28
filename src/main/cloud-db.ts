@@ -13,6 +13,7 @@ import {
   recalculatePlaytime,
 } from './db.ts';
 import { normalizeForMatch } from './media.ts';
+import { canonicalNonSteamGameKeyFromTitle } from '../shared/game-identity.ts';
 import { autoEnrichAllGameCovers } from './covers.ts';
 import { NON_GAME_TITLE_REGEX } from './tracker.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
@@ -150,7 +151,7 @@ export async function communityUploadImage(bytes: ArrayBuffer, mime: string): Pr
 
 export function computeGameKey(game: Game): string {
   if (game.steam_id && Number(game.steam_id) > 0) return String(Number(game.steam_id));
-  return `t_${normalizeForMatch(game.title)}`;
+  return canonicalNonSteamGameKeyFromTitle(game.title);
 }
 
 export interface CloudCoverResult {

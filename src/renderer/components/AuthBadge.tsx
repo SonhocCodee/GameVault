@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { LogIn, LogOut, Cpu, ChevronDown, Loader2, User, ShieldCheck, Globe, Settings } from 'lucide-react';
 import { type AuthStatus, type HardwareProfile, isAdminEmail } from '../../shared/types.js';
 
@@ -208,9 +209,9 @@ export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged, onOpenAdminModa
       )}
 
       {/* Hardware profile modal */}
-      {hwModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-sm rounded-2xl border border-[#2a2e3d] bg-[#161821] p-6 shadow-2xl space-y-4">
+        {hwModalOpen && createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-[#2a2e3d] bg-[#161821] p-6 shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Cpu className="h-5 w-5 text-sky-400" />
               <span>Cấu hình máy của tôi</span>
@@ -265,8 +266,9 @@ export const AuthBadge: React.FC<AuthBadgeProps> = ({ onChanged, onOpenAdminModa
               </button>
             </div>
           </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
 
       {/* Login error toast */}
       {error && !hwModalOpen && (

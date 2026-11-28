@@ -1248,7 +1248,36 @@ app.whenReady().then(() => {
       .catch(() => {});
   };
   tracker.onSessionClosed = (result) => {
-    fpsMonitor.finishCapture(result).catch(() => {});
+    void fpsMonitor.finishCapture(result).then(async () => {
+      if (
+        result.discarded ||
+        !result.gameId ||
+        !result.sessionId ||
+        !loadAppSettings().fpsAutoShareEnabled
+      ) {
+        return;
+      }
+      try {
+        const preview = getPerformancePreview(result.gameId);
+        const report = preview.reports.find((entry) => entry.sessionId === result.sessionId);
+        if (!report || !report.snapshotAvailable || !report.cpu || !report.gpu || report.ramGb <= 0) {
+          return;
+        }
+        const communityReport = {
+          ...report,
+          sessionId: undefined,
+          snapshotAvailable: undefined,
+        };
+        await communityRequest(
+          `/api/community/games/${encodeURIComponent(report.gameKey)}/performance`,
+          'POST',
+          communityReport,
+        );
+        console.log(`[performance] Auto-shared session ${result.sessionId} for ${report.gameKey}`);
+      } catch (error) {
+        console.warn('[performance] Automatic community share failed:', error);
+      }
+    }).catch((error) => console.warn('[fps] Session finalization failed:', error));
     if (!result.discarded && result.gameId) {
       try {
         const updated = getGameById(result.gameId);

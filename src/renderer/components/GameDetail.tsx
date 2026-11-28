@@ -28,8 +28,10 @@ import {
   ChevronDown,
   Trash2,
   BookmarkCheck,
+  MessageSquareText,
   Users
 } from 'lucide-react';
+import { formatScore } from '../community/CommunityWidgets.tsx';
 import type { Game, GameStatus, MediaItem, Session } from '../../shared/types.js';
 import { formatPlaytime, getStatusMeta } from './GameCard.js';
 import { Lightbox } from './Lightbox.js';
@@ -594,6 +596,18 @@ const filteredMedia = useMemo(() => {
                 </button>
               )}
 
+              {/* Action: Open Community Reviews & Details */}
+              {onOpenCommunity && (
+                <button
+                  onClick={() => onOpenCommunity(gameToPublic(game))}
+                  className="flex items-center gap-2 rounded-xl border border-sky-400/50 bg-sky-500/15 px-4 py-3 text-xs font-bold text-sky-200 shadow transition-all hover:bg-sky-500 hover:text-white hover:shadow-[0_0_15px_rgba(56,189,248,0.35)]"
+                  title="Mở trang điểm số, đánh giá và thông tin game trên Cộng đồng"
+                >
+                  <MessageSquareText className="h-4 w-4 text-sky-300" />
+                  <span>Xem điểm &amp; Đánh giá cộng đồng</span>
+                </button>
+              )}
+
               {/* Action: Delete Game */}
               <button
                 onClick={handleDeleteGame}
@@ -677,7 +691,7 @@ const filteredMedia = useMemo(() => {
                 <span className="text-xs font-semibold text-[#8e95a5]">Điểm cá nhân:</span>
                 <div className="flex items-center gap-2">
                   <span className={`text-base font-black ${rating !== null && rating > 0 ? 'text-amber-400' : 'text-[#8e95a5]'}`}>
-                    {rating !== null && rating > 0 ? `${rating.toFixed(1)} / 10` : 'Chưa chấm'}
+                    {rating !== null && rating > 0 ? `${formatScore(rating)} / 10` : 'Chưa chấm'}
                   </span>
                   {rating !== null && rating > 0 && (
                     <button
@@ -731,11 +745,11 @@ const filteredMedia = useMemo(() => {
               {onOpenCommunity && (
                 <button
                   onClick={() => onOpenCommunity(gameToPublic(game))}
-                  className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-400/40 bg-sky-600/10 px-3 py-2 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-600 hover:text-white"
-                  title="Thông tin game, Top người chơi, giờ chơi và cấu hình của người đã hoàn thành"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-sky-400/50 bg-sky-500/15 px-3 py-2.5 text-xs font-bold text-sky-200 transition hover:bg-sky-500 hover:text-white"
+                  title="Mở trang đánh giá, điểm số, cấu hình và top người chơi trên tab Cộng đồng"
                 >
-                  <Users className="h-3.5 w-3.5" />
-                  Top người chơi & cấu hình
+                  <MessageSquareText className="h-4 w-4" />
+                  Xem đánh giá &amp; Điểm cộng đồng
                 </button>
               )}
             </div>

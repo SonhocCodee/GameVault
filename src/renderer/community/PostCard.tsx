@@ -32,6 +32,7 @@ import {
 import {
   Avatar,
   ConfirmModal,
+  formatScore,
   ImageLightbox,
   KindBadge,
   ReportModal,
@@ -153,7 +154,7 @@ export function PostCard({
               {post.kind === "review" && post.reviewScore != null && (
                 <span className={`gv-score-pill ${scoreTierClass(post.reviewScore)}`}>
                   <Star size={12} />
-                  {post.reviewScore}/10
+                  {formatScore(post.reviewScore)}/10
                 </span>
               )}
               {post.reviewDropped && (

@@ -1,7 +1,7 @@
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getDb, getDbDir, updateSessionFps } from './db.ts';
+import { getDb, getDbDir, getSetting, updateSessionFps } from './db.ts';
 import { findPresentMon, downloadPresentMon, getManagedPresentMonPath } from './presentmon.ts';
 import type { FpsStatus } from '../shared/types.js';
 
@@ -239,6 +239,7 @@ export class FpsMonitor {
     if (process.platform !== 'win32' || !target?.sessionId || !target.exeName) {
       return false;
     }
+    if (getSetting('fps_auto_capture_enabled') === 'false') return false;
     if (this.finishingSessions.has(target.sessionId)) {
       return false; // previous capture of this session is still being finalized
     }

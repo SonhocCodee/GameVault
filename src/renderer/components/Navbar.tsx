@@ -8,7 +8,6 @@ import {
   Trophy,
   Clock,
   Library,
-  Activity,
   X,
   ArrowLeft,
   BookmarkPlus,
@@ -449,7 +448,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <button
                     key={tab.id}
                     onClick={() => onStatusFilterChange(tab.id)}
-                    className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+                    className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-semibold transition-all ${
                       isActive
                         ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
                         : 'text-[#8e95a5] hover:bg-[#161821] hover:text-[#f1f3f7]'
@@ -462,29 +461,25 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Right Section: Sort dropdown & Live Stats */}
-            <div className="flex items-center gap-3 xl:gap-4 text-xs text-[#8e95a5] shrink-0">
+            <div className="flex items-center gap-2.5 text-xs text-[#8e95a5] shrink-0">
               {/* Active Process / Tracker Status */}
-              <div className="hidden xl:flex items-center gap-2 border-r border-[#2a2e3d] pr-4 shrink-0">
-                {trackerStatus?.activeGameTitle ? (
-                  <div
-                    className="flex items-center gap-1.5 text-emerald-400 font-medium whitespace-nowrap"
-                    title={`Đang chơi: ${trackerStatus.activeGameTitle}`}
-                  >
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                    </span>
-                    <span className="truncate max-w-[130px] 2xl:max-w-[200px]">
-                      Đang chơi: <strong className="text-white font-semibold">{trackerStatus.activeGameTitle}</strong>
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-[#8e95a5] whitespace-nowrap">
-                    <Activity className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
-                    <span>Tracker: Sẵn sàng</span>
-                  </div>
-                )}
-              </div>
+              {trackerStatus?.activeGameTitle && (
+                <div
+                  className="hidden xl:flex items-center gap-1.5 border-r border-[#2a2e3d] pr-3 shrink-0 whitespace-nowrap font-medium text-emerald-400"
+                  title={`Đang chơi: ${trackerStatus.activeGameTitle}`}
+                >
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                  </span>
+                  <span className="truncate max-w-[120px] 2xl:max-w-[180px]">
+                    Đang chơi:{' '}
+                    <strong className="text-white font-semibold">
+                      {trackerStatus.activeGameTitle}
+                    </strong>
+                  </span>
+                </div>
+              )}
 
               {/* View Mode Switcher: Grid vs Timeline Tree */}
               {onLibraryLayoutChange && (
@@ -521,21 +516,26 @@ export const Navbar: React.FC<NavbarProps> = ({
               {/* Sorter */}
               <div className="flex items-center gap-2 shrink-0">
                 <SlidersHorizontal className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
-                <select
-                  value={sortBy}
-                  onChange={(e) => onSortChange(e.target.value)}
-                  className="cursor-pointer rounded-md border border-[#2a2e3d] bg-[#161821] px-2.5 py-1 text-xs text-[#f1f3f7] outline-none transition-colors hover:border-[#ff2a44] focus:border-[#ff2a44] shrink-0 whitespace-nowrap"
-                >
-                  {SORT_OPTIONS.map((opt) => (
-                    <option key={opt.id} value={opt.id} className="bg-[#161821] text-[#f1f3f7]">
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative shrink-0">
+                  <select
+                    value={sortBy}
+                    onChange={(e) => onSortChange(e.target.value)}
+                    className="cursor-pointer appearance-none rounded-md border border-[#2a2e3d] bg-[#161821] py-1 pl-2.5 pr-7 text-xs text-[#f1f3f7] outline-none transition-colors hover:border-[#ff2a44] focus:border-[#ff2a44] shrink-0 whitespace-nowrap"
+                  >
+                    {SORT_OPTIONS.map((opt) => (
+                      <option key={opt.id} value={opt.id} className="bg-[#161821] text-[#f1f3f7]">
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#8e95a5]"
+                  />
+                </div>
               </div>
 
               {/* Library Stats */}
-              <div className="hidden lg:flex items-center gap-3.5 pl-2 font-medium shrink-0 whitespace-nowrap border-l border-[#2a2e3d]/60">
+              <div className="hidden lg:flex items-center gap-3 pl-2.5 font-medium shrink-0 whitespace-nowrap border-l border-[#2a2e3d]/60">
                 <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap" title={`Tổng số trò chơi: ${totalGames} game`}>
                   <Library className="h-3.5 w-3.5 text-[#8e95a5] shrink-0" />
                   <span className="text-[#f1f3f7] font-bold">{totalGames}</span>

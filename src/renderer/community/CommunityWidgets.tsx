@@ -147,6 +147,11 @@ export function getMetacriticVerdict(score: number | null | undefined, count = 0
   return "Đa số tiêu cực";
 }
 
+export function formatScore(score: number): string {
+  const rounded = Math.round(score * 10) / 10;
+  return rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1);
+}
+
 export function scoreTierClass(score: number): string {
   if (score >= 7.5) return "gv-score-high";
   if (score >= 5) return "gv-score-mid";

@@ -14,7 +14,7 @@ export const EMPTY_GRAPHICS: GraphicsContext = {
   upscaling: "",
   frameGeneration: "",
   rayTracing: "",
-  source: "manual",
+  source: "unknown",
 };
 export function ensurePerformanceSchema() {
   getDb().exec(`CREATE TABLE IF NOT EXISTS performance_session_context (
@@ -48,7 +48,12 @@ export function validateGraphicsContext(
     upscaling: bounded(input.upscaling),
     frameGeneration: bounded(input.frameGeneration),
     rayTracing: bounded(input.rayTracing),
-    source: input.source === "config" ? "config" : "manual",
+    source:
+      input.source === "config"
+        ? "config"
+        : input.source === "unknown"
+          ? "unknown"
+          : "manual",
   };
 }
 export function getGameGraphics(gameId: number): GraphicsContext {
@@ -56,20 +61,22 @@ export function getGameGraphics(gameId: number): GraphicsContext {
   const row = getDb()
     .prepare("SELECT value FROM app_settings WHERE key=?")
     .get(`graphics_context_${gameId}`) as any;
+  let saved: GraphicsContext | null = null;
   try {
-    if (row?.value) return validateGraphicsContext(JSON.parse(row.value));
+    if (row?.value) saved = validateGraphicsContext(JSON.parse(row.value));
   } catch {}
   const config = detectGameConfigs(gameId).find(
     (c) => c.graphics.width && c.graphics.height,
   );
-  return config
-    ? {
-        ...EMPTY_GRAPHICS,
-        ...config.graphics,
-      }
-    : {
-        ...EMPTY_GRAPHICS,
-      };
+  if (config) {
+    return validateGraphicsContext({
+      ...EMPTY_GRAPHICS,
+      ...saved,
+      ...config.graphics,
+      source: "config",
+    });
+  }
+  return saved || { ...EMPTY_GRAPHICS };
 }
 export function saveGameGraphics(
   gameId: number,
@@ -156,7 +163,7 @@ export function getPerformancePreview(gameId: number): PerformancePreview {
       title: game.title,
       steamId: game.steam_id && game.steam_id > 0 ? game.steam_id : null,
       coverUrl: game.cover_url,
-      completionStatus: "completed" as const,
+      completionStatus: (game.status === "completed" ? "completed" : "played") as "completed" | "played",
       cpu: hardware?.cpu_name || "",
       gpu: hardware?.gpus?.map((g) => g.name).join(" / ") || "",
       ramGb: hardware?.ram_gb || 0,

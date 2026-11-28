@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Star, Clock, Trophy, PlayCircle, PauseCircle, XCircle, BookmarkCheck, Gamepad2, FolderOpen, Trash2 } from 'lucide-react';
 import type { Game, GameStatus } from '../../shared/types.js';
+import { formatScore } from '../community/CommunityWidgets.tsx';
 
 export interface GameCardProps {
   game: Game;
@@ -145,7 +146,7 @@ export const GameCard: React.FC<GameCardProps> = ({ game, onSelect, onDelete, is
           {game.user_rating !== null && game.user_rating !== undefined && Number(game.user_rating) > 0 && (
             <div className="flex items-center gap-0.5 rounded-full border border-amber-400/60 bg-[#0e1015]/95 px-1.5 py-0.5 text-[10px] font-black text-amber-300 shadow-md shadow-black/80 backdrop-blur-md whitespace-nowrap shrink-0">
               <Star className="h-2.5 w-2.5 fill-amber-300 text-amber-300 shrink-0" />
-              <span className="whitespace-nowrap">{Number(game.user_rating).toFixed(1)}</span>
+              <span className="whitespace-nowrap">{formatScore(Number(game.user_rating))}</span>
             </div>
           )}
         </div>

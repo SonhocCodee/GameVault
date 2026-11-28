@@ -31,6 +31,7 @@ export interface TimelineViewProps {
   trackerStatus?: TrackerStatus | null;
   searchQuery?: string;
   statusFilter?: string;
+  publicProfileMode?: boolean;
 }
 
 export interface TimelineGameItem {
@@ -74,11 +75,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   trackerStatus,
   searchQuery = '',
   statusFilter = 'all',
+  publicProfileMode = false,
 }) => {
   const [collapsedYears, setCollapsedYears] = useState<Record<number, boolean>>({});
 
   // Tree View Tab: 'completed' (Đã phá đảo - chính) vs 'all' (Tất cả game)
-  const [treeTab, setTreeTab] = useState<TimelineTreeTab>(() => {
+  const [treeTabState, setTreeTab] = useState<TimelineTreeTab>(() => {
     try {
       const saved = localStorage.getItem('gv_tree_view_tab');
       if (saved === 'all' || saved === 'completed') return saved;
@@ -87,6 +89,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     } catch {}
     return 'completed';
   });
+  const treeTab: TimelineTreeTab = publicProfileMode ? 'completed' : treeTabState;
 
   const completedCount = useMemo(() => {
     return games.filter((g) => g.status === 'completed').length;
@@ -400,7 +403,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     item: TimelineGameItem,
     monthLabel: string
   ) => {
-    if (!previewEnabled) return;
+    if (publicProfileMode || !previewEnabled) return;
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
       hideTimeoutRef.current = null;
@@ -479,88 +482,92 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
         {/* Actions & Jump Bar */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Tree View 2-Tab Switcher: Đã phá đảo (chính) | Tất cả game */}
-          <div className="flex items-center rounded-xl border border-[#2a2e3d] bg-[#12141c] p-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => {
-                setTreeTab('completed');
-                try {
-                  localStorage.setItem('gv_tree_view_tab', 'completed');
-                } catch {}
-              }}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
-                treeTab === 'completed'
-                  ? 'bg-gradient-to-r from-[#ff2a44] to-[#c7001e] text-white shadow-md shadow-[#ff2a44]/30'
-                  : 'text-[#8e95a5] hover:text-white'
-              }`}
-              title="Chỉ hiển thị các tựa game đã phá đảo theo cột mốc tháng/năm hoàn thành (mỗi game xuất hiện đúng 1 lần)"
-            >
-              <Trophy className="h-3.5 w-3.5 text-amber-300" />
-              <span>Đã phá đảo ({completedCount})</span>
-            </button>
+          {!publicProfileMode && (
+            <>
+              {/* Tree View 2-Tab Switcher: Đã phá đảo (chính) | Tất cả game */}
+              <div className="flex items-center rounded-xl border border-[#2a2e3d] bg-[#12141c] p-1 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreeTab('completed');
+                    try {
+                      localStorage.setItem('gv_tree_view_tab', 'completed');
+                    } catch {}
+                  }}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                    treeTab === 'completed'
+                      ? 'bg-gradient-to-r from-[#ff2a44] to-[#c7001e] text-white shadow-md shadow-[#ff2a44]/30'
+                      : 'text-[#8e95a5] hover:text-white'
+                  }`}
+                  title="Chỉ hiển thị các tựa game đã phá đảo theo cột mốc tháng/năm hoàn thành (mỗi game xuất hiện đúng 1 lần)"
+                >
+                  <Trophy className="h-3.5 w-3.5 text-amber-300" />
+                  <span>Đã phá đảo ({completedCount})</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setTreeTab('all');
-                try {
-                  localStorage.setItem('gv_tree_view_tab', 'all');
-                } catch {}
-              }}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
-                treeTab === 'all'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30'
-                  : 'text-[#8e95a5] hover:text-white'
-              }`}
-              title="Hiển thị tất cả trò chơi trong thư viện (mỗi game xuất hiện đúng 1 lần)"
-            >
-              <Gamepad2 className="h-3.5 w-3.5" />
-              <span>Tất cả game ({totalCount})</span>
-            </button>
-          </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreeTab('all');
+                    try {
+                      localStorage.setItem('gv_tree_view_tab', 'all');
+                    } catch {}
+                  }}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                    treeTab === 'all'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30'
+                      : 'text-[#8e95a5] hover:text-white'
+                  }`}
+                  title="Hiển thị tất cả trò chơi trong thư viện (mỗi game xuất hiện đúng 1 lần)"
+                >
+                  <Gamepad2 className="h-3.5 w-3.5" />
+                  <span>Tất cả game ({totalCount})</span>
+                </button>
+              </div>
 
-          {/* Quick Preview Toggle Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const next = !previewEnabled;
-              setPreviewEnabled(next);
-              try {
-                localStorage.setItem('gv_timeline_preview_enabled', String(next));
-              } catch {}
-              if (!next) {
-                setHoveredData(null);
-                setIsPinned(false);
-              }
-            }}
-            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all shadow-sm ${
-              previewEnabled
-                ? 'border-[#ff2a44]/50 bg-[#ff2a44]/15 text-[#ff2a44] hover:bg-[#ff2a44]/25'
-                : 'border-[#2a2e3d] bg-[#12141c] text-[#8e95a5] hover:text-white hover:border-[#3a4055]'
-            }`}
-            title={
-              previewEnabled
-                ? 'Đang bật: Xem nhanh thông tin & ảnh F6 ở góc màn hình khi rê chuột (không che thẻ game)'
-                : 'Đang tắt: Nhấp để bật lại tính năng xem nhanh khi rê chuột'
-            }
-          >
-            {previewEnabled ? (
-              <>
-                <Eye className="h-3.5 w-3.5" />
-                <span>Xem nhanh: Bật</span>
-              </>
-            ) : (
-              <>
-                <EyeOff className="h-3.5 w-3.5" />
-                <span>Xem nhanh: Tắt</span>
-              </>
-            )}
-          </button>
+              {/* Quick Preview Toggle Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !previewEnabled;
+                  setPreviewEnabled(next);
+                  try {
+                    localStorage.setItem('gv_timeline_preview_enabled', String(next));
+                  } catch {}
+                  if (!next) {
+                    setHoveredData(null);
+                    setIsPinned(false);
+                  }
+                }}
+                className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all shadow-sm ${
+                  previewEnabled
+                    ? 'border-[#ff2a44]/50 bg-[#ff2a44]/15 text-[#ff2a44] hover:bg-[#ff2a44]/25'
+                    : 'border-[#2a2e3d] bg-[#12141c] text-[#8e95a5] hover:text-white hover:border-[#3a4055]'
+                }`}
+                title={
+                  previewEnabled
+                    ? 'Đang bật: Xem nhanh thông tin & ảnh F6 ở góc màn hình khi rê chuột (không che thẻ game)'
+                    : 'Đang tắt: Nhấp để bật lại tính năng xem nhanh khi rê chuột'
+                }
+              >
+                {previewEnabled ? (
+                  <>
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Xem nhanh: Bật</span>
+                  </>
+                ) : (
+                  <>
+                    <EyeOff className="h-3.5 w-3.5" />
+                    <span>Xem nhanh: Tắt</span>
+                  </>
+                )}
+              </button>
+            </>
+          )}
 
           {/* Quick Year Jump Bar */}
           {timelineData.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 border-l border-[#2a2e3d] pl-3">
+            <div className={`flex flex-wrap items-center gap-1.5 ${publicProfileMode ? '' : 'border-l border-[#2a2e3d] pl-3'}`}>
               <span className="text-[11px] font-semibold text-[#8e95a5] mr-1">Năm:</span>
               {timelineData.map((yg) => (
                 <a
@@ -805,7 +812,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       )}
 
       {/* Floating Smart Corner Preview HUD (Docked at opposite bottom corner so it NEVER blocks adjacent cards) */}
-      {previewEnabled && hoveredData && (
+      {!publicProfileMode && previewEnabled && hoveredData && (
         <div
           onMouseEnter={() => {
             if (hideTimeoutRef.current) {

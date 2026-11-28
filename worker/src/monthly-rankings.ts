@@ -12,6 +12,11 @@ import {
 import { communityAvatar, CommunityError, publicUrl, safeName, visibleTo } from "./community-common.ts";
 import type { Env } from "./types.ts";
 import { IDLE_APP_KEYS, IDLE_APP_TITLES } from "./ranking-eligibility.ts";
+import {
+  canonicalNonSteamGameKey,
+  canonicalNonSteamGameKeySql,
+  canonicalNonSteamGameTitle,
+} from "../../src/shared/game-identity.ts";
 
 type GameData = {
   uid: string; gameKey: string; title: string; steamId: number | null;
@@ -51,9 +56,14 @@ export function mergedMinutes(intervals: Interval[]): number {
   return Math.round((total + end - start) / 60) / 1000;
 }
 
-const canonical = (key: string) => `CASE WHEN ul.steam_id>0 THEN CAST(ul.steam_id AS TEXT)
-  WHEN alias.steam_id>0 THEN CAST(alias.steam_id AS TEXT)
-  WHEN ${key} GLOB 's_[0-9]*' THEN SUBSTR(${key},3) ELSE ${key} END`;
+const canonical = (
+  key: string,
+  userLibraryAlias = "ul",
+  gameCoverAlias = "alias",
+) => `CASE WHEN ${userLibraryAlias}.steam_id>0 THEN CAST(${userLibraryAlias}.steam_id AS TEXT)
+  WHEN ${gameCoverAlias}.steam_id>0 THEN CAST(${gameCoverAlias}.steam_id AS TEXT)
+  WHEN ${key} GLOB 's_[0-9]*' THEN SUBSTR(${key},3)
+  ELSE ${canonicalNonSteamGameKeySql(key)} END`;
 
 export async function getMonthlyRankings(env: Env, month: string, limit = 20, now = new Date()): Promise<MonthlyRankings> {
   const currentMonth = currentRankingMonth(now);
@@ -63,21 +73,34 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
   if (!Number.isInteger(limit) || limit < 1 || limit > 50)
     throw new CommunityError("Ranking limit must be between 1 and 50");
   const start = new Date(bounds.start).toISOString(), end = new Date(Math.min(bounds.end, now.getTime() + 1)).toISOString();
+  const libraryCanonical = canonical("l.game_key", "ul_l", "alias_l");
+  const sessionCanonical = canonical("s.game_key", "ul_s", "alias_s");
 
   const [sessions, reviews] = await Promise.all([
-    env.DB.prepare(`SELECT s.uid,l.game_key AS gameKey,l.title,l.steam_id AS steamId,
-      COALESCE(gc.cover_url,l.cover_url) AS coverUrl,gc.banner_url AS bannerUrl,
-      COALESCE(gm.classification,'unknown') AS classification,
+    env.DB.prepare(`WITH library_rows AS (
+      SELECT l.*,${libraryCanonical} AS canonicalKey,
+        ROW_NUMBER() OVER (PARTITION BY l.uid,${libraryCanonical}
+          ORDER BY CASE WHEN LOWER(l.game_key)=LOWER(${libraryCanonical}) THEN 0 ELSE 1 END,LOWER(l.title)) AS canonicalRank
+      FROM community_library l
+      LEFT JOIN user_library ul_l ON ul_l.uid=l.uid AND ul_l.game_key=l.game_key
+      LEFT JOIN game_covers alias_l ON alias_l.game_key=l.game_key
+    )
+    SELECT s.uid,l.canonicalKey AS gameKey,l.title,COALESCE(gc.steam_id,l.steam_id,aliasCover.steam_id) AS steamId,
+      COALESCE(gc.cover_url,aliasCover.cover_url,l.cover_url) AS coverUrl,
+      COALESCE(gc.banner_url,aliasCover.banner_url) AS bannerUrl,
+      COALESCE(gm.classification,gmAlias.classification,'unknown') AS classification,
       s.start_time AS startTime,s.end_time AS endTime,s.duration_minutes AS durationMinutes
       FROM user_sessions s
-      LEFT JOIN user_library ul ON ul.uid=s.uid AND ul.game_key=s.game_key
-      LEFT JOIN game_covers alias ON alias.game_key=s.game_key
-      JOIN community_library l ON l.uid=s.uid AND l.game_key=${canonical("s.game_key")}
+      LEFT JOIN user_library ul_s ON ul_s.uid=s.uid AND ul_s.game_key=s.game_key
+      LEFT JOIN game_covers alias_s ON alias_s.game_key=s.game_key
+      JOIN library_rows l ON l.uid=s.uid AND l.canonicalKey=${sessionCanonical} AND l.canonicalRank=1
       JOIN community_profiles cp ON cp.uid=s.uid
-      LEFT JOIN game_metadata gm ON gm.game_key=l.game_key
-      LEFT JOIN game_covers gc ON gc.game_key=l.game_key
+      LEFT JOIN game_metadata gm ON gm.game_key=l.canonicalKey
+      LEFT JOIN game_metadata gmAlias ON gmAlias.game_key=l.game_key
+      LEFT JOIN game_covers gc ON gc.game_key=l.canonicalKey
+      LEFT JOIN game_covers aliasCover ON aliasCover.game_key=l.game_key
       WHERE cp.share_library=1 AND cp.suspended=0 AND s.source IN ('tracker','amd_import')
-        AND s.duration_minutes>0 AND LOWER(l.game_key) NOT IN ${IDLE_APP_KEYS}
+        AND s.duration_minutes>0 AND LOWER(l.canonicalKey) NOT IN ${IDLE_APP_KEYS}
         AND LOWER(TRIM(l.title)) NOT IN ${IDLE_APP_TITLES}
         AND julianday(s.start_time)<julianday(?,'+1 day')
         AND julianday(s.start_time,'+' || s.duration_minutes || ' minutes')>julianday(?,'-1 day')`)
@@ -95,10 +118,11 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
     SELECT h.uid,h.canonical_key AS gameKey,COALESCE(gc.title,h.game_title) AS title,
       COALESCE(gc.steam_id,CASE WHEN h.canonical_key NOT GLOB '*[^0-9]*' THEN CAST(h.canonical_key AS INTEGER) END) AS steamId,
       COALESCE(gc.cover_url,h.cover_url) AS coverUrl,gc.banner_url AS bannerUrl,
-      COALESCE(gm.classification,'unknown') AS classification,h.score,h.effective_at AS effectiveAt
+      COALESCE(gm.classification,gmAlias.classification,'unknown') AS classification,h.score,h.effective_at AS effectiveAt
     FROM latest h JOIN users u ON u.uid=h.uid
     LEFT JOIN community_profiles cp ON cp.uid=h.uid
-    LEFT JOIN game_metadata gm ON gm.game_key=h.canonical_key
+      LEFT JOIN game_metadata gm ON gm.game_key=h.canonical_key
+      LEFT JOIN game_metadata gmAlias ON gmAlias.game_key=h.game_key
     LEFT JOIN game_covers gc ON gc.game_key=h.canonical_key
     WHERE h.position=1 AND h.score BETWEEN 1 AND 10
       AND COALESCE(cp.suspended,0)=0
@@ -110,7 +134,13 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
   ]);
 
   const activity = new Map<string, { game: GameData; intervals: Interval[] }>();
-  for (const row of sessions.results || []) {
+  for (const sourceRow of sessions.results || []) {
+    const gameKey = canonicalNonSteamGameKey(sourceRow.gameKey);
+    const row = {
+      ...sourceRow,
+      gameKey,
+      title: canonicalNonSteamGameTitle(gameKey, sourceRow.title),
+    };
     const interval = recordedInterval(row, now.getTime());
     if (!interval) continue;
     const clipped: Interval = [Math.max(interval[0], bounds.start), Math.min(interval[1], bounds.end)];
@@ -123,16 +153,17 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
 
   const games = new Map<string, MonthlyGameRanking & { scoreTotal: number; participants: Set<string> }>();
   const gameFor = (row: GameData) => {
-    let game = games.get(row.gameKey);
+    const gameKey = canonicalNonSteamGameKey(row.gameKey);
+    let game = games.get(gameKey);
     if (!game) {
       game = {
-        gameKey: row.gameKey, title: row.title, steamId: row.steamId,
+        gameKey, title: canonicalNonSteamGameTitle(gameKey, row.title), steamId: row.steamId,
         coverUrl: publicUrl(row.coverUrl), bannerUrl: publicUrl(row.bannerUrl),
         classification: row.classification, players: 0, totalMinutes: 0,
         averageScore: null, reviewCount: 0, rankingScore: null,
         scoreTotal: 0, participants: new Set(),
       };
-      games.set(row.gameKey, game);
+      games.set(gameKey, game);
     }
     return game;
   };
@@ -141,7 +172,13 @@ export async function getMonthlyRankings(env: Env, month: string, limit = 20, no
     game.totalMinutes += mergedMinutes(intervals);
     game.participants.add(row.uid);
   }
-  for (const row of reviews.results || []) {
+  for (const sourceRow of reviews.results || []) {
+    const gameKey = canonicalNonSteamGameKey(sourceRow.gameKey);
+    const row = {
+      ...sourceRow,
+      gameKey,
+      title: canonicalNonSteamGameTitle(gameKey, sourceRow.title),
+    };
     const timestamp = Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(row.effectiveAt) ? row.effectiveAt : `${row.effectiveAt.replace(" ", "T")}Z`);
     // A public review made this month also qualifies games without a synced session.
     if (timestamp < bounds.start && !activity.has(`${row.uid}\0${row.gameKey}`)) continue;
@@ -218,23 +255,35 @@ export async function getMonthlyPlayerRankings(
   const includeTopGames = !!options.includeTopGames;
   const start = new Date(bounds.start).toISOString();
   const end = new Date(Math.min(bounds.end, now.getTime() + 1)).toISOString();
+  const libraryCanonical = canonical("l.game_key", "ul_l", "alias_l");
+  const sessionCanonical = canonical("s.game_key", "ul_s", "alias_s");
 
   const sessions = await env.DB.prepare(`
+    WITH library_rows AS (
+      SELECT l.*,${libraryCanonical} AS canonicalKey,
+        ROW_NUMBER() OVER (PARTITION BY l.uid,${libraryCanonical}
+          ORDER BY CASE WHEN LOWER(l.game_key)=LOWER(${libraryCanonical}) THEN 0 ELSE 1 END,LOWER(l.title)) AS canonicalRank
+      FROM community_library l
+      LEFT JOIN user_library ul_l ON ul_l.uid=l.uid AND ul_l.game_key=l.game_key
+      LEFT JOIN game_covers alias_l ON alias_l.game_key=l.game_key
+    )
     SELECT s.uid, cp.nickname, cp.bio,
       COALESCE('/community/profile-presets/avatars/'||cp.avatar_preset||'.svg', u.photo_url) AS avatarUrl,
-      l.game_key AS gameKey, l.title, l.steam_id AS steamId,
-      COALESCE(gc.cover_url, l.cover_url) AS coverUrl, gc.banner_url AS bannerUrl,
+      l.canonicalKey AS gameKey, l.title, COALESCE(gc.steam_id,l.steam_id,aliasCover.steam_id) AS steamId,
+      COALESCE(gc.cover_url,aliasCover.cover_url,l.cover_url) AS coverUrl,
+      COALESCE(gc.banner_url,aliasCover.banner_url) AS bannerUrl,
       l.status, s.start_time AS startTime, s.end_time AS endTime, s.duration_minutes AS durationMinutes
     FROM user_sessions s
-    LEFT JOIN user_library ul ON ul.uid=s.uid AND ul.game_key=s.game_key
-    LEFT JOIN game_covers alias ON alias.game_key=s.game_key
-    JOIN community_library l ON l.uid=s.uid AND l.game_key=${canonical("s.game_key")}
+    LEFT JOIN user_library ul_s ON ul_s.uid=s.uid AND ul_s.game_key=s.game_key
+    LEFT JOIN game_covers alias_s ON alias_s.game_key=s.game_key
+    JOIN library_rows l ON l.uid=s.uid AND l.canonicalKey=${sessionCanonical} AND l.canonicalRank=1
     JOIN community_profiles cp ON cp.uid=s.uid
     LEFT JOIN users u ON u.uid=s.uid
-    LEFT JOIN game_covers gc ON gc.game_key=l.game_key
+    LEFT JOIN game_covers gc ON gc.game_key=l.canonicalKey
+    LEFT JOIN game_covers aliasCover ON aliasCover.game_key=l.game_key
     WHERE cp.share_library=1 AND cp.suspended=0 AND ${visibleTo("cp")}
       AND s.source IN ('tracker','amd_import') AND s.duration_minutes>0
-      AND LOWER(l.game_key) NOT IN ${IDLE_APP_KEYS}
+      AND LOWER(l.canonicalKey) NOT IN ${IDLE_APP_KEYS}
       AND LOWER(TRIM(l.title)) NOT IN ${IDLE_APP_TITLES}
       AND julianday(s.start_time)<julianday(?,'+1 day')
       AND julianday(s.start_time,'+' || s.duration_minutes || ' minutes')>julianday(?,'-1 day')
@@ -258,7 +307,13 @@ export async function getMonthlyPlayerRankings(
   };
 
   const byPlayer = new Map<string, PlayerBucket>();
-  for (const row of sessions.results || []) {
+  for (const sourceRow of sessions.results || []) {
+    const gameKey = canonicalNonSteamGameKey(sourceRow.gameKey);
+    const row = {
+      ...sourceRow,
+      gameKey,
+      title: canonicalNonSteamGameTitle(gameKey, sourceRow.title),
+    };
     const interval = recordedInterval(row, now.getTime());
     if (!interval) continue;
     const clipped: Interval = [Math.max(interval[0], bounds.start), Math.min(interval[1], bounds.end)];
@@ -329,7 +384,7 @@ export async function getMonthlyPlayerRankings(
           const mins = Math.round(mergedMinutes(g.intervals) * 1000) / 1000;
           return {
             gameKey: g.gameKey,
-            title: g.title,
+            title: canonicalNonSteamGameTitle(g.gameKey, g.title),
             steamId: g.steamId,
             coverUrl: publicUrl(g.coverUrl),
             bannerUrl: publicUrl(g.bannerUrl),

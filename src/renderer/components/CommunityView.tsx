@@ -20,6 +20,7 @@ import {
   Send,
 } from 'lucide-react';
 import type { CloudReview, CommunityPick, Game, LeaderboardEntry } from '../../shared/types.js';
+import { formatScore } from '../community/CommunityWidgets.tsx';
 
 /** Mirrors cloud-db.ts computeGameKey — joins cloud reviews with local games. */
 function computeGameKeyClient(game: Game): string {
@@ -366,7 +367,7 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {entry && (
-                          <span className="font-mono text-[10px] text-amber-300">★ {entry.avgScore.toFixed(1)}</span>
+                          <span className="font-mono text-[10px] text-amber-300">★ {formatScore(entry.avgScore)}</span>
                         )}
                         <span className="rounded bg-[#2a2e3d] px-2 py-0.5 text-[10px] text-[#8e95a5]">{count} vote</span>
                       </div>
@@ -480,7 +481,7 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
                               bạn: {entry.myScore}
                             </span>
                           )}
-                          <span className="font-mono text-sm font-bold text-amber-300">★ {entry.avgScore.toFixed(1)}</span>
+                          <span className="font-mono text-sm font-bold text-amber-300">★ {formatScore(entry.avgScore)}</span>
                           {isSelected ? (
                             <ChevronUp className="h-3.5 w-3.5 text-[#8e95a5]" />
                           ) : (
@@ -568,7 +569,7 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
                                       onChange={(e) => setMyScore(Number(e.target.value))}
                                       className="flex-1 accent-amber-400"
                                     />
-                                    <span className="font-mono text-sm font-bold text-amber-300">{myScore.toFixed(1)}</span>
+                                    <span className="font-mono text-sm font-bold text-amber-300">{formatScore(myScore)}</span>
                                   </div>
                                   <textarea
                                     value={myReview}

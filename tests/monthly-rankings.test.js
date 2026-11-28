@@ -4,6 +4,7 @@ import fs from "node:fs";
 import worker from "../worker/src/index.ts";
 import { createTestWorkerEnv, createMockD1, createTestSessionToken } from "./test-helpers-cloudflare.js";
 import { getMonthlyPlayerRankings, getMonthlyRankings, mergedMinutes, sessionTimestamp } from "../worker/src/monthly-rankings.ts";
+import { refreshSharedLibrary } from "../worker/src/community-common.ts";
 import { currentRankingMonth, FIRST_PLAYER_RANKING_MONTH, rankingMonthBounds, rankingMonths, monthlyRatingScore } from "../src/shared/monthly.ts";
 
 const now = new Date("2026-12-15T12:00:00Z");
@@ -54,6 +55,62 @@ test("online ranks only the selected month's recorded hours, never lifetime or m
   const result = await f.board();
   assert.deepEqual(result.online.map(g => [g.gameKey, g.totalMinutes, g.players]), [["10", 120, 1], ["20", 60, 1]]);
   assert.equal(result.singlePlayer.length, 0);
+});
+
+test("monthly rankings merge non-Steam title aliases across players and overlapping sources", async () => {
+  const f = await fixture();
+  for (const uid of ["english", "vietnamese", "duplicate-local-entry"]) f.user(uid);
+  f.game("t_leagueoflegends", "online", "League of Legends");
+  f.game("t_linminhhuynthoi", "online", "Liên Minh Huyền Thoại");
+  f.library("english", "t_leagueoflegends");
+  f.library("vietnamese", "t_linminhhuynthoi");
+  f.library("duplicate-local-entry", "t_leagueoflegends");
+  f.library("duplicate-local-entry", "t_linminhhuynthoi");
+
+  f.session("english", "t_leagueoflegends", "2026-11-04T08:00:00", 60);
+  f.session("vietnamese", "t_linminhhuynthoi", "2026-11-04T08:00:00", 90);
+  f.session("duplicate-local-entry", "t_leagueoflegends", "2026-11-04T08:00:00", 60, "tracker");
+  f.session("duplicate-local-entry", "t_linminhhuynthoi", "2026-11-04T08:00:00", 60, "amd_import");
+
+  const result = await f.board();
+  assert.deepEqual(
+    result.online.map(g => [g.gameKey, g.title, g.totalMinutes, g.players]),
+    [["t_leagueoflegends", "League of Legends", 210, 3]],
+  );
+});
+
+test("community game rankings merge title aliases in shared libraries", async () => {
+  const f = await fixture();
+  f.user("english"); f.user("vietnamese");
+  f.game("t_leagueoflegends", "online", "League of Legends");
+  f.game("t_linminhhuynthoi", "online", "Liên Minh Huyền Thoại");
+  f.library("english", "t_leagueoflegends");
+  f.library("vietnamese", "t_linminhhuynthoi");
+  f.db.prepare("UPDATE community_library SET playtime_minutes=120,recorded_playtime_minutes=120 WHERE uid='english'").run();
+  f.db.prepare("UPDATE community_library SET playtime_minutes=90,recorded_playtime_minutes=90 WHERE uid='vietnamese'").run();
+
+  const response = await worker.fetch(new Request("https://example.test/api/community/rankings?sort=hours&limit=50"), f.env);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  const matches = body.items.filter(g => g.gameKey === "t_leagueoflegends");
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].title, "League of Legends");
+  assert.equal(matches[0].players, 2);
+  assert.equal(matches[0].recordedMinutes, 210);
+});
+
+test("library refresh stores non-Steam aliases under one canonical shared key", async () => {
+  const f = await fixture();
+  f.user("alias-owner");
+  f.db.prepare(`INSERT INTO user_library(uid,game_key,title,status,playtime_minutes,recorded_playtime_minutes)
+    VALUES ('alias-owner','t_leagueoflegends','League of Legends','playing',90,90),
+      ('alias-owner','t_linminhhuynthoi','Liên Minh Huyền Thoại','playing',120,120)`).run();
+
+  await refreshSharedLibrary(f.env, "alias-owner");
+  const rows = f.db.prepare("SELECT game_key,title,recorded_playtime_minutes FROM community_library WHERE uid='alias-owner'").all();
+  assert.deepEqual(rows.map(row => [row.game_key, row.title, row.recorded_playtime_minutes]), [
+    ["t_leagueoflegends", "League of Legends", 120],
+  ]);
 });
 
 test("cross-month sessions split at GMT+7 and overlapping sources and aliases count once", async () => {
@@ -246,4 +303,21 @@ test("monthly player rankings start in December 2026 and rank by recorded hours"
 
   const httpBeforeStart = await worker.fetch(new Request("https://example.test/api/community/players/monthly?month=2026-11"), f.env);
   assert.equal(httpBeforeStart.status, 400);
+});
+
+test("monthly player top games merge non-Steam aliases and overlapping session sources", async () => {
+  const f = await fixture();
+  f.user("alias-player");
+  f.game("t_leagueoflegends", "online", "League of Legends");
+  f.game("t_linminhhuynthoi", "online", "Liên Minh Huyền Thoại");
+  f.library("alias-player", "t_leagueoflegends");
+  f.library("alias-player", "t_linminhhuynthoi");
+  f.session("alias-player", "t_leagueoflegends", "2026-12-02T10:00:00", 60, "tracker");
+  f.session("alias-player", "t_linminhhuynthoi", "2026-12-02T10:00:00", 60, "amd_import");
+
+  const result = await getMonthlyPlayerRankings(f.env, "2026-12", { includeTopGames: true }, now);
+  assert.equal(result.items[0].totalMinutes, 60);
+  assert.deepEqual(result.items[0].topGames.map(g => [g.gameKey, g.title, g.playtimeMinutes]), [
+    ["t_leagueoflegends", "League of Legends", 60],
+  ]);
 });

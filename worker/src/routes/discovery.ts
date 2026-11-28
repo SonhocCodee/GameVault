@@ -125,13 +125,15 @@ async function discoveryRate(request: Request, env: Env) {
   await rateLimit(env, actor, "discovery", 60);
 }
 export function validatePerformanceReport(input: any): PerformanceReport {
-  if (input.completionStatus !== "completed")
+  if (!["played", "completed"].includes(input.completionStatus))
     throw new CommunityError(
-      "Only completed games can have a completion report",
+      "Choose whether the game was played or completed",
     );
   const graphics = input.graphics || {};
-  const width = number(graphics.width, 320, 16384, true),
-    height = number(graphics.height, 200, 16384, true);
+  const width = graphics.width == null ? null : number(graphics.width, 320, 16384, true),
+    height = graphics.height == null ? null : number(graphics.height, 200, 16384, true);
+  if ((width === null) !== (height === null))
+    throw new CommunityError("Provide both game resolution dimensions or leave both unknown");
   if (!["presentmon", "manual"].includes(input.source))
     throw new CommunityError("Choose the measurement source");
   const measuredAt = text(input.measuredAt, 50, true);
@@ -145,14 +147,14 @@ export function validatePerformanceReport(input: any): PerformanceReport {
     throw new CommunityError(
       "PresentMon reports need at least ten measured frames",
     );
-  if (!["manual", "config"].includes(graphics.source))
+  if (!["manual", "config", "unknown"].includes(graphics.source))
     throw new CommunityError("Confirm the graphics context");
   return {
     gameKey: key(input.gameKey),
     title: text(input.title, 160, true),
     steamId: input.steamId ? number(input.steamId, 1, 2147483647, true) : null,
     coverUrl: publicUrl(input.coverUrl),
-    completionStatus: "completed",
+    completionStatus: input.completionStatus,
     cpu: text(input.cpu, 160, true),
     gpu: text(input.gpu, 160, true),
     ramGb: number(input.ramGb, 0.1, 4096),
@@ -162,7 +164,7 @@ export function validatePerformanceReport(input: any): PerformanceReport {
     graphics: {
       width,
       height,
-      preset: text(graphics.preset, 60, true),
+      preset: text(graphics.preset, 60),
       upscaling: text(graphics.upscaling, 80),
       frameGeneration: text(graphics.frameGeneration, 80),
       rayTracing: text(graphics.rayTracing, 80),
@@ -404,7 +406,7 @@ export function registerDiscoveryRoutes(router: Router) {
     if (input.gameKey !== gameKey)
       throw new CommunityError("Game key does not match");
     const report = validatePerformanceReport(input);
-    // Completion is explicitly user-reported; the client measurement is not a verified benchmark.
+    // PresentMon uploads describe a real play session; completion remains user-reported.
     await env.DB.prepare(
       `INSERT INTO community_performance(id,uid,game_key,game_title,data_json) VALUES (?,?,?,?,?)
       ON CONFLICT(uid,game_key) DO UPDATE SET game_title=excluded.game_title,data_json=excluded.data_json,updated_at=datetime('now')`,

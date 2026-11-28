@@ -71,6 +71,8 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
   const closeToTrayStr = getSetting('close_to_tray', customDb);
   const appStartupStr = getSetting('app_startup_enabled', customDb);
   const setupCompletedStr = getSetting('setup_completed', customDb);
+  const fpsAutoCaptureStr = getSetting('fps_auto_capture_enabled', customDb);
+  const fpsAutoShareStr = getSetting('fps_auto_share_enabled', customDb);
   const playtimeWatchStr = getSetting('playtime_watch_enabled', customDb);
   const hddModeStr = getSetting('hdd_mode', customDb);
   const googleApiKey = decryptSecretString(getSetting('google_api_key', customDb) || '');
@@ -107,6 +109,10 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
     closeToTray: closeToTrayStr === null ? true : closeToTrayStr === 'true',
     appStartupEnabled: appStartupStr === null ? false : appStartupStr === 'true',
     setupCompleted: setupCompletedStr === null ? false : setupCompletedStr === 'true',
+    fpsAutoCaptureEnabled: fpsAutoCaptureStr === null ? true : fpsAutoCaptureStr === 'true',
+    fpsAutoShareEnabled: fpsAutoShareStr === null
+      ? setupCompletedStr !== 'true'
+      : fpsAutoShareStr === 'true',
     // Watchdog defaults ON: installed from first run, keeps counting playtime
     // while GameVault itself is closed
     playtimeWatchEnabled: playtimeWatchStr === null ? true : playtimeWatchStr === 'true',
@@ -238,6 +244,12 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
   }
   if (patch.setupCompleted !== undefined) {
     setSetting('setup_completed', patch.setupCompleted ? 'true' : 'false', customDb);
+  }
+  if (patch.fpsAutoCaptureEnabled !== undefined) {
+    setSetting('fps_auto_capture_enabled', patch.fpsAutoCaptureEnabled ? 'true' : 'false', customDb);
+  }
+  if (patch.fpsAutoShareEnabled !== undefined) {
+    setSetting('fps_auto_share_enabled', patch.fpsAutoShareEnabled ? 'true' : 'false', customDb);
   }
   if (patch.playtimeWatchEnabled !== undefined) {
     setSetting('playtime_watch_enabled', patch.playtimeWatchEnabled ? 'true' : 'false', customDb);

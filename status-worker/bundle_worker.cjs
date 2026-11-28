@@ -165,75 +165,123 @@ function renderHtml(apiUrl) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GameVault · Đăng nhập &amp; Profile</title>
+  <title>GameVault · Đăng nhập &amp; Hồ sơ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
-      --bg: #0b0f17;
-      --panel: #131a26;
-      --panel-2: #192233;
-      --border: #263248;
-      --text: #e6edf7;
-      --muted: #8b9bb4;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --accent-2: #22d3ee;
+      --bg: #0c0e13;
+      --panel: #13161f;
+      --panel-2: #191d28;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.16);
+      --text: #f1f3f7;
+      --muted: #94a3b8;
+      --accent: #ff2a44;
+      --accent-hover: #e11d48;
+      --accent-soft: rgba(255, 42, 68, 0.15);
+      --accent-text: #ff6b7d;
+      --accent-2: #38bdf8;
       --ok: #10b981;
       --warn: #f59e0b;
       --danger: #ef4444;
     }
     * { box-sizing: border-box; }
+    html { color-scheme: dark; }
     body {
       margin: 0;
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: radial-gradient(circle at top right, rgba(99,102,241,0.14), transparent 36%), var(--bg);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background:
+        radial-gradient(ellipse 75% 45% at 50% 0%, rgba(255, 42, 68, 0.16) 0%, rgba(14, 165, 233, 0.06) 45%, rgba(12, 14, 19, 0) 75%),
+        var(--bg);
       color: var(--text);
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 18px 56px; }
+    ::selection { background: rgba(255, 42, 68, 0.35); color: #fff; }
+    .topbar-shell {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(12, 14, 19, 0.85);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+    }
     .topbar {
-      display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
-      margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 0 20px;
+      min-height: 64px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
     }
+    .wrap { max-width: 1180px; width: 100%; margin: 0 auto; padding: 24px 20px 56px; flex: 1; }
     .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
     .logo {
-      width: 38px; height: 38px; border-radius: 10px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 18px;
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #ff2a44, #be123c);
+      display: grid; place-items: center; font-weight: 900; color: #fff; font-size: 14px;
+      box-shadow: 0 6px 18px rgba(255, 42, 68, 0.32);
     }
-    .title { font-size: 18px; font-weight: 700; margin: 0; }
-    .subtitle { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
+    .brand-title-row { display: flex; align-items: center; gap: 6px; }
+    .title { font-size: 16px; font-weight: 800; letter-spacing: 0.4px; margin: 0; color: #fff; }
+    .pro-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px;
+      background: var(--accent-soft); color: #ff5c70; border: 1px solid rgba(255, 42, 68, 0.35);
+    }
+    .subtitle { font-size: 11px; color: var(--muted); margin: 2px 0 0; }
+    .nav-links { display: flex; align-items: center; gap: 18px; }
+    .nav-links a {
+      font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; transition: color 0.15s;
+    }
+    .nav-links a:hover { color: #fff; }
+    @media (max-width: 820px) { .nav-links { display: none; } }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .pill {
       display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
-      border-radius: 999px; font-size: 12px; font-weight: 600;
-      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      border-radius: 10px; font-size: 12px; font-weight: 600;
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
       text-decoration: none; cursor: pointer; transition: 0.15s all;
     }
-    .pill:hover { border-color: var(--accent); color: #fff; }
+    .pill:hover { border-color: var(--border-hover); background: #222736; color: #fff; }
     .pill-accent {
       background: var(--accent); border-color: var(--accent); color: #fff;
+      box-shadow: 0 4px 14px rgba(255, 42, 68, 0.3);
     }
-    .pill-accent:hover { background: var(--accent-hover); }
+    .pill-accent:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
     button, .btn {
       cursor: pointer; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
-      padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 600;
       transition: 0.15s border-color, 0.15s background;
     }
-    button:hover, .btn:hover { border-color: var(--accent); }
-    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn-primary:hover { filter: brightness(1.08); }
+    button:hover, .btn:hover { border-color: var(--border-hover); background: #222736; }
+    .btn-primary {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+      box-shadow: 0 4px 14px rgba(255, 42, 68, 0.28);
+    }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
     .tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
     .tab {
-      padding: 9px 16px; border-radius: 9px; border: 1px solid var(--border);
+      padding: 9px 16px; border-radius: 10px; border: 1px solid var(--border);
       background: var(--panel); color: var(--muted); font-weight: 600; font-size: 13px;
     }
-    .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .hero {
-      background: linear-gradient(135deg, rgba(99,102,241,0.16), rgba(34,211,238,0.08));
-      border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 18px;
+    .tab:hover { color: #fff; border-color: var(--border-hover); }
+    .tab.active {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+      box-shadow: 0 4px 14px rgba(255, 42, 68, 0.28);
     }
-    .hero h2 { margin: 0 0 8px; font-size: 24px; }
+    .hero {
+      background: linear-gradient(135deg, rgba(255, 42, 68, 0.14), rgba(14, 165, 233, 0.06));
+      border: 1px solid rgba(255, 42, 68, 0.25); border-radius: 18px; padding: 24px; margin-bottom: 18px;
+    }
+    .hero h2 { margin: 0 0 8px; font-size: 24px; color: #fff; }
     .hero p { margin: 0; color: var(--muted); line-height: 1.6; max-width: 760px; }
     .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
@@ -241,13 +289,13 @@ function renderHtml(apiUrl) {
     @media (max-width: 920px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .grid-3, .grid-2 { grid-template-columns: 1fr; } }
     @media (max-width: 540px) { .grid-4 { grid-template-columns: 1fr; } }
     .card {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px;
     }
-    .card h3 { margin: 0 0 14px; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+    .card h3 { margin: 0 0 14px; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; color: #fff; }
     .metric-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-    .metric-val { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+    .metric-val { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
     .metric-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
-    .bar { height: 7px; border-radius: 999px; background: #0c111b; overflow: hidden; margin-top: 10px; border: 1px solid var(--border); }
+    .bar { height: 7px; border-radius: 999px; background: #090b10; overflow: hidden; margin-top: 10px; border: 1px solid var(--border); }
     .bar > i { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
     .bar.warn > i { background: var(--warn); }
     .bar.danger > i { background: var(--danger); }
@@ -257,56 +305,83 @@ function renderHtml(apiUrl) {
     .dot.bad { background: var(--danger); }
     .section { margin-top: 18px; }
     .input {
-      width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
-      background: #0c111b; color: var(--text); font-size: 13px;
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: #090b10; color: var(--text); font-size: 13px;
     }
     .row { display: flex; gap: 8px; align-items: center; }
     .muted { color: var(--muted); font-size: 13px; }
     .list { display: flex; flex-direction: column; gap: 10px; }
     .item {
       display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 10px 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border);
+      padding: 11px 14px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border);
     }
     .item-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .thumb { width: 38px; height: 50px; border-radius: 6px; object-fit: cover; background: #0c111b; flex-shrink: 0; }
-    .avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); background: #0c111b; }
+    .thumb { width: 38px; height: 50px; border-radius: 6px; object-fit: cover; background: #090b10; flex-shrink: 0; }
+    .avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); background: #090b10; }
     .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .badge {
-      font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
-      background: rgba(99,102,241,0.16); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.35);
+      font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+      background: var(--accent-soft); color: var(--accent-text); border: 1px solid rgba(255, 42, 68, 0.35);
     }
     .badge.ok { background: rgba(16,185,129,0.14); color: #6ee7b7; border-color: rgba(16,185,129,0.35); }
     .notice {
-      padding: 12px 14px; border-radius: 10px; background: rgba(245,158,11,0.08);
+      padding: 12px 14px; border-radius: 12px; background: rgba(245,158,11,0.08);
       border: 1px solid rgba(245,158,11,0.3); font-size: 13px; line-height: 1.5;
     }
     .hidden { display: none !important; }
-    code { background: #0c111b; padding: 2px 6px; border-radius: 5px; font-size: 12px; }
+    code { background: #090b10; padding: 2px 6px; border-radius: 5px; font-size: 12px; }
     .login-box {
-      background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.25);
-      border-radius: 14px; padding: 24px; max-width: 600px; margin: 0 auto;
+      background: linear-gradient(180deg, rgba(255, 42, 68, 0.08), rgba(19, 22, 31, 0.4));
+      border: 1px solid rgba(255, 42, 68, 0.28);
+      border-radius: 18px; padding: 28px 24px; max-width: 560px; margin: 12px auto;
     }
+    .gv-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--bg);
+      padding: 24px 20px;
+      color: #64748b;
+      font-size: 13px;
+    }
+    .gv-footer-inner {
+      max-width: 1180px; margin: 0 auto;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
+    }
+    .gv-footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
+    .gv-footer-links a { color: #64748b; text-decoration: none; transition: color 0.15s; }
+    .gv-footer-links a:hover { color: #cbd5e1; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header class="topbar">
+  <header class="topbar-shell">
+    <div class="topbar">
       <a href="/" class="brand">
         <div class="logo">GV</div>
         <div>
-          <h1 class="title">GameVault</h1>
-          <p class="subtitle">Quản lý thư viện game, theo dõi giờ chơi &amp; Cộng đồng</p>
+          <div class="brand-title-row">
+            <h1 class="title">GAMEVAULT</h1>
+            <span class="pro-badge">PRO</span>
+          </div>
+          <p class="subtitle">Permanent Playtime &amp; Media</p>
         </div>
       </a>
+
+      <nav class="nav-links" aria-label="Primary">
+        <a href="/">Trang chủ</a>
+        <a href="\${apiUrl}/community/" target="_blank" rel="noreferrer">Cộng đồng ↗</a>
+        <a href="/privacy">Bảo mật</a>
+        <a href="/terms">Điều khoản</a>
+      </nav>
+
       <div class="actions">
         <a class="pill" href="/">← Trang chủ</a>
-        <a class="pill" href="\${apiUrl}/community/" target="_blank" rel="noreferrer">Cộng đồng ↗</a>
-        <button id="topbar-login-btn" class="pill pill-accent" onclick="switchTab('profile')">🔑 Đăng nhập</button>
+        <button id="topbar-login-btn" class="pill pill-accent" onclick="switchTab('profile')">Đăng nhập</button>
         <a id="admin-portal-link" class="pill hidden" href="\${apiUrl}/admin/" target="_blank" rel="noreferrer">Admin Covers ↗</a>
         <button id="logout-btn" class="pill hidden">Đăng xuất</button>
       </div>
-    </header>
+    </div>
+  </header>
 
+  <div class="wrap">
     <nav class="tabs">
       <button class="tab active" id="tab-btn-profile" data-tab="profile">Đăng nhập / Profile</button>
       <button class="tab" id="tab-btn-intro" data-tab="intro">Giới thiệu &amp; BXH</button>
@@ -319,9 +394,11 @@ function renderHtml(apiUrl) {
         <div id="auth-guest">
           <div class="login-box">
             <div style="text-align: center; margin-bottom: 18px;">
-              <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(99,102,241,0.2); color: #818cf8; display: inline-grid; place-items: center; font-size: 20px; margin-bottom: 8px;">🔑</div>
-              <h2 style="margin: 0 0 6px; font-size: 19px; font-weight: 800; color: #fff;">Đăng nhập tài khoản GameVault</h2>
-              <p class="muted" style="margin: 0; font-size: 13px;">Đăng nhập bằng tài khoản Google đã liên kết với app GameVault để xem nhanh thư viện game, số giờ chơi và cấu hình PC.</p>
+              <div style="width: 48px; height: 48px; border-radius: 14px; background: rgba(255,42,68,0.16); border: 1px solid rgba(255,42,68,0.35); color: #ff6b7d; display: inline-grid; place-items: center; font-size: 20px; margin-bottom: 12px;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+              </div>
+              <h2 style="margin: 0 0 8px; font-size: 20px; font-weight: 800; color: #fff;">Đăng nhập tài khoản GameVault</h2>
+              <p class="muted" style="margin: 0; font-size: 13px; line-height: 1.55;">Đăng nhập bằng tài khoản Google đã liên kết với app GameVault để xem nhanh thư viện game, số giờ chơi và cấu hình PC.</p>
             </div>
 
             <div id="google-btn-wrap" style="display: flex; justify-content: center; margin: 18px 0; min-height: 44px;">
@@ -457,6 +534,19 @@ function renderHtml(apiUrl) {
       </div>
     </div>
   </div>
+
+  <footer class="gv-footer">
+    <div class="gv-footer-inner">
+      <div>© 2026 GameVault. Lưu giữ kỷ niệm &amp; thời gian chơi game bền vững.</div>
+      <div class="gv-footer-links">
+        <a href="/">Trang chủ</a>
+        <a href="/#download">Tải về</a>
+        <a href="/privacy">Bảo mật</a>
+        <a href="/terms">Điều khoản</a>
+        <a href="mailto:son62320@gmail.com">Liên hệ</a>
+      </div>
+    </div>
+  </footer>
 
   <script>
     const API_URL = \${JSON.stringify(apiUrl)};

@@ -510,6 +510,10 @@ export interface AppSettings {
   appStartupEnabled: boolean;
   /** One-time setup wizard (choose media/screenshots/vault drives) has been completed. */
   setupCompleted: boolean;
+  /** Capture local PresentMon metrics for tracked game sessions. */
+  fpsAutoCaptureEnabled: boolean;
+  /** Publish measured FPS and hardware/game settings to the community. */
+  fpsAutoShareEnabled: boolean;
   /** Independent background watchdog counts playtime even while GameVault is closed. */
   playtimeWatchEnabled: boolean;
   /** HDD Mode: buffer screenshots on fast drive before syncing to avoid spinning up HDD during gameplay. If disabled (SSD mode), saves directly to game media folder. */

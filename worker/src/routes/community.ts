@@ -4,6 +4,10 @@ import { queueMetadataRefresh, refreshCatalogMetadata } from "../game-metadata.t
 import { getMonthlyPlayerRankings, getMonthlyRankings } from "../monthly-rankings.ts";
 import { IDLE_APP_KEYS, IDLE_APP_TITLES } from "../ranking-eligibility.ts";
 import { currentRankingMonth } from "../../../src/shared/monthly.ts";
+import {
+  canonicalNonSteamGameKeySql,
+  canonicalNonSteamGameTitleSql,
+} from "../../../src/shared/game-identity.ts";
 import { authenticate, isAdminUser } from "../auth.ts";
 import { jsonResponse } from "../utils.ts";
 import type { Router } from "../router.ts";
@@ -370,6 +374,35 @@ export function registerCommunityRoutes(router: Router) {
             .all<any>()
         ).results || []
       : [];
+    const libraryDatesByGameKey = new Map<
+      string,
+      { completedAt: string | null; lastPlayed: string | null; userScore: number | null }
+    >();
+    if (p.share_library && games.length > 0) {
+      const extraRows =
+        (
+          await env.DB.prepare(
+            `SELECT CASE WHEN steam_id>0 THEN CAST(steam_id AS TEXT) ELSE ${canonicalNonSteamGameKeySql("game_key")} END AS shared_key,
+              MAX(completed_at) AS completed_at,
+              MAX(last_played) AS last_played,
+              MAX(user_score) AS user_score
+            FROM user_library
+            WHERE uid=? AND is_deleted=0
+            GROUP BY shared_key`,
+          )
+            .bind(uid)
+            .all<any>()
+        ).results || [];
+      for (const row of extraRows) {
+        if (row.shared_key) {
+          libraryDatesByGameKey.set(String(row.shared_key), {
+            completedAt: row.completed_at || null,
+            lastPlayed: row.last_played || null,
+            userScore: row.user_score != null ? Number(row.user_score) : null,
+          });
+        }
+      }
+    }
     const stats = await env.DB.prepare(`SELECT COUNT(*) AS totalGames,
       SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completedGames,
       SUM(CASE WHEN playtime_minutes>0 OR status IN ('playing','completed','paused','dropped') THEN 1 ELSE 0 END) AS playedGames,
@@ -397,16 +430,22 @@ export function registerCommunityRoutes(router: Router) {
       playedGames: Number(stats?.playedGames || 0),
       totalMinutes: Number(stats?.totalMinutes || 0),
       recordedMinutes: Number(stats?.recordedMinutes || 0),
-      games: games.map((g) => ({
-        gameKey: g.game_key,
-        title: g.title,
-        steamId: g.steam_id,
-        coverUrl: publicUrl(g.resolved_cover),
-        bannerUrl: publicUrl(g.resolved_banner),
-        status: g.status,
-        playtimeMinutes: g.playtime_minutes,
-        recordedPlaytimeMinutes: Number(g.recorded_playtime_minutes) || 0,
-      })),
+      games: games.map((g) => {
+        const extra = libraryDatesByGameKey.get(String(g.game_key));
+        return {
+          gameKey: g.game_key,
+          title: g.title,
+          steamId: g.steam_id,
+          coverUrl: publicUrl(g.resolved_cover),
+          bannerUrl: publicUrl(g.resolved_banner),
+          status: g.status,
+          playtimeMinutes: g.playtime_minutes,
+          recordedPlaytimeMinutes: Number(g.recorded_playtime_minutes) || 0,
+          completedAt: extra?.completedAt || null,
+          lastPlayed: extra?.lastPlayed || null,
+          userScore: extra?.userScore ?? null,
+        };
+      }),
     });
   });
   add("GET", "/me/comments", async (request, env, ctx) => {
@@ -419,6 +458,23 @@ export function registerCommunityRoutes(router: Router) {
       WHERE c.uid=? AND c.hidden=0 AND p.hidden=0 AND COALESCE(cp.suspended,0)=0 AND ${visibleTo("p")}
       ORDER BY c.created_at DESC,c.id DESC LIMIT ? OFFSET ?`,
     ).bind(user.uid, user.uid, user.uid, limit + 1, offset).all<any>()).results || [];
+    return jsonResponse(page(rows.map(c => ({
+      id: c.id, postId: c.post_id, body: c.body, createdAt: c.created_at,
+      gameTitle: c.game_title, spoiler: !!c.spoiler,
+    })), limit, offset));
+  });
+  add("GET", "/profiles/:uid/comments", async (request, env, ctx) => {
+    const uid = decodeURIComponent(ctx.params.uid || "");
+    const viewer = await authenticate(request, env);
+    const who = viewer?.uid || "";
+    const { limit, offset } = paging(ctx.url);
+    const rows = (await env.DB.prepare(
+      `SELECT c.id,c.post_id,c.body,c.created_at,p.game_title,p.spoiler
+      FROM community_comments c JOIN community_posts p ON p.id=c.post_id
+      LEFT JOIN community_profiles cp ON cp.uid=p.uid
+      WHERE c.uid=? AND c.hidden=0 AND p.hidden=0 AND COALESCE(cp.suspended,0)=0 AND ${visibleTo("p")}
+      ORDER BY c.created_at DESC,c.id DESC LIMIT ? OFFSET ?`,
+    ).bind(uid, who, who, limit + 1, offset).all<any>()).results || [];
     return jsonResponse(page(rows.map(c => ({
       id: c.id, postId: c.post_id, body: c.body, createdAt: c.created_at,
       gameTitle: c.game_title, spoiler: !!c.spoiler,
@@ -1089,13 +1145,19 @@ export function registerCommunityRoutes(router: Router) {
         : sort === "score"
           ? "averageScore DESC,reviewCount DESC,recordedMinutes DESC"
           : "players DESC,recordedMinutes DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC";
+    const catalogKey = `CASE WHEN steam_id>0 THEN CAST(steam_id AS TEXT)
+      WHEN game_key GLOB 's_[0-9]*' THEN SUBSTR(game_key,3)
+      ELSE ${canonicalNonSteamGameKeySql("game_key")} END`;
+    const libraryKey = canonicalNonSteamGameKeySql("l.game_key");
+    const reviewKey = canonicalNonSteamGameKeySql("r.game_key");
+    const metadataKey = canonicalNonSteamGameKeySql("gm.game_key");
     const rows =
       (
         await env.DB.prepare(
           `WITH catalog AS (
-      SELECT CASE WHEN steam_id>0 THEN CAST(steam_id AS TEXT)
-        WHEN game_key GLOB 's_[0-9]*' THEN SUBSTR(game_key,3) ELSE game_key END AS game_key,
-        MAX(title) AS title,MAX(steam_id) AS steamId,MAX(cover_url) AS coverUrl,MAX(banner_url) AS bannerUrl
+      SELECT ${catalogKey} AS game_key,
+        MAX(${canonicalNonSteamGameTitleSql(catalogKey, "title")}) AS title,
+        MAX(steam_id) AS steamId,MAX(cover_url) AS coverUrl,MAX(banner_url) AS bannerUrl
       FROM game_covers
       WHERE NOT (
         game_key LIKE 't_%'
@@ -1106,22 +1168,42 @@ export function registerCommunityRoutes(router: Router) {
         )
       )
       GROUP BY 1
+    ), library_users AS (
+      SELECT l.uid,${libraryKey} AS game_key,
+        MAX(${canonicalNonSteamGameTitleSql(libraryKey, "l.title")}) AS title,
+        MAX(l.steam_id) AS steamId,MAX(l.cover_url) AS coverUrl,
+        CASE WHEN MAX(CASE WHEN l.status='completed' THEN 1 ELSE 0 END)=1
+          THEN 'completed' ELSE MAX(l.status) END AS status,
+        MAX(l.playtime_minutes) AS totalMinutes,
+        MAX(l.recorded_playtime_minutes) AS recordedMinutes
+      FROM community_library l JOIN community_profiles cp ON cp.uid=l.uid
+      WHERE cp.share_library=1 AND cp.suspended=0 AND ${visibleTo("l")}
+      GROUP BY l.uid,${libraryKey}
     ), libraries AS (
-      SELECT l.game_key,MAX(l.title) AS title,MAX(l.steam_id) AS steamId,MAX(l.cover_url) AS coverUrl,
-      COUNT(DISTINCT CASE WHEN l.playtime_minutes>0 OR l.status IN ('completed','playing') THEN l.uid END) AS players,
-      COUNT(DISTINCT CASE WHEN l.status='completed' THEN l.uid END) AS completedPlayers,SUM(l.playtime_minutes) AS totalMinutes,SUM(l.recorded_playtime_minutes) AS recordedMinutes
-      FROM community_library l JOIN community_profiles cp ON cp.uid=l.uid WHERE cp.share_library=1 AND cp.suspended=0 AND ${visibleTo("l")} GROUP BY l.game_key
+      SELECT game_key,MAX(title) AS title,MAX(steamId) AS steamId,MAX(coverUrl) AS coverUrl,
+        COUNT(DISTINCT CASE WHEN totalMinutes>0 OR status IN ('completed','playing') THEN uid END) AS players,
+        COUNT(DISTINCT CASE WHEN status='completed' THEN uid END) AS completedPlayers,
+        SUM(totalMinutes) AS totalMinutes,SUM(recordedMinutes) AS recordedMinutes
+      FROM library_users GROUP BY game_key
     ), reviews AS (
-      SELECT r.game_key,MAX(r.game_title) AS title,MAX(r.cover_url) AS coverUrl,AVG(r.score) AS averageScore,COUNT(DISTINCT r.uid) AS reviewCount
+      SELECT ${reviewKey} AS game_key,
+        MAX(${canonicalNonSteamGameTitleSql(reviewKey, "r.game_title")}) AS title,
+        MAX(r.cover_url) AS coverUrl,AVG(r.score) AS averageScore,COUNT(DISTINCT r.uid) AS reviewCount
       FROM ratings r LEFT JOIN community_profiles cp ON cp.uid=r.uid LEFT JOIN community_review_meta m ON m.uid=r.uid AND m.game_key=r.game_key
-      WHERE COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")} GROUP BY r.game_key
+      WHERE COALESCE(cp.suspended,0)=0 AND COALESCE(m.hidden,0)=0 AND ${visibleTo("r")} GROUP BY ${reviewKey}
+    ), metadata AS (
+      SELECT ${metadataKey} AS game_key,
+        CASE MAX(CASE classification WHEN 'online' THEN 3 WHEN 'hybrid' THEN 2 WHEN 'offline' THEN 1 ELSE 0 END)
+          WHEN 3 THEN 'online' WHEN 2 THEN 'hybrid' WHEN 1 THEN 'offline' ELSE 'unknown' END AS classification,
+        MAX(source) AS source,MAX(confidence) AS confidence
+      FROM game_metadata gm GROUP BY ${metadataKey}
     ), game_keys AS (SELECT game_key FROM catalog UNION SELECT game_key FROM libraries UNION SELECT game_key FROM reviews)
     SELECT k.game_key AS gameKey,COALESCE(c.title,l.title,r.title) AS title,COALESCE(c.steamId,l.steamId) AS steamId,COALESCE(c.coverUrl,l.coverUrl,r.coverUrl) AS coverUrl,
       c.bannerUrl AS bannerUrl,COALESCE(gm.classification,'unknown') AS classification,
       COALESCE(gm.source,'unknown') AS classificationSource,COALESCE(gm.confidence,0) AS classificationConfidence,
       COALESCE(l.players,0) AS players,COALESCE(l.completedPlayers,0) AS completedPlayers,COALESCE(l.totalMinutes,0) AS totalMinutes,COALESCE(l.recordedMinutes,0) AS recordedMinutes,r.averageScore,COALESCE(r.reviewCount,0) AS reviewCount
     FROM game_keys k LEFT JOIN catalog c ON c.game_key=k.game_key LEFT JOIN libraries l ON l.game_key=k.game_key LEFT JOIN reviews r ON r.game_key=k.game_key
-    LEFT JOIN game_metadata gm ON gm.game_key=k.game_key
+    LEFT JOIN metadata gm ON gm.game_key=k.game_key
     WHERE COALESCE(c.title,l.title,r.title) LIKE ? ESCAPE '\\'
       AND LOWER(k.game_key) NOT IN ${IDLE_APP_KEYS}
       AND LOWER(TRIM(COALESCE(c.title,l.title,r.title,''))) NOT IN ${IDLE_APP_TITLES}
