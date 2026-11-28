@@ -6,6 +6,33 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 11:14] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Tự động nhận diện file setting game (Save-dir + PCGamingWiki API) & hiển thị chi tiết setting đồ họa**:
+  - Cập nhật `src/main/game-settings.ts`:
+    - Bổ sung `scanSaveRelatedConfigs` quét tự động file cấu hình (`.ini`/`.cfg`/`.json`/`.xml`/`.settings`) trong thư mục save và thư mục anh em (`Config`/`Settings`) + thư mục cài đặt game, lọc credential qua `hasCredentialSettings`.
+    - Bổ sung `discoverGameConfigsAsync` & `extractPcgwConfigPathsFromWikitext` tra cứu tự động đường dẫn file config trên PCGamingWiki API (cache 7 ngày trong `app_settings`).
+    - Nâng cấp `parseGraphicsConfig` thành generic parser hỗ trợ INI/CFG/JSON/XML: trích xuất thêm `upscaling` (DLSS/FSR/FSR 3/XeSS), `frameGeneration`, `rayTracing` và `details` (Window Mode, VSync, FPS Cap, Textures, Shadows, AA, Effects, Post Processing, View Distance, Foliage, Reflections, AO, Volumetric Fog, Anisotropic, Motion Blur, Render Scale, FOV, HDR).
+  - Expose IPC `gameSettings:discover` trong `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/types.ts`.
+  - Mở rộng `GraphicsContext.details` trong `src/shared/community.ts`, `src/main/performance-context.ts`, và `worker/src/routes/discovery.ts` (`validatePerformanceReport`).
+  - Cập nhật `src/renderer/community/PerformancePanel.tsx` & `src/renderer/community/GameHub.tsx`: tự động chạy `discoverGameConfigs`, hiển thị chi tiết setting đọc được lên UI cá nhân và Cộng đồng, kèm nút **Chọn file setting...** dự phòng.
+  - Bổ sung 3 unit test mới trong `tests/game-settings.test.js`.
+
+### File chính đã thay đổi
+- `src/main/game-settings.ts`, `src/main/performance-context.ts`, `src/main/main.ts`
+- `src/preload/preload.ts`, `src/shared/community.ts`, `src/shared/types.ts`
+- `src/renderer/community/PerformancePanel.tsx`, `src/renderer/community/GameHub.tsx`
+- `worker/src/routes/discovery.ts`, `tests/game-settings.test.js`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass `561/561` (103 suites, 0 fail, 0 skipped).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Pull `main` về; nếu test thực tế với Cloudflare Worker thì cần deploy `worker/` để server nhận/lưu trường `graphics.details` mới (các trường cũ vẫn tương thích ngược).
+
 ## [2026-11-28 10:55] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

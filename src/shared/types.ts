@@ -629,6 +629,7 @@ export interface ElectronAPI {
   prepareMeasuredReport?(gameId: number, sessionId: number): Promise<import('./community.ts').PerformanceReport>;
   syncGamePerformance?(gameId: number): Promise<{ synced: number; skipped?: boolean }>;
   syncAllPerformance?(): Promise<{ synced: number }>;
+  discoverGameConfigs?(gameId: number, forceRefresh?: boolean): Promise<import('./community.ts').ConfigCandidate[]>;
   chooseGameConfig?(gameId: number): Promise<import('./community.ts').ConfigCandidate[]>;
   exportGameSettings?(gameId: number, selectedPaths: string[]): Promise<{ files: number; destination: string } | null>;
   // Database Operations

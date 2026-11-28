@@ -64,6 +64,7 @@ const electronAPI: ElectronAPI = {
   prepareMeasuredReport: (gameId, sessionId) => ipcRenderer.invoke('performance:prepareReport', gameId, sessionId),
   syncGamePerformance: (gameId) => ipcRenderer.invoke('performance:syncGame', gameId),
   syncAllPerformance: () => ipcRenderer.invoke('performance:syncAll'),
+  discoverGameConfigs: (gameId, forceRefresh) => ipcRenderer.invoke('gameSettings:discover', gameId, forceRefresh),
   chooseGameConfig: (gameId) => ipcRenderer.invoke('gameSettings:choose', gameId),
   exportGameSettings: (gameId, selectedPaths) => ipcRenderer.invoke('gameSettings:export', gameId, selectedPaths),
   // Database Operations

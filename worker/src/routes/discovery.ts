@@ -169,6 +169,16 @@ export function validatePerformanceReport(input: any): PerformanceReport {
       frameGeneration: text(graphics.frameGeneration, 80),
       rayTracing: text(graphics.rayTracing, 80),
       source: graphics.source,
+      ...(graphics.details && typeof graphics.details === "object" && !Array.isArray(graphics.details)
+        ? {
+            details: Object.fromEntries(
+              Object.entries(graphics.details)
+                .slice(0, 24)
+                .map(([k, v]) => [text(k, 40), text(String(v ?? ""), 60)])
+                .filter(([k, v]) => k.length > 0 && v.length > 0),
+            ),
+          }
+        : {}),
     },
     source: input.source,
     measuredAt,

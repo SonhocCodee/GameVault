@@ -41,6 +41,14 @@ export function validateGraphicsContext(
       throw new Error("Invalid graphics setting");
     return v.trim();
   };
+  const details: Record<string, string> = {};
+  if (input.details && typeof input.details === "object" && !Array.isArray(input.details)) {
+    for (const [k, v] of Object.entries(input.details).slice(0, 24)) {
+      if (typeof k === "string" && typeof v === "string" && k.trim() && v.trim()) {
+        details[k.trim().slice(0, 40)] = v.trim().slice(0, 60);
+      }
+    }
+  }
   return {
     width,
     height,
@@ -54,6 +62,7 @@ export function validateGraphicsContext(
         : input.source === "unknown"
           ? "unknown"
           : "manual",
+    ...(Object.keys(details).length > 0 ? { details } : {}),
   };
 }
 export function getGameGraphics(gameId: number): GraphicsContext {
@@ -65,9 +74,17 @@ export function getGameGraphics(gameId: number): GraphicsContext {
   try {
     if (row?.value) saved = validateGraphicsContext(JSON.parse(row.value));
   } catch {}
-  const config = detectGameConfigs(gameId).find(
-    (c) => c.graphics.width && c.graphics.height,
-  );
+  const configs = detectGameConfigs(gameId);
+  const config =
+    configs.find((c) => c.graphics.width && c.graphics.height) ||
+    configs.find(
+      (c) =>
+        c.graphics.preset ||
+        c.graphics.upscaling ||
+        c.graphics.frameGeneration ||
+        c.graphics.rayTracing ||
+        (c.graphics.details && Object.keys(c.graphics.details).length > 0),
+    );
   if (config) {
     return validateGraphicsContext({
       ...EMPTY_GRAPHICS,
@@ -297,6 +314,9 @@ export async function buildAutoCommunityPerformanceReport(
     frameGeneration: detectedGraphics.frameGeneration || "",
     rayTracing: detectedGraphics.rayTracing || "",
     source: detectedGraphics.source === "config" ? "config" : "unknown",
+    ...(detectedGraphics.details && Object.keys(detectedGraphics.details).length > 0
+      ? { details: detectedGraphics.details }
+      : {}),
   };
 
   return {

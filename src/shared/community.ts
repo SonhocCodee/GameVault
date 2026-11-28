@@ -138,6 +138,7 @@ export interface GraphicsContext {
   frameGeneration: string;
   rayTracing: string;
   source: "manual" | "config" | "unknown";
+  details?: Record<string, string>;
 }
 export interface PerformanceReport extends PublicGame {
   id?: string;

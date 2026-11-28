@@ -9,6 +9,7 @@ import {
   closeDb,
   createGame,
   getDb,
+  addSavePath,
   mergeFragmentedSessions,
 } from "../src/main/db.ts";
 import { validatePerformanceReport } from "../worker/src/routes/discovery.ts";
@@ -17,6 +18,8 @@ import {
   parseGraphicsConfig,
   registerManualConfig,
   detectGameConfigs,
+  discoverGameConfigsAsync,
+  extractPcgwConfigPathsFromWikitext,
   exportGameSettings,
   makeSettingsZip,
 } from "../src/main/game-settings.ts";
@@ -307,4 +310,91 @@ test("performance UI removes manual FPS/config input forms", () => {
   assert.equal(panel.includes("Chọn file thủ công"), false);
   assert.equal(hub.includes("Chia sẻ thủ công"), false);
   assert.equal(fs.existsSync(path.resolve("src/renderer/community/PerformanceShareForm.tsx")), false);
+});
+
+test("generic parser extracts upscaling, frame gen, ray tracing, and safe details", () => {
+  const parsed = parseGraphicsConfig(
+    JSON.stringify({
+      Resolution: "2560x1440",
+      GraphicsPreset: "Ultra",
+      FSR3: "Quality",
+      FrameGeneration: true,
+      RayTracing: false,
+      VSync: false,
+      TextureQuality: 3,
+      ShadowQuality: 2,
+      RenderScale: 67,
+      Password: "should-not-appear",
+    }),
+  );
+  assert.equal(parsed.width, 2560);
+  assert.equal(parsed.height, 1440);
+  assert.equal(parsed.preset, "Ultra");
+  assert.equal(parsed.upscaling, "FSR 3 Quality");
+  assert.equal(parsed.frameGeneration, "On");
+  assert.equal(parsed.rayTracing, "Off");
+  assert.equal(parsed.details?.VSync, "Off");
+  assert.equal(parsed.details?.Textures, "Ultra");
+  assert.equal(parsed.details?.Shadows, "High");
+  assert.equal(parsed.details?.["Render Scale"], "67%");
+  assert.equal(JSON.stringify(parsed).includes("should-not-appear"), false);
+});
+
+test("detectGameConfigs scans sibling Config folder next to registered save path", () => {
+  const game = createGame({ title: "Custom Indie Game" });
+  const saveDir = path.join(dir, "Saved", "SaveGames");
+  const configDir = path.join(dir, "Saved", "Config");
+  fs.mkdirSync(saveDir, { recursive: true });
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, "settings.ini"),
+    "ScreenWidth=1920\nScreenHeight=1080\nDLSS=Balanced\nVSync=0\n",
+  );
+  addSavePath(game.id, saveDir);
+  const found = detectGameConfigs(game.id);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].adapter, "auto-save-scan");
+  assert.equal(found[0].graphics.width, 1920);
+  assert.equal(found[0].graphics.upscaling, "DLSS Balanced");
+  assert.equal(found[0].graphics.details?.VSync, "Off");
+});
+
+test("discoverGameConfigsAsync extracts PCGamingWiki config paths and caches them", async () => {
+  const wikitext =
+    "{{Game data/config|Windows|{{p|localappdata}}/TestPcgwGame/config.ini}}";
+  assert.deepEqual(extractPcgwConfigPathsFromWikitext(wikitext), [
+    "{{p|localappdata}}/TestPcgwGame/config.ini",
+  ]);
+  const game = createGame({ title: "Test PCGW Game", steam_id: 999888 });
+  const mockLocal = process.env.LOCALAPPDATA || dir;
+  const targetDir = path.join(mockLocal, "TestPcgwGame");
+  const targetFile = path.join(targetDir, "config.ini");
+  const prevExisted = fs.existsSync(targetDir);
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(targetFile, "Resolution=1920x1080\nFSR=Quality\n");
+    const fakeFetch = async (url) => {
+      if (url.includes("cargoquery")) {
+        return {
+          ok: true,
+          json: async () => ({ cargoquery: [{ title: { Page: "Test PCGW Game" } }] }),
+        };
+      }
+      if (url.includes("action=parse")) {
+        return {
+          ok: true,
+          json: async () => ({ parse: { wikitext: { "*": wikitext } } }),
+        };
+      }
+      return { ok: false };
+    };
+    const found = await discoverGameConfigsAsync(game.id, {
+      fetchImpl: fakeFetch,
+      forceRefresh: true,
+    });
+    assert.ok(found.some((c) => c.adapter === "pcgamingwiki" && c.graphics.upscaling === "FSR Quality"));
+  } finally {
+    if (!prevExisted) fs.rmSync(targetDir, { recursive: true, force: true });
+    else fs.rmSync(targetFile, { force: true });
+  }
 });

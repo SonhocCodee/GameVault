@@ -25,7 +25,7 @@ import { getTracker, manualEditPlaytime, cleanupNonGameEntries } from './tracker
 import { initDiscordDetectable } from './discord-detectable.js';
 import { communityRequest, communityUploadImage } from './cloud-db.js';
 import { capturePerformanceContext, getPerformancePreview, prepareMeasuredReport, saveGameGraphics } from './performance-context.js';
-import { detectGameConfigs, exportGameSettings, registerManualConfig } from './game-settings.js';
+import { detectGameConfigs, discoverGameConfigsAsync, exportGameSettings, registerManualConfig } from './game-settings.js';
 import { getFpsMonitor } from './fps-monitor.js';
 import { getHardwareInfo } from './hardware.js';
 import {
@@ -409,6 +409,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('performance:prepareReport', (_event, gameId, sessionId) => prepareMeasuredReport(gameId, sessionId));
   ipcMain.handle('performance:syncGame', (_event, gameId: number) => syncSingleGamePerformanceToCommunity(gameId));
   ipcMain.handle('performance:syncAll', () => syncLocalPerformanceToCommunity({ maxUploads: 4 }));
+  ipcMain.handle('gameSettings:discover', (_event, gameId: number, forceRefresh?: boolean) => discoverGameConfigsAsync(gameId, { forceRefresh: !!forceRefresh }));
   ipcMain.handle('gameSettings:choose', async (_event, gameId) => {
     const chosen = await dialog.showOpenDialog({ title: 'Choose a game configuration file', properties: ['openFile'], filters: [{ name: 'Game configuration', extensions: ['ini','cfg','json','xml','settings'] }] });
     if (!chosen.canceled && chosen.filePaths[0]) registerManualConfig(gameId, chosen.filePaths[0]);

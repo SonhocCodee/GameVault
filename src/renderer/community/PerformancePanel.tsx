@@ -42,11 +42,14 @@ export function PerformancePanel({
     setBusy(true);
     setError("");
     try {
-      if (triggerSync && window.electronAPI.syncGamePerformance) {
-        const res = await window.electronAPI.syncGamePerformance(gameId).catch(() => null);
-        if (res?.synced) {
-          setSyncNotice("Đã tự động chọn phiên FPS đo được và đồng bộ lên Cộng đồng.");
-          onShared?.();
+      if (triggerSync) {
+        await window.electronAPI.discoverGameConfigs?.(gameId, false).catch(() => null);
+        if (window.electronAPI.syncGamePerformance) {
+          const res = await window.electronAPI.syncGamePerformance(gameId).catch(() => null);
+          if (res?.synced) {
+            setSyncNotice("Đã tự động chọn phiên FPS đo được và đồng bộ lên Cộng đồng.");
+            onShared?.();
+          }
         }
       }
       const [p, hw, status] = await Promise.all([
@@ -160,6 +163,20 @@ export function PerformancePanel({
               <span className="gv-pill">RT: {preview.context.rayTracing}</span>
             )}
           </div>
+          {preview?.context.details && Object.keys(preview.context.details).length > 0 && (
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="gv-muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                Thiết lập chi tiết đọc được từ file setting:
+              </div>
+              <div className="gv-actions" style={{ gap: 6, flexWrap: "wrap" }}>
+                {Object.entries(preview.context.details).map(([k, v]) => (
+                  <span className="gv-pill" key={k} style={{ fontSize: 11 }}>
+                    {k}: <strong>{v}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Auto-detected config files (read-only) */}
@@ -169,9 +186,25 @@ export function PerformancePanel({
               <FileCode2 size={16} className="gv-text-amber" />
               File cấu hình tự phát hiện (INI / CFG / JSON / XML)
             </h3>
-            <span className="gv-muted" style={{ fontSize: 12 }}>
-              {preview?.candidates.length ? `${preview.candidates.length} file` : "Không có"}
-            </span>
+            <div className="gv-actions" style={{ gap: 8 }}>
+              <span className="gv-muted" style={{ fontSize: 12 }}>
+                {preview?.candidates.length ? `${preview.candidates.length} file` : "Không có"}
+              </span>
+              {window.electronAPI?.chooseGameConfig && (
+                <button
+                  type="button"
+                  className="gv-btn"
+                  style={{ padding: "4px 10px", fontSize: 11 }}
+                  disabled={busy}
+                  onClick={async () => {
+                    await window.electronAPI?.chooseGameConfig?.(gameId);
+                    void load(true);
+                  }}
+                >
+                  Chọn file setting...
+                </button>
+              )}
+            </div>
           </div>
           {preview?.candidates.length ? (
             <div className="gv-stack-sm">
