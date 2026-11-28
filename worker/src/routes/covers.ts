@@ -8,6 +8,7 @@ import {
 } from './images.ts';
 import { authenticate, isAdminUser } from '../auth.ts';
 import { rateLimit, CommunityError } from '../community-common.ts';
+import { canonicalNonSteamGameKey } from '../../../src/shared/game-identity.ts';
 
 const STEAM_STATIC_CDN_BASE = 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps';
 const IGDB_API_URL = 'https://api.igdb.com/v4/games';
@@ -45,8 +46,10 @@ async function searchIgdbCandidates(
   const auth = await getTwitchAccessToken(env);
   if (!auth) return [];
 
-  const splitCamel = query.replace(/([a-z])([A-Z])/g, '$1 $2');
-  const clean = splitCamel.replace(/"/g, '').trim();
+  const splitCamel = query
+    .replace(/[®™©]/g, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2');
+  const clean = splitCamel.replace(/"/g, '').replace(/\s+/g, ' ').trim();
 
   const runIgdbPost = async (body: string) => {
     const res = await fetch(IGDB_API_URL, {
@@ -65,7 +68,7 @@ async function searchIgdbCandidates(
 
   try {
     let rows: any[] = [];
-    if (steamId && steamId > 0) {
+    if (steamId && steamId > 0 && steamId < 2147483647) {
       rows = await runIgdbPost(
         `fields name, cover.image_id, artworks.image_id, screenshots.image_id; where external_games.category = 1 & external_games.uid = "${steamId}"; limit 5;`
       );
@@ -74,6 +77,14 @@ async function searchIgdbCandidates(
       rows = await runIgdbPost(
         `search "${clean}"; fields name, cover.image_id, artworks.image_id, screenshots.image_id; limit 8;`
       );
+    }
+    if (rows.length === 0 && clean.includes(':')) {
+      const baseTitle = clean.split(':')[0].trim();
+      if (baseTitle.length >= 3) {
+        rows = await runIgdbPost(
+          `search "${baseTitle}"; fields name, cover.image_id, artworks.image_id, screenshots.image_id; limit 8;`
+        );
+      }
     }
     return rows.map((r) => {
       const coverId = r?.cover?.image_id;
@@ -445,6 +456,16 @@ async function ingestExternalImage(
     const bytes = await readBoundedResponseBytes(res, MAX_IMAGE_SIZE_BYTES);
     if (!bytes || !hasValidImageSignature(bytes, mime)) return null;
 
+    // Reject Steam CDN's tiny solid-grey placeholder JPEGs (4584B / 1655B) for missing 2:3 posters
+    if (
+      kind === 'cover_poster' &&
+      mime === 'image/jpeg' &&
+      /steamstatic\.com/i.test(url) &&
+      bytes.byteLength < 6000
+    ) {
+      return null;
+    }
+
     if (options?.rejectLandscape && isLandscapeBytes(bytes)) {
       return null;
     }
@@ -662,6 +683,13 @@ export const handleCacheCover: RouteHandler = async (request, env) => {
       finalCoverUrl,
       finalBannerUrl
     ).run();
+
+    // Clean up any stale t_* title-keyed duplicate in game_covers when a valid Steam ID exists
+    if (steamId && steamId > 0 && steamId < 2147483647 && !gameKey.startsWith('t_')) {
+      await env.DB.prepare(
+        `DELETE FROM game_covers WHERE game_key LIKE 't_%' AND (steam_id = ? OR LOWER(TRIM(title)) = LOWER(TRIM(?)))`
+      ).bind(steamId, title).run();
+    }
   }
 
   return jsonResponse({
@@ -1100,25 +1128,51 @@ async function discoverGamesIntoCatalog(env: Env): Promise<{ discovered: number;
 
   let inserted = 0;
   for (const row of discoveredRows.results || []) {
-    const cleanKey = sanitizeGameKey(row.game_key);
-    if (!cleanKey) continue;
+    const rawKey = sanitizeGameKey(row.game_key);
+    if (!rawKey || rawKey === '2147483647' || rawKey === 't_ubisoftanticheatlauncher') continue;
+    const cleanKey = canonicalNonSteamGameKey(rawKey);
+    const cleanTitle = (row.title || cleanKey).trim();
+    const validSteamId = row.steam_id && Number(row.steam_id) > 0 && Number(row.steam_id) < 2147483647
+      ? Number(row.steam_id)
+      : null;
+
     const existing = await env.DB.prepare('SELECT game_key FROM game_covers WHERE game_key = ?')
       .bind(cleanKey)
       .first();
     if (existing) continue;
+
+    // Skip inserting a t_* row if a valid Steam ID entry already exists for the same title
+    if (cleanKey.startsWith('t_')) {
+      const steamMatch = await env.DB.prepare(
+        `SELECT game_key FROM game_covers WHERE steam_id > 0 AND steam_id < 2147483647 AND LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1`
+      ).bind(cleanTitle).first();
+      if (steamMatch) continue;
+    }
 
     await env.DB.prepare(`
       INSERT INTO game_covers (game_key, title, steam_id, cover_url, banner_url, updated_at)
       VALUES (?, ?, ?, ?, ?, datetime('now'))
     `).bind(
       cleanKey,
-      (row.title || cleanKey).trim(),
-      row.steam_id && Number(row.steam_id) > 0 ? Number(row.steam_id) : null,
+      cleanTitle,
+      validSteamId,
       row.cover_url || null,
       row.banner_url || null
     ).run();
     inserted++;
   }
+
+  // Clean up any stale t_* rows that now have a valid Steam ID counterpart with the same title
+  await env.DB.prepare(`
+    DELETE FROM game_covers
+    WHERE game_key LIKE 't_%'
+      AND EXISTS (
+        SELECT 1 FROM game_covers g2
+        WHERE g2.game_key NOT LIKE 't_%'
+          AND g2.steam_id > 0 AND g2.steam_id < 2147483647
+          AND LOWER(TRIM(g2.title)) = LOWER(TRIM(game_covers.title))
+      )
+  `).run();
 
   const totalRow = await env.DB.prepare('SELECT count(*) as total FROM game_covers').first<any>();
   return {
@@ -1141,6 +1195,40 @@ export const handleAdminDiscoverGames: RouteHandler = async (request, env) => {
     success: true,
     ...result,
   });
+};
+
+const ALLOWED_IGDB_SIZES = new Set(['t_cover_big_2x', 't_cover_big', 't_1080p', 't_720p']);
+
+/**
+ * GET /api/admin/igdb-image/:size/:imageId
+ * Proxies IGDB cover/artwork JPEGs through Cloudflare Edge so Admin previews
+ * work even when images.igdb.com is unreachable from the user's ISP.
+ */
+export const handleProxyIgdbImage: RouteHandler = async (_request, _env, ctx) => {
+  const size = String(ctx.params?.size || '').trim();
+  const imageId = String(ctx.params?.imageId || '').trim();
+  if (!ALLOWED_IGDB_SIZES.has(size) || !/^[a-z0-9_]{4,32}\.jpg$/i.test(imageId)) {
+    return errorResponse('Invalid IGDB image parameters', 400);
+  }
+  const targetUrl = `${IGDB_IMAGE_CDN}/${size}/${imageId}`;
+  try {
+    const res = await fetch(targetUrl, {
+      headers: { 'User-Agent': 'GameVault/1.0 (Admin IGDB Preview)' },
+    });
+    if (!res.ok || !res.body) {
+      return errorResponse('IGDB image not found', res.status || 404);
+    }
+    return new Response(res.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'public, max-age=86400',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch {
+    return errorResponse('Failed to fetch IGDB image', 502);
+  }
 };
 
 /**

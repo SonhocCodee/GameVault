@@ -811,6 +811,54 @@ test("Steam requirements are safe text, retain source, and handle missing recomm
   }
   assert.equal(stripSteamHtml("<li>GPU &lt;test&gt;</li>"), "GPU <test>");
 });
+test("Steam requirements fall back across regions and never return 404 when unavailable", async () => {
+  const f = await fixture();
+  configureSteamDiscovery(async (url) => {
+    const target = String(url);
+    if (target.includes("cc=us")) {
+      return new Response(JSON.stringify({ 2909400: { success: false } }));
+    }
+    return new Response(
+      JSON.stringify({
+        2909400: {
+          success: true,
+          data: {
+            name: "FINAL FANTASY VII REBIRTH",
+            pc_requirements: {
+              minimum: "<b>OS:</b> Windows 10 64-bit",
+            },
+          },
+        },
+      }),
+    );
+  });
+  try {
+    const res = await f.call("/games/2909400/requirements");
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.available, true);
+    assert.equal(data.title, "FINAL FANTASY VII REBIRTH");
+    assert.equal(data.minimum, "OS: Windows 10 64-bit");
+  } finally {
+    configureSteamDiscovery();
+  }
+
+  configureSteamDiscovery(
+    async () =>
+      new Response(JSON.stringify({ 9999999: { success: false } })),
+  );
+  try {
+    const res = await f.call("/games/9999999/requirements");
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.available, false);
+    assert.equal(data.minimum, null);
+    assert.equal(data.recommended, null);
+    assert.ok(data.sourceUrl.includes("/9999999/"));
+  } finally {
+    configureSteamDiscovery();
+  }
+});
 test("Steam search validates IDs and does not search private library data", async () => {
   const f = await fixture();
   f.d1.sqlite

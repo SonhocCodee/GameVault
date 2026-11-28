@@ -88,8 +88,8 @@ export function MonthlyRankings({ api, onGame, month, onMonthChange }: {
             {online && game.averageScore !== null && <span className="gv-muted">{decimal(game.averageScore)}/10 · {game.reviewCount} đánh giá</span>}
           </span>
           <span className="gv-monthly-metric">
-            <strong>{online ? decimal(game.totalMinutes / 60) : decimal(game.averageScore!)}</strong>
-            <span>{online ? "giờ trong tháng" : "/ 10"}</span>
+            <strong>{online ? decimal(game.totalMinutes / 60) : (Math.round(game.averageScore! * 10) / 10 % 1 === 0 ? Math.round(game.averageScore!).toString() : (Math.round(game.averageScore! * 10) / 10).toFixed(1))}</strong>
+            <span>{online ? "giờ trong tháng" : `${game.reviewCount} đánh giá`}</span>
           </span>
         </button>
       </li>

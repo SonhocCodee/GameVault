@@ -75,6 +75,8 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
   const fpsAutoShareStr = getSetting('fps_auto_share_enabled', customDb);
   const playtimeWatchStr = getSetting('playtime_watch_enabled', customDb);
   const hddModeStr = getSetting('hdd_mode', customDb);
+  const communityNotifyStr = getSetting('community_notify_enabled', customDb);
+  const communityNotifyIntervalStr = getSetting('community_notify_interval_min', customDb);
   const googleApiKey = decryptSecretString(getSetting('google_api_key', customDb) || '');
   const googleCseId = getSetting('google_cse_id', customDb) || '';
 
@@ -117,6 +119,10 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
     // HDD Mode defaults ON: buffers screenshots to protect spinning HDD drives.
     // When disabled (SSD mode), saves directly to game media folder to minimize SSD wear.
     hddMode: hddModeStr === null ? true : hddModeStr === 'true',
+    communityNotifyEnabled: communityNotifyStr === null ? true : communityNotifyStr === 'true',
+    communityNotifyIntervalMinutes: communityNotifyIntervalStr
+      ? Math.min(60, Math.max(5, parseInt(communityNotifyIntervalStr, 10) || 10))
+      : 10,
     googleApiKey,
     googleCseId,
     imageStorageProvider: provider === 'cloudflare_r2' ? 'cloudflare_r2' : (provider === 'google_photos' ? 'google_photos' : 'google_drive'),
@@ -254,6 +260,13 @@ export function saveAppSettings(patch: Partial<AppSettings>, customDb?: Database
   }
   if (patch.hddMode !== undefined) {
     setSetting('hdd_mode', patch.hddMode ? 'true' : 'false', customDb);
+  }
+  if (patch.communityNotifyEnabled !== undefined) {
+    setSetting('community_notify_enabled', patch.communityNotifyEnabled ? 'true' : 'false', customDb);
+  }
+  if (patch.communityNotifyIntervalMinutes !== undefined) {
+    const minutes = Math.min(60, Math.max(5, Math.round(patch.communityNotifyIntervalMinutes) || 10));
+    setSetting('community_notify_interval_min', String(minutes), customDb);
   }
   if (patch.googleApiKey !== undefined) {
     const apiKey = (patch.googleApiKey || '').trim();

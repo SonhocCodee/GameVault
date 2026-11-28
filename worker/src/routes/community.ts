@@ -654,7 +654,7 @@ export function registerCommunityRoutes(router: Router) {
         user.uid,
         gameKey,
         title,
-        b.steamId == null ? null : number(b.steamId, 1, 2147483647, true),
+        b.steamId == null ? null : number(b.steamId, 1, 2147483646, true),
         publicUrl(b.coverUrl),
         b.kind,
         body,
@@ -686,6 +686,25 @@ export function registerCommunityRoutes(router: Router) {
       throw new CommunityError(
         "Selected uploads changed. Please retry the post.",
         409,
+      );
+    const followers =
+      (
+        await env.DB.prepare(
+          `SELECT f.uid FROM community_follows f WHERE f.followed_uid=?
+      AND NOT EXISTS(SELECT 1 FROM community_blocks b WHERE
+        (b.uid=f.uid AND b.blocked_uid=?) OR (b.blocked_uid=f.uid AND b.uid=?))
+      LIMIT 500`,
+        )
+          .bind(user.uid, user.uid, user.uid)
+          .all<any>()
+      ).results || [];
+    if (followers.length)
+      await env.DB.batch(
+        followers.map((f) =>
+          env.DB.prepare(
+            "INSERT INTO community_notifications(id,uid,actor_uid,post_id,kind) VALUES (?,?,?,?,'new_post')",
+          ).bind(crypto.randomUUID(), f.uid, user.uid, id),
+        ),
       );
     return jsonResponse(
       {
@@ -1145,7 +1164,7 @@ export function registerCommunityRoutes(router: Router) {
         : sort === "score"
           ? "averageScore DESC,reviewCount DESC,recordedMinutes DESC"
           : "players DESC,recordedMinutes DESC,COALESCE(r.averageScore,0) DESC,COALESCE(r.reviewCount,0) DESC";
-    const catalogKey = `CASE WHEN steam_id>0 THEN CAST(steam_id AS TEXT)
+    const catalogKey = `CASE WHEN steam_id>0 AND steam_id<2147483647 THEN CAST(steam_id AS TEXT)
       WHEN game_key GLOB 's_[0-9]*' THEN SUBSTR(game_key,3)
       ELSE ${canonicalNonSteamGameKeySql("game_key")} END`;
     const libraryKey = canonicalNonSteamGameKeySql("l.game_key");
@@ -1157,13 +1176,14 @@ export function registerCommunityRoutes(router: Router) {
           `WITH catalog AS (
       SELECT ${catalogKey} AS game_key,
         MAX(${canonicalNonSteamGameTitleSql(catalogKey, "title")}) AS title,
-        MAX(steam_id) AS steamId,MAX(cover_url) AS coverUrl,MAX(banner_url) AS bannerUrl
+        MAX(CASE WHEN steam_id>0 AND steam_id<2147483647 THEN steam_id ELSE NULL END) AS steamId,
+        MAX(cover_url) AS coverUrl,MAX(banner_url) AS bannerUrl
       FROM game_covers
       WHERE NOT (
-        game_key LIKE 't_%'
+        (game_key LIKE 't_%' OR game_key = '2147483647')
         AND EXISTS (
           SELECT 1 FROM game_covers g2
-          WHERE g2.steam_id > 0
+          WHERE g2.steam_id > 0 AND g2.steam_id < 2147483647
             AND LOWER(TRIM(g2.title)) = LOWER(TRIM(game_covers.title))
         )
       )

@@ -73,6 +73,7 @@ export default function App() {
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
   const [communityGame, setCommunityGame] = useState<PublicGame | null>(null);
   const [profileRequest, setProfileRequest] = useState(0);
+  const [notificationRequest, setNotificationRequest] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [updateBanner, setUpdateBanner] = useState<{
@@ -438,10 +439,20 @@ export default function App() {
       showToast(`📸 F6 Capture: Đã đồng bộ ảnh vào "${info.gameTitle}"`);
     });
 
+    const unsubNotify = window.electronAPI?.onCommunityNotifyOpen?.(() => {
+      setCommunitySearch(undefined);
+      setProfileRequest(0);
+      setCommunityGame(null);
+      setNotificationRequest((request) => request + 1);
+      setView('community');
+      window.scrollTo({ top: 0 });
+    });
+
     return () => {
       if (unsubGame) unsubGame();
       if (unsubUpdated) unsubUpdated();
       if (unsubShot) unsubShot();
+      if (unsubNotify) unsubNotify();
     };
   }, [fetchGames, showToast]);
 
@@ -755,6 +766,7 @@ export default function App() {
           setCommunitySearch(undefined);
           setProfileRequest(0);
           setCommunityGame(null);
+          setNotificationRequest(0);
           setView('community');
           window.scrollTo({ top: 0 });
         }}
@@ -762,6 +774,7 @@ export default function App() {
           setCommunitySearch(undefined);
           setCommunityGame(null);
           setProfileRequest((request) => request + 1);
+          setNotificationRequest(0);
           setView('community');
           window.scrollTo({ top: 0 });
         }}
@@ -770,7 +783,7 @@ export default function App() {
       {/* Main View Router */}
       <main className="mx-auto max-w-7xl">
         {view === 'community' ? (
-          <CommunityView searchRequest={communitySearch} onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} profileRequest={profileRequest} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
+          <CommunityView searchRequest={communitySearch} onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} profileRequest={profileRequest} notificationRequest={notificationRequest} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
         ) : view === 'detail' && selectedGameId !== null ? (
           <GameDetail
             gameId={selectedGameId}

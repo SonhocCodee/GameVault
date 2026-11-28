@@ -58,24 +58,36 @@ async function cached<T>(
   env: Env,
   cacheKey: string,
   loader: () => Promise<T>,
+  ttlFor: (value: T) => number = () => 21600,
 ): Promise<T> {
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
-    "SELECT value FROM community_steam_cache WHERE key=? AND expires_at>?",
+    "SELECT value, expires_at FROM community_steam_cache WHERE key=?",
   )
-    .bind(cacheKey, now)
-    .first<any>();
+    .bind(cacheKey)
+    .first<{ value: string; expires_at: number }>();
+  let stale: T | undefined;
   if (row) {
     try {
-      return JSON.parse(row.value);
+      stale = JSON.parse(row.value) as T;
+      if (row.expires_at > now) return stale;
     } catch {}
   }
-  const data = await loader();
-  await env.DB.prepare(
-    "INSERT INTO community_steam_cache(key,value,expires_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,expires_at=excluded.expires_at",
-  )
-    .bind(cacheKey, JSON.stringify(data), now + 21600)
-    .run();
+  let data: T;
+  try {
+    data = await loader();
+  } catch (error) {
+    if (stale !== undefined) return stale;
+    throw error;
+  }
+  const ttl = ttlFor(data);
+  if (ttl > 0) {
+    await env.DB.prepare(
+      "INSERT INTO community_steam_cache(key,value,expires_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,expires_at=excluded.expires_at",
+    )
+      .bind(cacheKey, JSON.stringify(data), now + ttl)
+      .run();
+  }
   if (Math.random() < 0.05) {
     await env.DB.prepare("DELETE FROM community_steam_cache WHERE expires_at<?")
       .bind(now - 86400)
@@ -91,6 +103,7 @@ async function steamJson(url: string): Promise<any> {
       signal: controller.signal,
       headers: {
         Accept: "application/json",
+        "User-Agent": "GameVault/1.0",
       },
     });
     if (!response.ok)
@@ -152,7 +165,7 @@ export function validatePerformanceReport(input: any): PerformanceReport {
   return {
     gameKey: key(input.gameKey),
     title: text(input.title, 160, true),
-    steamId: input.steamId ? number(input.steamId, 1, 2147483647, true) : null,
+    steamId: input.steamId ? number(input.steamId, 1, 2147483646, true) : null,
     coverUrl: publicUrl(input.coverUrl),
     completionStatus: input.completionStatus,
     cpu: text(input.cpu, 160, true),
@@ -279,36 +292,79 @@ export function registerDiscoveryRoutes(router: Router) {
       };
       return jsonResponse(empty);
     }
-    const id = number(Number(gameKey), 1, 2147483647, true);
-    const details = await cached<SteamRequirements>(
-      env,
-      `details-v2:${id}`,
-      async () => {
-        const result = await steamJson(
+    const id = number(Number(gameKey), 1, 2147483646, true);
+    const buildFallbackRequirements = async (): Promise<SteamRequirements> => {
+      const row = await env.DB.prepare(
+        "SELECT title,steam_id,cover_url FROM game_covers WHERE game_key=? OR steam_id=? LIMIT 1",
+      )
+        .bind(String(id), id)
+        .first<any>();
+      return {
+        gameKey: String(id),
+        title: row?.title || String(id),
+        steamId: id,
+        coverUrl: publicUrl(row?.cover_url) || null,
+        minimum: null,
+        recommended: null,
+        sourceUrl: `https://store.steampowered.com/app/${id}/`,
+        fetchedAt: new Date().toISOString(),
+        available: false,
+      };
+    };
+
+    try {
+      const details = await cached<SteamRequirements>(
+        env,
+        `details-v2:${id}`,
+        async () => {
+          const urls = [
             `https://store.steampowered.com/api/appdetails?appids=${id}&l=english&cc=us`,
-          ),
-          game = result?.[String(id)];
-        if (!game?.success || !game.data)
-          throw new CommunityError("Steam game not found", 404);
-        const d = game.data;
-        return {
-          gameKey: String(id),
-          title: text(d.name, 160, true),
-          steamId: id,
-          coverUrl: publicUrl(d.header_image),
-          description: stripSteamHtml(d.short_description),
-          genres: Array.isArray(d.genres) ? d.genres.slice(0, 12).map((g: any) => text(g.description, 100)) : [],
-          developers: Array.isArray(d.developers) ? d.developers.slice(0, 8).map((s: any) => text(s, 160)) : [],
-          releaseDate: typeof d.release_date?.date === "string" ? text(d.release_date.date, 80) : null,
-          minimum: stripSteamHtml(d.pc_requirements?.minimum),
-          recommended: stripSteamHtml(d.pc_requirements?.recommended),
-          sourceUrl: `https://store.steampowered.com/app/${id}/`,
-          fetchedAt: new Date().toISOString(),
-          available: true,
-        };
-      },
-    );
-    return jsonResponse(details);
+            `https://store.steampowered.com/api/appdetails?appids=${id}&l=english`,
+            `https://store.steampowered.com/api/appdetails?appids=${id}&l=english&cc=jp`,
+          ];
+          let hadTransientError = false;
+          let matchedData: any = null;
+          for (const url of urls) {
+            try {
+              const result = await steamJson(url);
+              const game = result?.[String(id)];
+              if (game?.success && game.data) {
+                matchedData = game.data;
+                break;
+              }
+            } catch {
+              hadTransientError = true;
+            }
+          }
+          if (!matchedData) {
+            if (hadTransientError) {
+              throw new CommunityError("Cannot load Steam data. Please retry.", 502);
+            }
+            return buildFallbackRequirements();
+          }
+          const d = matchedData;
+          return {
+            gameKey: String(id),
+            title: text(d.name, 160, true),
+            steamId: id,
+            coverUrl: publicUrl(d.header_image),
+            description: stripSteamHtml(d.short_description),
+            genres: Array.isArray(d.genres) ? d.genres.slice(0, 12).map((g: any) => text(g.description, 100)) : [],
+            developers: Array.isArray(d.developers) ? d.developers.slice(0, 8).map((s: any) => text(s, 160)) : [],
+            releaseDate: typeof d.release_date?.date === "string" ? text(d.release_date.date, 80) : null,
+            minimum: stripSteamHtml(d.pc_requirements?.minimum),
+            recommended: stripSteamHtml(d.pc_requirements?.recommended),
+            sourceUrl: `https://store.steampowered.com/app/${id}/`,
+            fetchedAt: new Date().toISOString(),
+            available: true,
+          };
+        },
+        (value) => (value.available ? 21600 : 1800),
+      );
+      return jsonResponse(details);
+    } catch {
+      return jsonResponse(await buildFallbackRequirements());
+    }
   });
   add("GET", "/games/:gameKey/players", async (request, env, ctx) => {
     const gameKey = key(ctx.params?.gameKey);

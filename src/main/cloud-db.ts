@@ -155,7 +155,8 @@ export async function communityUploadImage(bytes: ArrayBuffer, mime: string): Pr
 }
 
 export function computeGameKey(game: Game): string {
-  if (game.steam_id && Number(game.steam_id) > 0) return String(Number(game.steam_id));
+  const sid = Number(game.steam_id);
+  if (Number.isInteger(sid) && sid > 0 && sid < 2147483647) return String(sid);
   return canonicalNonSteamGameKeyFromTitle(game.title);
 }
 
@@ -1399,6 +1400,7 @@ function computePerformanceSignature(report: {
         .join(';')
     : '';
   return [
+    'v2',
     report.gameKey,
     report.completionStatus,
     report.fpsAverage,

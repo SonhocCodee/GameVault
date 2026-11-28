@@ -6,6 +6,28 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 14:30] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Hoàn thiện chia sẻ & hiển thị chi tiết setting đồ họa (`graphics.details`) trên Community Hub & phát hành `v1.0.10`**:
+  - Bổ sung hiển thị `r.graphics.details` (tối đa 12 mục) trong danh sách báo cáo cộng đồng ở tab **Cấu hình & Hiệu năng (`specs`)** của `src/renderer/community/GameHub.tsx`.
+  - Bump prefix `'v2'` trong `computePerformanceSignature` (`src/main/cloud-db.ts`) để các máy đã sync lên Worker cũ tự động re-upload đầy đủ `graphics.details` lên Worker mới.
+  - Đã deploy `worker/` (`npm run deploy:worker`, Version ID `5ba2dd75-6cac-4996-8b66-41727cbac959`).
+  - Gộp các thay đổi đang có trên máy (`admin-web` `CoverEditorPanel` + `ImageCropModal`, `worker` covers/community/discovery, `tracker.ts`, `MonthlyRankings.tsx`, `game-identity.ts`, `tests/community.test.js`), cập nhật `src/shared/changelog.ts` & bump `package.json` lên `1.0.10`.
+
+### File chính đã thay đổi
+- `src/renderer/community/GameHub.tsx`, `src/main/cloud-db.ts`, `src/shared/changelog.ts`, `package.json`
+- `admin-web/src/components/CoverEditorPanel.tsx`, `admin-web/src/components/ImageCropModal.tsx`
+- `worker/src/index.ts`, `worker/src/routes/community.ts`, `worker/src/routes/covers.ts`, `worker/src/routes/discovery.ts`
+- `src/main/tracker.ts`, `src/renderer/community/MonthlyRankings.tsx`, `src/renderer/community/community.css`, `src/shared/game-identity.ts`, `tests/community.test.js`
+- `PENDING_PUSH.md`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`, `npx tsc --noEmit -p worker/tsconfig.json`, `npm run build`, `npm test` (chạy trước khi push).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Pull `main` về; mở app trên máy có nick `son6232000@gmail.com` để `v2` signature tự re-upload `graphics.details` lên Worker mới.
+
 ## [2026-11-28 11:17] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

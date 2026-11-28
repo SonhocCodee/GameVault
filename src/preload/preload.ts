@@ -422,6 +422,13 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.removeListener('drive:mediaProgress', handler);
     };
   },
+  onCommunityNotifyOpen: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('community:notify-open', handler);
+    return () => {
+      ipcRenderer.removeListener('community:notify-open', handler);
+    };
+  },
 
   // In-app Auto Updater
   getUpdateStatus: (): Promise<AppUpdateStatus> => {

@@ -76,6 +76,7 @@ export function DesktopCommunity({
   authStatus,
   initialGame,
   profileRequest,
+  notificationRequest,
   onLocalGame,
 }: {
   onBack?: () => void;
@@ -83,6 +84,7 @@ export function DesktopCommunity({
   authStatus?: AuthStatus | null;
   initialGame?: PublicGame | null;
   profileRequest?: number;
+  notificationRequest?: number;
   onLocalGame?: (id: number) => void;
 }) {
   const [base, setBase] = useState("");
@@ -171,6 +173,7 @@ export function DesktopCommunity({
         shellAuth={authStatus}
         initialGame={initialGame}
         profileRequest={profileRequest}
+        notificationRequest={notificationRequest}
         onLocalGame={onLocalGame}
         games={games.map(gameToPublic)}
         onAdd={async (g) => {

@@ -36,6 +36,7 @@ import {
   handleAdminBatchIngest,
   handleAdminSyncAll,
   handleAdminDeleteCover,
+  handleProxyIgdbImage,
 } from './routes/covers.ts';
 
 export const router = new Router();
@@ -96,6 +97,7 @@ router.get('/api/admin/me', handleAdminMe);
 router.get('/api/admin/covers', handleAdminGetCovers);
 router.post('/api/admin/covers/discover', handleAdminDiscoverGames);
 router.post('/api/admin/covers/igdb-search', handleAdminIgdbSearch);
+router.get('/api/admin/igdb-image/:size/:imageId', handleProxyIgdbImage);
 router.post('/api/admin/covers/health-check', handleAdminHealthCheck);
 router.post('/api/admin/covers/batch-ingest', handleAdminBatchIngest);
 router.post('/api/admin/covers/sync-all', handleAdminSyncAll);

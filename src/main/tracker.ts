@@ -128,13 +128,13 @@ export const GAME_PLATFORM_DIR_REGEX = /\\(steamapps\\common|epic games|gog game
 export const USER_GAME_DIR_REGEX = /(?:^[a-zA-Z]:\\(?:games?|gaming|tro choi|my games)\b|\\(?:games?|gaming|my games)\\[^\\]+\\)/i;
 
 /** Common installer / updater / tool executables to skip even within game folders */
-export const INSTALLER_OR_TOOL_EXE_REGEX = /(?:^|[._-])(?:unins\d*|setup|installer?|updater?|crashpad_handler|crashreporter|unitycrashhandler.*|vc_redist.*|dxsetup|easyanticheat.*|battleye.*)(?:[._-]|\.exe$)/i;
+export const INSTALLER_OR_TOOL_EXE_REGEX = /(?:^|[._-])(?:unins\d*|setup|installer?|updater?|crashpad_handler|crashreporter|unitycrashhandler.*|vc_redist.*|dxsetup|easyanticheat.*|battleye.*|ubisoftanticheat.*)(?:[._-]|\.exe$)/i;
 
 /** Known game launchers, client frontends, IDEs, remote tools, browsers and utilities that are NOT games */
-export const KNOWN_LAUNCHER_OR_CLIENT_REGEX = /^(?:leagueclient.*|riot\s*client.*|riotclient.*|googledrive.*|steam|steamwebhelper|steamservice|epicgameslauncher|epicwebhelper|galaxyclient.*|ea|eadesktop|ealauncher|eabackgroundservice|link2ea|battle\.net.*|agent|upc|ubisoftconnect.*|ubisoftgamelauncher.*|garena.*|onedrive.*|dropbox.*|ultraviewer.*|antigravity.*|cursor.*|windsurf.*|code(?:-insiders)?|claude.*|mremoteng.*|putty.*|winscp.*|filezilla.*|postman.*|insomnia.*|figma.*|notion.*|obsidian.*|docker.*|ollama.*|tailscale.*|gamevault.*)\.exe$/i;
+export const KNOWN_LAUNCHER_OR_CLIENT_REGEX = /^(?:leagueclient.*|riot\s*client.*|riotclient.*|googledrive.*|steam|steamwebhelper|steamservice|epicgameslauncher|epicwebhelper|galaxyclient.*|ea|eadesktop|ealauncher|eabackgroundservice|link2ea|battle\.net.*|agent|upc|ubisoftconnect.*|ubisoftgamelauncher.*|ubisoftanticheat.*|garena.*|onedrive.*|dropbox.*|ultraviewer.*|antigravity.*|cursor.*|windsurf.*|code(?:-insiders)?|claude.*|mremoteng.*|putty.*|winscp.*|filezilla.*|postman.*|insomnia.*|figma.*|notion.*|obsidian.*|docker.*|ollama.*|tailscale.*|gamevault.*)\.exe$/i;
 
 /** Known non-game title patterns (catches synced/imported utility entries even without exe path) */
-export const NON_GAME_TITLE_REGEX = /^(?:antigravity(?:\s*-?\s*x\s*64)?|m\s*remote\s*ng|putty(?:\s*ng)?|ultra\s*viewer(?:[_\s]*desktop)?|visual\s*studio\s*code|cursor|windsurf|google\s*drive.*|riot\s*client.*|league\s*client.*|discord.*|spotify|vlc|ollama|crosshair(?:\s*v\d+)?)$/i;
+export const NON_GAME_TITLE_REGEX = /^(?:antigravity(?:\s*-?\s*x\s*64)?|m\s*remote\s*ng|putty(?:\s*ng)?|ultra\s*viewer(?:[_\s]*desktop)?|visual\s*studio\s*code|cursor|windsurf|google\s*drive.*|riot\s*client.*|league\s*client.*|ubisoft\s*(?:connect|game\s*launcher|anti-?cheat\s*launcher).*|discord.*|spotify|vlc|ollama|crosshair(?:\s*v\d+)?)$/i;
 
 /** Core game SDK / runtime files to look for in the executable's directory */
 export const GAME_SDK_FINGERPRINTS = [

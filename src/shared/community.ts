@@ -211,7 +211,7 @@ export interface Page<T> {
 export interface CommunityNotification {
   id: string;
   postId: string;
-  kind: "like" | "comment";
+  kind: "like" | "comment" | "new_post";
   nickname: string;
   read: boolean;
   createdAt: string;

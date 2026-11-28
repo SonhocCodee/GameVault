@@ -24,6 +24,10 @@ import { syncScreenshots } from './sync-screenshots.js';
 import { getTracker, manualEditPlaytime, cleanupNonGameEntries } from './tracker.js';
 import { initDiscordDetectable } from './discord-detectable.js';
 import { communityRequest, communityUploadImage } from './cloud-db.js';
+import {
+  startCommunityNotifications,
+  updateCommunityNotificationsConfig,
+} from './community-notifications.js';
 import { capturePerformanceContext, getPerformancePreview, prepareMeasuredReport, saveGameGraphics } from './performance-context.js';
 import { detectGameConfigs, discoverGameConfigsAsync, exportGameSettings, registerManualConfig } from './game-settings.js';
 import { getFpsMonitor } from './fps-monitor.js';
@@ -762,6 +766,12 @@ function registerIpcHandlers(): void {
     if (patch.closeToTray !== undefined) {
       closeToTrayEnabled = updated.closeToTray;
     }
+    if (
+      patch.communityNotifyEnabled !== undefined ||
+      patch.communityNotifyIntervalMinutes !== undefined
+    ) {
+      updateCommunityNotificationsConfig(updated);
+    }
     if (patch.appStartupEnabled !== undefined) {
       toggleAppStartup(updated.appStartupEnabled, getAppStartupLaunchInfo()).catch(() => {});
     }
@@ -1168,6 +1178,7 @@ app.whenReady().then(() => {
   // Create Window immediately for instant UX
   createWindow(startHidden);
   createTray();
+  startCommunityNotifications(() => mainWindow);
   initAutoUpdater(() => mainWindow, () => { forceQuit = true; });
 
   // Re-ensure the Startup shortcut exists (e.g. after a folder cleanup)

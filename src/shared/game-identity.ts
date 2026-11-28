@@ -24,6 +24,11 @@ export const NON_STEAM_GAME_IDENTITIES: readonly NonSteamGameIdentity[] = [
     title: "VALORANT",
     titleAliases: ["VALORANT"],
   },
+  {
+    gameKey: "t_roblox",
+    title: "Roblox",
+    titleAliases: ["Roblox", "Roblox Player", "RobloxPlayerBeta"],
+  },
 ];
 
 function legacyTitleToken(value: string): string {

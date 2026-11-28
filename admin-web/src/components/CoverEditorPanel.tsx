@@ -10,7 +10,9 @@ import {
   Activity,
   Trash2,
   AlertTriangle,
+  Crop,
 } from 'lucide-react';
+import { ImageCropModal } from './ImageCropModal.tsx';
 import {
   type AdminCoverItem,
   type HealthCheckItem,
@@ -41,6 +43,17 @@ function formatSyncSummary(stats?: PropagationStats): string {
   return `Đồng bộ toàn server: ${stats.userLibraryUpdated} library, ${stats.ratingsUpdated} reviews, ${stats.picksUpdated + stats.votesUpdated} picks/votes.`;
 }
 
+function toAdminPreviewUrl(rawUrl?: string | null): string | null {
+  if (!rawUrl) return null;
+  const igdbMatch = rawUrl.match(
+    /^https:\/\/images\.igdb\.com\/igdb\/image\/upload\/(t_cover_big_2x|t_cover_big|t_1080p|t_720p)\/([a-z0-9_]{4,32}\.jpg)$/i
+  );
+  if (igdbMatch) {
+    return `/api/admin/igdb-image/${igdbMatch[1]}/${igdbMatch[2]}`;
+  }
+  return qualifyImageUrl(rawUrl);
+}
+
 export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
   cover,
   health,
@@ -61,6 +74,12 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
   const [igdbResults, setIgdbResults] = useState<IgdbCandidate[] | null>(null);
   const [posterBroken, setPosterBroken] = useState<boolean>(false);
   const [bannerBroken, setBannerBroken] = useState<boolean>(false);
+  const [cropTarget, setCropTarget] = useState<{
+    type: 'poster' | 'banner';
+    sourceUrl: string;
+    originalFile?: File | null;
+    isObjectUrl?: boolean;
+  } | null>(null);
 
   const posterInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +124,35 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
     } finally {
       setSaving(false);
     }
+  };
+
+  const openFileCropper = (type: 'poster' | 'banner', file?: File | null) => {
+    if (!file) return;
+    if (file.type === 'image/gif') {
+      handleFileUpload(type, file);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setCropTarget({
+      type,
+      sourceUrl: objectUrl,
+      originalFile: file,
+      isObjectUrl: true,
+    });
+  };
+
+  const openCropFromBanner = () => {
+    const src = qualifyImageUrl(bannerUrl);
+    if (!src) {
+      onError('Chưa có ảnh Banner để cắt thành Poster');
+      return;
+    }
+    setCropTarget({
+      type: 'poster',
+      sourceUrl: src,
+      originalFile: null,
+      isObjectUrl: false,
+    });
   };
 
   const handleFileUpload = async (type: 'poster' | 'banner', file?: File | null) => {
@@ -200,7 +248,7 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
     inputRef: React.RefObject<HTMLInputElement | null>
   ) => {
     const isPoster = type === 'poster';
-    const previewSrc = qualifyImageUrl(url);
+    const previewSrc = toAdminPreviewUrl(url);
     const healthStatus = isPoster ? health?.poster : health?.banner;
 
     return (
@@ -210,7 +258,7 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
           e.preventDefault();
           const f = e.dataTransfer.files?.[0];
           if (f && f.type.startsWith('image/')) {
-            handleFileUpload(type, f);
+            openFileCropper(type, f);
           }
         }}
         className="rounded-xl border border-[#262b3d] bg-[#161a26] p-3.5 space-y-3"
@@ -247,23 +295,37 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) handleFileUpload(type, f);
+              if (f) openFileCropper(type, f);
               e.target.value = '';
             }}
           />
-          <button
-            type="button"
-            disabled={uploadingType !== null}
-            onClick={() => inputRef.current?.click()}
-            className="flex items-center gap-1.5 rounded-lg bg-[#262b3d] hover:bg-[#353c54] px-2.5 py-1 text-[11px] font-semibold text-white transition disabled:opacity-50"
-          >
-            {uploadingType === type ? (
-              <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
-            ) : (
-              <Upload className="h-3 w-3 text-amber-400" />
+          <div className="flex items-center gap-1.5">
+            {isPoster && bannerUrl && !bannerBroken && (
+              <button
+                type="button"
+                disabled={uploadingType !== null}
+                onClick={openCropFromBanner}
+                className="flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 px-2.5 py-1 text-[11px] font-semibold text-sky-300 transition disabled:opacity-50"
+                title="Cắt một phần từ ảnh Banner 16:9 hiện tại thành Poster 2:3"
+              >
+                <Crop className="h-3 w-3" />
+                <span>Cắt từ Banner</span>
+              </button>
             )}
-            <span>Chọn / Kéo ảnh</span>
-          </button>
+            <button
+              type="button"
+              disabled={uploadingType !== null}
+              onClick={() => inputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-lg bg-[#262b3d] hover:bg-[#353c54] px-2.5 py-1 text-[11px] font-semibold text-white transition disabled:opacity-50"
+            >
+              {uploadingType === type ? (
+                <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+              ) : (
+                <Upload className="h-3 w-3 text-amber-400" />
+              )}
+              <span>Chọn / Kéo ảnh</span>
+            </button>
+          </div>
         </div>
 
         <div className={isPoster ? 'flex gap-3' : 'space-y-2.5'}>
@@ -413,12 +475,31 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
                     }
                     setIgdbResults(null);
                   }}
-                  className="flex items-center gap-2 rounded-lg border border-[#262b3d] bg-[#121520] p-1.5 text-left hover:border-purple-400"
+                  className="flex items-center gap-2.5 rounded-lg border border-[#262b3d] bg-[#121520] p-2 text-left hover:border-purple-400 transition"
                 >
-                  {cand.posterUrl && (
-                    <img src={cand.posterUrl} alt="" className="h-10 w-7 rounded object-cover shrink-0" />
-                  )}
-                  <span className="text-[11px] text-white font-medium line-clamp-2">{cand.name}</span>
+                  <div className="h-14 w-10 rounded bg-[#0b0d13] border border-[#262b3d] overflow-hidden shrink-0 flex items-center justify-center">
+                    {cand.posterUrl ? (
+                      <img
+                        src={toAdminPreviewUrl(cand.posterUrl) || cand.posterUrl}
+                        referrerPolicy="no-referrer"
+                        alt={cand.name}
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-[9px] text-[#60677a]">No img</span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="text-[11px] text-white font-semibold line-clamp-2">{cand.name}</div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-[#8e95a5]">
+                      <span>{cand.posterUrl ? 'Poster ✓' : 'No poster'}</span>
+                      <span>•</span>
+                      <span>{cand.bannerUrl ? 'Banner ✓' : 'No banner'}</span>
+                    </div>
+                  </div>
                 </button>
               ))}
             </div>
@@ -461,6 +542,26 @@ export const CoverEditorPanel: React.FC<CoverEditorPanelProps> = ({
           <span>Lưu & Đồng bộ toàn Server</span>
         </button>
       </div>
+
+      {cropTarget && (
+        <ImageCropModal
+          sourceUrl={cropTarget.sourceUrl}
+          targetType={cropTarget.type}
+          originalFile={cropTarget.originalFile}
+          onConfirm={(croppedFile) => handleFileUpload(cropTarget.type, croppedFile)}
+          onUploadOriginal={
+            cropTarget.originalFile
+              ? (origFile) => handleFileUpload(cropTarget.type, origFile)
+              : undefined
+          }
+          onClose={() => {
+            if (cropTarget.isObjectUrl) {
+              URL.revokeObjectURL(cropTarget.sourceUrl);
+            }
+            setCropTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 };

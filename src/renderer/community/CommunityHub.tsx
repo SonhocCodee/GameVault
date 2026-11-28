@@ -115,6 +115,7 @@ export function CommunityHub({
   shellAuth,
   initialGame,
   profileRequest = 0,
+  notificationRequest = 0,
   onLocalGame,
 }: {
   searchRequest?: CommunitySearchRequest;
@@ -126,9 +127,16 @@ export function CommunityHub({
   shellAuth?: AuthStatus | null;
   initialGame?: PublicGame | null;
   profileRequest?: number;
+  notificationRequest?: number;
   onLocalGame?: (id: number) => void;
 }) {
-  const [tab, setTab] = useState<Tab>(profileRequest ? "profile" : "feed");
+  const [tab, setTab] = useState<Tab>(
+    profileRequest
+      ? "profile"
+      : notificationRequest
+        ? "notifications"
+        : "feed",
+  );
   const [route, setRoute] = useState<Route>(() =>
     initialGame ? { game: initialGame } : embedded ? {} : initialRoute(),
   );
@@ -577,6 +585,10 @@ export function CommunityHub({
         .catch(() => {});
     }
   }, [me?.uid, identityUnavailable, api]);
+
+  useEffect(() => {
+    if (notificationRequest > 0) setTab("notifications");
+  }, [notificationRequest]);
 
   useEffect(() => {
     if (tab === "notifications" && me) void loadNotifications();
@@ -2070,8 +2082,10 @@ export function CommunityHub({
           <section className="gv-stack">
             <div className="gv-top">
               <div>
-                <h2>Thông báo tương tác</h2>
-                <p className="gv-muted">Lượt thả tim và bình luận mới nhất trên bài của bạn.</p>
+                <h2>Thông báo</h2>
+                <p className="gv-muted">
+                  Tương tác trên bài của bạn và bài mới từ người bạn theo dõi.
+                </p>
               </div>
               <div className="gv-actions">
                 <button type="button" onClick={() => void loadNotifications()}>
@@ -2110,7 +2124,11 @@ export function CommunityHub({
                   >
                     <span>
                       <strong>{n.nickname}</strong>{" "}
-                      {n.kind === "like" ? "đã thả tim" : "đã bình luận"} bài viết của bạn
+                      {n.kind === "like"
+                        ? "đã thả tim bài viết của bạn"
+                        : n.kind === "new_post"
+                          ? "vừa đăng bài mới"
+                          : "đã bình luận bài viết của bạn"}
                     </span>
                     <span className="gv-actions">
                       <span className="gv-muted" style={{ fontSize: 12 }}>

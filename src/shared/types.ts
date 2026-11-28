@@ -520,6 +520,8 @@ export interface AppSettings {
   playtimeWatchEnabled: boolean;
   /** HDD Mode: buffer screenshots on fast drive before syncing to avoid spinning up HDD during gameplay. If disabled (SSD mode), saves directly to game media folder. */
   hddMode: boolean;
+  communityNotifyEnabled: boolean;
+  communityNotifyIntervalMinutes: number;
   googleApiKey: string;
   googleCseId: string;
   /** Image Storage Provider: 'cloudflare_r2' (default) or 'google_photos' */
@@ -764,6 +766,7 @@ export interface ElectronAPI {
   onGameUpdated?(callback: (game: Game) => void): () => void;
   onScreenshotSynced?(callback: (info: { gameTitle: string; file: string; targetPath: string }) => void): () => void;
   onDriveMediaProgress?(callback: (progress: DriveMediaProgress) => void): () => void;
+  onCommunityNotifyOpen?(callback: () => void): () => void;
 
   // In-app Auto Updater
   getUpdateStatus?(): Promise<AppUpdateStatus>;

@@ -112,6 +112,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
   const [appStartupEnabled, setAppStartupEnabled] = useState<boolean>(false);
   const [playtimeWatchEnabled, setPlaytimeWatchEnabled] = useState<boolean>(true);
+  const [communityNotifyEnabled, setCommunityNotifyEnabled] = useState<boolean>(true);
+  const [communityNotifyIntervalMinutes, setCommunityNotifyIntervalMinutes] = useState<number>(10);
   const [fpsAutoCaptureEnabled, setFpsAutoCaptureEnabled] = useState<boolean>(true);
   const [fpsAutoShareEnabled, setFpsAutoShareEnabled] = useState<boolean>(false);
   const [autoEnrichCovers, setAutoEnrichCovers] = useState<boolean>(true);
@@ -153,6 +155,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setCloseToTray(data.closeToTray);
         setAppStartupEnabled(data.appStartupEnabled);
         setPlaytimeWatchEnabled(data.playtimeWatchEnabled);
+        setCommunityNotifyEnabled(data.communityNotifyEnabled !== undefined ? data.communityNotifyEnabled : true);
+        setCommunityNotifyIntervalMinutes(data.communityNotifyIntervalMinutes || 10);
         setFpsAutoCaptureEnabled(data.fpsAutoCaptureEnabled);
         setFpsAutoShareEnabled(data.fpsAutoShareEnabled);
         setAutoEnrichCovers(data.autoEnrichCovers);
@@ -327,6 +331,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           closeToTray,
           appStartupEnabled,
           playtimeWatchEnabled,
+          communityNotifyEnabled,
+          communityNotifyIntervalMinutes,
           fpsAutoCaptureEnabled,
           fpsAutoShareEnabled: fpsAutoCaptureEnabled && fpsAutoShareEnabled,
           autoEnrichCovers,
@@ -1329,6 +1335,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           }`}
                         />
                       </button>
+                    </div>
+
+                    {/* Community background notifications */}
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-[#2a2e3d] bg-[#161822] p-4">
+                      <div>
+                        <span className="font-bold text-xs text-white">Thông báo cộng đồng khi chạy ngầm</span>
+                        <p className="mt-1 text-[11px] text-[#8e95a5]">
+                          App ẩn ở khay vẫn kiểm tra định kỳ: ai đó đăng bài mới (người bạn theo dõi), thả tim hoặc bình luận bài của bạn → hiện thông báo Windows, bấm vào mở ngay tab Thông báo.
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <select
+                          value={communityNotifyIntervalMinutes}
+                          onChange={(e) => setCommunityNotifyIntervalMinutes(parseInt(e.target.value, 10))}
+                          disabled={!communityNotifyEnabled}
+                          className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs text-white outline-none focus:border-[#ff2a44] disabled:opacity-40"
+                        >
+                          <option value={5}>5 phút</option>
+                          <option value={10}>10 phút (Khuyên dùng)</option>
+                          <option value={15}>15 phút</option>
+                          <option value={30}>30 phút</option>
+                          <option value={60}>60 phút</option>
+                        </select>
+                        <button
+                          onClick={() => setCommunityNotifyEnabled(!communityNotifyEnabled)}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                            communityNotifyEnabled ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              communityNotifyEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
                     </div>
 
                     {/* App Version & Auto-Update */}

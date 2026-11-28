@@ -565,13 +565,6 @@ export function GameHub({
                     : "--"}
                 </div>
                 <div className="gv-meta-score-details">
-                  <div className="gv-meta-score-headline">
-                    <span
-                      className={`gv-meta-verdict gv-meta-text-${getMetacriticTier(reviewStats?.avg)}`}
-                    >
-                      {getMetacriticVerdict(reviewStats?.avg, reviewStats?.count ?? 0)}
-                    </span>
-                  </div>
                   <div className="gv-meta-stats-row">
                     <span className="gv-meta-count">
                       <strong>{reviewStats?.count ?? 0}</strong> đánh giá
@@ -587,28 +580,6 @@ export function GameHub({
                   </div>
                 </div>
               </div>
-
-              {perfStats && (
-                <div
-                  className="gv-meta-perf-box"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setHubTab("specs");
-                  }}
-                  title="Nhấn để xem chi tiết cấu hình & FPS"
-                >
-                  <div className="gv-meta-perf-icon">
-                    <Gauge size={18} />
-                  </div>
-                  <div>
-                    <div className="gv-meta-perf-label">Hiệu năng cộng đồng</div>
-                    <div className="gv-meta-perf-value">
-                      TB <strong>{perfStats.avg.toFixed(0)} FPS</strong>
-                      <span className="gv-meta-sub"> ({perfStats.count} benchmark)</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -878,9 +849,7 @@ export function GameHub({
               <div>
                 <h2>FPS & cấu hình thực tế</h2>
                 <p className="gv-muted">
-                  {perfStats
-                    ? `Trung bình ${perfStats.avg.toFixed(0)} FPS (từ ${perfStats.min.toFixed(0)} đến ${perfStats.max.toFixed(0)} FPS) qua ${perfStats.count} báo cáo.`
-                    : "Phiên đo trên máy bạn và báo cáo từ người chơi khác."}
+                  Phiên đo trên máy bạn và báo cáo từ người chơi khác.
                 </p>
               </div>
               <div className="gv-actions">
@@ -961,44 +930,39 @@ export function GameHub({
                             {r.uid ? (
                               <button
                                 type="button"
-                                className="gv-link"
+                                className="gv-link gv-perf-author"
                                 onClick={() => onProfile(r.uid!)}
-                                style={{ padding: 0, fontWeight: 700, fontSize: 14, color: "#f1f3f7" }}
                               >
                                 {r.nickname}
                                 {r.uid === me?.uid ? " (Bạn)" : ""}
                               </button>
                             ) : (
-                              <span style={{ fontWeight: 700, fontSize: 14 }}>{r.nickname}</span>
+                              <span className="gv-perf-author">{r.nickname}</span>
                             )}
-                            {r.source === "presentmon" && (
-                              <span className="gv-pill gv-pill-emerald">
-                                <CheckCircle2 size={11} /> PresentMon
-                              </span>
-                            )}
-                            <span className="gv-pill">
-                              {r.completionStatus === "completed" ? "Đã hoàn thành" : "Đã chơi"}
-                            </span>
-                          </div>
-                          <div className="gv-muted" style={{ fontSize: 12, marginTop: 2 }}>
-                            {new Date(r.measuredAt).toLocaleDateString("vi-VN")}
-                            {r.samples > 0 ? ` · ${r.samples.toLocaleString("vi-VN")} frames` : ""}
                           </div>
                         </div>
                       </div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>
-                        <Monitor size={14} style={{ display: "inline", marginRight: 6 }} />
-                        {r.gpu} · {r.cpu} · {r.ramGb} GB RAM
+                      <div className="gv-perf-hw-row">
+                        <span className="gv-perf-hw-chip">
+                          <Monitor size={13} />
+                          <span>{r.gpu || "GPU chưa nhận diện"}</span>
+                        </span>
+                        <span className="gv-perf-hw-chip">
+                          <span>{r.cpu || "CPU chưa nhận diện"}</span>
+                        </span>
+                        <span className="gv-perf-hw-chip">
+                          <span>{r.ramGb > 0 ? `${r.ramGb} GB RAM` : "RAM chưa nhận diện"}</span>
+                        </span>
                       </div>
                       <div className="gv-actions" style={{ gap: 6, flexWrap: "wrap" }}>
-                        <span className="gv-pill gv-pill-cyan">
-                          {r.graphics.width && r.graphics.height
-                            ? `${r.graphics.width}×${r.graphics.height}`
-                            : "Chưa nhận diện độ phân giải"}
-                        </span>
-                        <span className="gv-pill">
-                          {r.graphics.preset || "Chưa nhận diện preset"}
-                        </span>
+                        {r.graphics.width && r.graphics.height ? (
+                          <span className="gv-pill gv-pill-cyan">
+                            {r.graphics.width}×{r.graphics.height}
+                          </span>
+                        ) : null}
+                        {r.graphics.preset ? (
+                          <span className="gv-pill">{r.graphics.preset}</span>
+                        ) : null}
                         {r.graphics.upscaling && r.graphics.upscaling !== "Off" && (
                           <span className="gv-pill">Upscaling: {r.graphics.upscaling}</span>
                         )}
@@ -1021,9 +985,9 @@ export function GameHub({
                     </div>
                     <div className="gv-fps-box">
                       <div className="gv-fps-big">{r.fpsAverage.toFixed(1)}</div>
-                      <div className="gv-muted" style={{ fontSize: 11 }}>AVG FPS</div>
+                      <div className="gv-fps-label">AVG FPS</div>
                       {r.fpsLow != null && (
-                        <div className="gv-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        <div className="gv-fps-low">
                           1% Low: {r.fpsLow.toFixed(1)}
                         </div>
                       )}
@@ -1382,99 +1346,74 @@ export function GameHub({
               <div className="gv-stack">
                 {reports.items.map((r) => (
                   <article className="gv-perf-card" key={r.id}>
-                    <div className="gv-stack-sm">
-                      <div className="gv-actions" style={{ gap: 10 }}>
-                        <Avatar name={r.nickname} url={r.avatarUrl} size={36} />
+                    <div className="gv-stack-sm" style={{ gap: 10 }}>
+                      <div className="gv-actions" style={{ gap: 12 }}>
+                        <div className="gv-perf-avatar-ring">
+                          <Avatar name={r.nickname} url={r.avatarUrl} size={40} />
+                        </div>
                         <button
                           type="button"
-                          className="gv-link"
-                          style={{ color: "#f1f3f7", padding: 0 }}
+                          className="gv-link gv-perf-author"
                           onClick={() => onProfile(r.uid!)}
                         >
                           {r.nickname}
                           {r.uid === me?.uid ? " (Bạn)" : ""}
                         </button>
-                        <span
-                          className={`gv-pill ${
-                            r.source === "presentmon"
-                              ? "gv-pill-emerald"
-                              : "gv-pill-amber"
-                          }`}
-                        >
-                          {r.source === "presentmon"
-                            ? "PresentMon Verified"
-                            : "Tự khai báo"}
+                      </div>
+
+                      <div className="gv-perf-hw-row">
+                        <span className="gv-perf-hw-chip">
+                          <Monitor size={13} />
+                          <span>{r.gpu || "GPU chưa nhận diện"}</span>
                         </span>
-                        <span className="gv-pill">
-                          {r.completionStatus === "completed" ? "Đã hoàn thành" : "Đã chơi"}
+                        <span className="gv-perf-hw-chip">
+                          <span>{r.cpu || "CPU chưa nhận diện"}</span>
                         </span>
-                        <span className="gv-muted" style={{ fontSize: 12 }}>
-                          {new Date(r.measuredAt).toLocaleDateString("vi-VN")}
-                          {r.samples > 0
-                            ? ` · ${r.samples.toLocaleString("vi-VN")} frames`
-                            : ""}
+                        <span className="gv-perf-hw-chip">
+                          <span>{r.ramGb > 0 ? `${r.ramGb} GB RAM` : "RAM chưa nhận diện"}</span>
                         </span>
                       </div>
 
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>
-                        <Monitor
-                          size={14}
-                          style={{ display: "inline", marginRight: 6 }}
-                        />
-                        {r.gpu || "GPU chưa nhận diện"} · {r.cpu || "CPU chưa nhận diện"} · {r.ramGb > 0 ? `${r.ramGb} GB RAM` : "RAM chưa nhận diện"}
-                      </div>
-
-                      <div className="gv-actions" style={{ gap: 6 }}>
-                        <span className="gv-pill gv-pill-cyan">
-                          {r.graphics.width && r.graphics.height
-                            ? `${r.graphics.width}×${r.graphics.height}`
-                            : "Chưa nhận diện độ phân giải"}
-                        </span>
-                        <span className="gv-pill">{r.graphics.preset || "Mức đồ họa chưa nhận diện"}</span>
-                        <span className="gv-pill">
-                          {r.graphics.source === "config"
-                            ? "Đọc từ file cấu hình"
-                            : r.graphics.source === "manual"
-                              ? "Người chơi khai báo"
-                              : "Chưa nhận diện cấu hình"}
-                        </span>
-                        {r.graphics.upscaling && (
+                      <div className="gv-actions" style={{ gap: 6, flexWrap: "wrap" }}>
+                        {r.graphics.width && r.graphics.height ? (
+                          <span className="gv-pill gv-pill-cyan">
+                            {r.graphics.width}×{r.graphics.height}
+                          </span>
+                        ) : null}
+                        {r.graphics.preset ? (
+                          <span className="gv-pill">{r.graphics.preset}</span>
+                        ) : null}
+                        {r.graphics.upscaling && r.graphics.upscaling !== "Off" && (
                           <span className="gv-pill">
                             Upscaling: {r.graphics.upscaling}
                           </span>
                         )}
-                        {r.graphics.frameGeneration && (
+                        {r.graphics.frameGeneration && r.graphics.frameGeneration !== "Off" && (
                           <span className="gv-pill">
                             FG: {r.graphics.frameGeneration}
                           </span>
                         )}
-                        {r.graphics.rayTracing && (
+                        {r.graphics.rayTracing && r.graphics.rayTracing !== "Off" && (
                           <span className="gv-pill">
                             RT: {r.graphics.rayTracing}
                           </span>
                         )}
                       </div>
 
+                      {r.graphics.details && Object.keys(r.graphics.details).length > 0 && (
+                        <div className="gv-actions" style={{ gap: 5, flexWrap: "wrap", marginTop: 2 }}>
+                          {Object.entries(r.graphics.details).slice(0, 12).map(([k, v]) => (
+                            <span className="gv-pill" key={k} style={{ fontSize: 11, opacity: 0.9 }}>
+                              {k}: {v}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
                       {r.notes && <p className="gv-muted">{r.notes}</p>}
 
-                      <div className="gv-actions">
-                        <button
-                          type="button"
-                          className="gv-link"
-                          onClick={() =>
-                            me
-                              ? setReportTarget({
-                                  type: "performance",
-                                  id: r.id!,
-                                })
-                              : void api
-                                  .signIn()
-                                  .catch((e) => setError(communityError(e)))
-                          }
-                        >
-                          <Flag size={12} /> Báo cáo
-                        </button>
-                        {me?.uid === r.uid && (
+                      {me?.uid === r.uid && (
+                        <div className="gv-actions">
                           <button
                             type="button"
                             className="gv-link"
@@ -1491,19 +1430,19 @@ export function GameHub({
                           >
                             <Trash2 size={12} /> Gỡ kết quả của tôi
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="gv-fps-box">
                       <div className="gv-fps-big">
                         {r.fpsAverage.toFixed(1)}
                       </div>
-                      <div className="gv-muted" style={{ fontSize: 11 }}>
+                      <div className="gv-fps-label">
                         AVG FPS
                       </div>
                       {r.fpsLow != null && (
-                        <div className="gv-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        <div className="gv-fps-low">
                           1% Low: {r.fpsLow.toFixed(1)}
                         </div>
                       )}

@@ -14,6 +14,17 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '1.0.10',
+    date: '2026-11-28',
+    summary: 'Đồng bộ đầy đủ chi tiết cấu hình đồ họa khi chia sẻ FPS lên Cộng đồng và cải thiện giao diện Community Hub.',
+    features: [
+      'Hiển thị đầy đủ các thiết lập đồ họa chi tiết (graphics.details) trong tab Cấu hình & Hiệu năng trên Community Game Hub.',
+    ],
+    fixes: [
+      'Tự động đồng bộ lại báo cáo FPS kèm chi tiết cấu hình đồ họa lên Worker mới.',
+    ],
+  },
+  {
     version: '1.0.8',
     date: '2026-11-27',
     summary: 'Khắc phục lỗi thiếu file latest.yml khi phát hành bản cập nhật tự động.',

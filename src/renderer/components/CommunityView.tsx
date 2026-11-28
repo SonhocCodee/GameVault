@@ -39,6 +39,7 @@ function formatPlaytimeMinutes(minutes: number): string {
 interface CommunityViewProps {
   searchRequest?: CommunitySearchRequest;
   profileRequest?: number;
+  notificationRequest?: number;
   initialGame?: PublicGame | null;
   onLocalGame?: (id: number) => void;
   onBack: () => void;
@@ -656,4 +657,4 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
   );
 };
 
-export const CommunityView: React.FC<CommunityViewProps> = ({ onBack, searchRequest, authStatus, initialGame, profileRequest, onLocalGame }) => <DesktopCommunity onBack={onBack} searchRequest={searchRequest} authStatus={authStatus} initialGame={initialGame} profileRequest={profileRequest} onLocalGame={onLocalGame} />;
+export const CommunityView: React.FC<CommunityViewProps> = ({ onBack, searchRequest, authStatus, initialGame, profileRequest, notificationRequest, onLocalGame }) => <DesktopCommunity onBack={onBack} searchRequest={searchRequest} authStatus={authStatus} initialGame={initialGame} profileRequest={profileRequest} notificationRequest={notificationRequest} onLocalGame={onLocalGame} />;
