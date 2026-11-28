@@ -6,6 +6,20 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 15:03] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Làm gọn giao diện `GraphicsConfigBlock.tsx`**:
+  - Mặc định ẩn danh sách pill chi tiết, chỉ hiển thị nút **Xem thông số (N)** + khung **File setting gốc** (`fileName`, `folderHint`, `Tải file`, `Copy đường dẫn`, `Mở thư mục`, `Áp dụng vào máy`).
+  - Khi bấm **Xem thông số (N)** sẽ mở bảng lưới 2 cột có thanh cuộn thay vì rải pill tràn màn hình.
+  - Đã build lại `community-web` & deploy Worker (`c0733e81-0d49-4dae-a95b-07d3ff1afcc2`).
+
+### File chính đã thay đổi
+- `src/renderer/community/GraphicsConfigBlock.tsx`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`, `npm run build`, `npm run deploy:worker`: Pass.
+
 ## [2026-11-28 14:56] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc
