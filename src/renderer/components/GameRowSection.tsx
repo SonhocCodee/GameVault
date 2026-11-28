@@ -469,7 +469,7 @@ export const GameRowSection: React.FC<GameRowSectionProps> = ({
         <div className="relative group/carousel">
           <div
             ref={scrollContainerRef}
-            className="flex gap-3.5 sm:gap-4 overflow-x-auto pb-3 pt-1 px-1 scroll-smooth"
+            className="flex gap-3.5 sm:gap-4 overflow-x-auto pb-3 pt-2.5 -mt-1.5 px-1.5 scroll-smooth"
             style={{
               scrollbarWidth: 'thin',
               scrollbarColor: '#2a2e3d transparent',

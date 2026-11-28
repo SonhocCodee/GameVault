@@ -6,6 +6,24 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 17:04] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Phát hành `v1.0.13` — Sửa hover `GameRowSection` & đồng bộ UI 2 tab `TimelineView`**:
+  - Cập nhật `src/renderer/components/GameRowSection.tsx`: tăng `pt-2.5 -mt-1.5 px-1.5` ở khung cuộn ngang (`overflow-x-auto`) để hiệu ứng `hover:-translate-y-1.5` của `GameCard` không bị cắt phần đỉnh.
+  - Cập nhật `src/renderer/components/TimelineView.tsx`: đồng bộ cùng tông đỏ `#ff2a44` cho cả 2 tab `Đã phá đảo` / `Tất cả game` và badge tiêu đề, đồng thời giữ cố định thanh `Năm` (hiển thị `—` khi trống) để thanh điều hướng không bị xô lệch khi đổi tab.
+  - Tăng `version` lên `1.0.13` trong `package.json`, thêm changelog `1.0.13` trong `src/shared/changelog.ts` và làm sạch `PENDING_PUSH.md`.
+
+### File chính đã thay đổi
+- `src/renderer/components/GameRowSection.tsx`, `src/renderer/components/TimelineView.tsx`
+- `package.json`, `src/shared/changelog.ts`, `PENDING_PUSH.md`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`, `npx tsc --noEmit -p worker/tsconfig.json`, `npm run build`, `npm test` (chạy trước khi push `v1.0.13`).
+
+### Bàn giao cho máy kia (Notes / Next)
+- GitHub Actions `.github/workflows/release.yml` sẽ tự build và phát hành bản `v1.0.13`.
+
 ## [2026-11-28 16:47] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc

@@ -14,6 +14,15 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '1.0.13',
+    date: '2026-11-28',
+    summary: 'Sửa cắt viền khi hover thẻ game ở hàng ngang và đồng bộ giao diện 2 tab Dòng thời gian.',
+    fixes: [
+      'Sửa lỗi thẻ game bị cắt phần viền trên và hiệu ứng phát sáng khi hover trong hàng Game chơi gần đây (GameRowSection).',
+      'Đồng bộ giao diện và màu sắc giữa 2 tab Đã phá đảo / Tất cả game trên thanh Dòng thời gian, giữ cố định vị trí thanh Năm khi chuyển tab.',
+    ],
+  },
+  {
     version: '1.0.12',
     date: '2026-11-28',
     summary: 'Đồng bộ mốc ngày chơi cuối từ Steam/GOG/AMD/thư mục game và làm gọn thanh Dòng thời gian + bộ lọc năm.',
