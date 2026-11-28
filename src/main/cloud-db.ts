@@ -20,6 +20,7 @@ import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig,
 import { assertLibraryAccount, canImportDeviceHistory } from './account-library.ts';
 import { syncAmdGameReportFps } from './importer.ts';
 import { buildAutoCommunityPerformanceReport } from './performance-context.ts';
+import { discoverGameConfigsAsync } from './game-settings.ts';
 import { loadAppSettings } from './settings.ts';
 import { getHardwareInfo } from './hardware.ts';
 import type {
@@ -1381,8 +1382,22 @@ function computePerformanceSignature(report: {
   cpu: string;
   gpu: string;
   ramGb: number;
-  graphics: { width: number | null; height: number | null; preset: string };
+  graphics: {
+    width: number | null;
+    height: number | null;
+    preset: string;
+    upscaling?: string;
+    frameGeneration?: string;
+    rayTracing?: string;
+    details?: Record<string, string>;
+  };
 }): string {
+  const detailsKey = report.graphics.details
+    ? Object.entries(report.graphics.details)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}=${v}`)
+        .join(';')
+    : '';
   return [
     report.gameKey,
     report.completionStatus,
@@ -1396,6 +1411,10 @@ function computePerformanceSignature(report: {
     report.graphics.width ?? '',
     report.graphics.height ?? '',
     report.graphics.preset || '',
+    report.graphics.upscaling || '',
+    report.graphics.frameGeneration || '',
+    report.graphics.rayTracing || '',
+    detailsKey,
   ].join('|');
 }
 
@@ -1450,6 +1469,7 @@ export async function syncLocalPerformanceToCommunity(options?: {
     if (synced >= maxUploads) break;
     if (getCurrentSession()?.user.uid !== uid || getDb() !== db) break;
 
+    await discoverGameConfigsAsync(gameId).catch(() => null);
     const built = await buildAutoCommunityPerformanceReport(gameId, options?.preferredSessionId);
     if (!built) continue;
 

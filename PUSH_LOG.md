@@ -6,6 +6,24 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 11:17] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Đảm bảo auto-sync FPS lấy đủ setting chi tiết & tự re-upload lên Cộng đồng**:
+  - Cập nhật `buildAutoCommunityPerformanceReport` (`src/main/performance-context.ts`): gộp `preview.context.details`, `preset`, `upscaling`, `frameGeneration`, `rayTracing` vào báo cáo ngay cả khi session cũ đã có `width`/`height`.
+  - Cập nhật `syncLocalPerformanceToCommunity` & `computePerformanceSignature` (`src/main/cloud-db.ts`): tự động gọi `discoverGameConfigsAsync(gameId)` trước khi build báo cáo và hash thêm `upscaling`, `frameGeneration`, `rayTracing`, `details` để tự động re-upload khi phát hiện setting mới.
+
+### File chính đã thay đổi
+- `src/main/performance-context.ts`, `src/main/cloud-db.ts`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass `561/561` (103 suites, 0 fail, 0 skipped).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Cần deploy `worker/` (`wrangler deploy`) lên Cloudflare Worker để endpoint `/api/community/games/:gameKey/performance` trên server live lưu trường `graphics.details`.
+
 ## [2026-11-28 11:14] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

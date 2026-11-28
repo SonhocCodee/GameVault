@@ -299,24 +299,29 @@ export async function buildAutoCommunityPerformanceReport(
 
   if (!cpu || !gpu || !(ramGb > 0)) return null;
 
-  const detectedGraphics =
+  const ctx = preview.context;
+  const base =
     chosen.graphics.width && chosen.graphics.height
       ? chosen.graphics
-      : preview.context.width && preview.context.height
-        ? preview.context
+      : ctx.width && ctx.height
+        ? ctx
         : chosen.graphics;
 
+  const mergedDetails = {
+    ...(ctx.details || {}),
+    ...(chosen.graphics.details || {}),
+  };
+
   const normalizedGraphics: GraphicsContext = {
-    width: detectedGraphics.width ?? null,
-    height: detectedGraphics.height ?? null,
-    preset: detectedGraphics.preset || "",
-    upscaling: detectedGraphics.upscaling || "",
-    frameGeneration: detectedGraphics.frameGeneration || "",
-    rayTracing: detectedGraphics.rayTracing || "",
-    source: detectedGraphics.source === "config" ? "config" : "unknown",
-    ...(detectedGraphics.details && Object.keys(detectedGraphics.details).length > 0
-      ? { details: detectedGraphics.details }
-      : {}),
+    width: base.width ?? null,
+    height: base.height ?? null,
+    preset: base.preset || ctx.preset || "",
+    upscaling: base.upscaling || ctx.upscaling || "",
+    frameGeneration: base.frameGeneration || ctx.frameGeneration || "",
+    rayTracing: base.rayTracing || ctx.rayTracing || "",
+    source:
+      base.source === "config" || ctx.source === "config" ? "config" : "unknown",
+    ...(Object.keys(mergedDetails).length > 0 ? { details: mergedDetails } : {}),
   };
 
   return {
