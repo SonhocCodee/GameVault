@@ -6,6 +6,24 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 14:49] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Nới rate limit upload báo cáo FPS trên Worker & hoàn tất đồng bộ dữ liệu máy `son6232000@gmail.com`**:
+  - Cập nhật `worker/src/routes/discovery.ts`: nâng `rateLimit(env, user.uid, "performance", ...)` từ `5` lên `50` báo cáo / 300s.
+  - Đã deploy `worker/` (`game-vault-worker`, Version ID `a584e330-bedc-4cbc-882f-d959b556e019`).
+  - Đã chạy đồng bộ trực tiếp toàn bộ phiên FPS hợp lệ trên máy hiện tại lên Worker (`SYNC_RESULT: {"synced":5}` lượt đầu + `{"synced":2}` lượt hai).
+
+### File chính đã thay đổi
+- `worker/src/routes/discovery.ts`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx wrangler deploy`: Pass (`a584e330-bedc-4cbc-882f-d959b556e019`).
+- Electron performance sync (`son6232000@gmail.com`): Pass (`0` lỗi).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Pull `main` về để đồng bộ `worker/src/routes/discovery.ts`.
+
 ## [2026-11-28 14:43] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc

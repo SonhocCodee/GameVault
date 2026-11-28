@@ -470,7 +470,7 @@ export function registerDiscoveryRoutes(router: Router) {
   });
   add("POST", "/games/:gameKey/performance", async (request, env, ctx) => {
     const user = await requireUser(request, env);
-    await rateLimit(env, user.uid, "performance", 5, 300);
+    await rateLimit(env, user.uid, "performance", 50, 300);
     await ensureProfile(env, user);
     const input = await jsonBody(request),
       gameKey = key(ctx.params?.gameKey);
