@@ -75,7 +75,7 @@ describe('Local PC Game & Playtime Scanner', () => {
     );
     fs.writeFileSync(
       path.join(steamRoot, 'userdata', '12345', 'config', 'localconfig.vdf'),
-      `"UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "1245620" { "Playtime" "320" } } } } } }`
+      `"UserLocalConfigStore" { "Software" { "Valve" { "Steam" { "apps" { "1245620" { "Playtime" "320" "LastPlayed" "1764000000" } } } } } }`
     );
 
     const games = await scanSteamGames({ steamRoot });
@@ -84,6 +84,7 @@ describe('Local PC Game & Playtime Scanner', () => {
     assert.equal(games[0].steamId, 1245620);
     assert.equal(games[0].exeName, 'eldenring.exe');
     assert.equal(games[0].playtimeMinutes, 320);
+    assert.ok(games[0].lastPlayedAt && games[0].lastPlayedAt.startsWith('2025-11-'));
   });
 
   test('scanEpicGames reads completed .item manifests and skips incomplete / UE tools', () => {
@@ -294,6 +295,7 @@ describe('Local PC Game & Playtime Scanner', () => {
     assert.equal(hades.playtime_minutes, 185);
     assert.equal(hades.recorded_playtime_minutes, 0);
     assert.equal(hades.manual_playtime_minutes, 185);
+    assert.ok(hades.last_played_at && Number(hades.last_played_at.slice(0, 4)) >= 2024);
 
     // Re-scan is idempotent
     const summary2 = await scanAndImportLocalGames(scanOpts);

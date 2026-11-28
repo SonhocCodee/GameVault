@@ -14,6 +14,15 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '1.0.12',
+    date: '2026-11-28',
+    summary: 'Đồng bộ mốc ngày chơi cuối từ Steam/GOG/AMD/thư mục game và làm gọn thanh Dòng thời gian + bộ lọc năm.',
+    fixes: [
+      'Tự động lấy ngày chơi/cập nhật cuối (Steam LastPlayed / LastUpdated, GOG lastPlayedDate, AMD GameSessions, thời gian file .exe) để xếp game vào đúng tháng/năm thay vì dồn vào "2020 về trước".',
+      'Đồng bộ giao diện thanh Dòng thời gian giữa Thư viện và Hồ sơ Cộng đồng, bỏ chú thích dài và nâng cấp thanh chọn Năm thành bộ lọc pill gọn đẹp.',
+    ],
+  },
+  {
     version: '1.0.11',
     date: '2026-11-28',
     summary: 'Tự động quét game có sẵn trên máy (kèm giờ chơi cá nhân), thêm nút Gợi ý game khi thư viện trống và sửa đè badge giờ chơi ở Dòng thời gian.',

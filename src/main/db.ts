@@ -105,6 +105,9 @@ function migrateSchema(db: DatabaseSync): void {
     db.exec(`ALTER TABLE games ADD COLUMN recorded_playtime_minutes REAL
       GENERATED ALWAYS AS (MAX(0, playtime_minutes - manual_playtime_minutes)) VIRTUAL`);
   }
+  if (!gameColumns.some((c: any) => c.name === 'last_played_at')) {
+    db.exec('ALTER TABLE games ADD COLUMN last_played_at TEXT DEFAULT NULL');
+  }
 
   // sessions.last_poll: last confirmed-alive poll of a running session,
   // used to recover playtime after an abnormal exit (crash / kill)
@@ -191,6 +194,7 @@ function createTables(db: DatabaseSync): void {
       uplay_id INTEGER DEFAULT -1,
       origin_id INTEGER DEFAULT -1,
       amd_game_id INTEGER DEFAULT NULL,
+      last_played_at TEXT DEFAULT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
     );
@@ -343,8 +347,9 @@ export function getGames(filter?: GameFilter): Game[] {
         orderClause = 'ORDER BY games.title ASC';
         break;
       case 'recent_played':
-        orderClause = `ORDER BY (
-          SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual'
+        orderClause = `ORDER BY COALESCE(
+          (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual'),
+          games.last_played_at
         ) DESC NULLS LAST, games.updated_at DESC`;
         break;
       case 'created_desc':
@@ -356,7 +361,10 @@ export function getGames(filter?: GameFilter): Game[] {
   const query = `
     SELECT 
       games.*,
-      (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual') AS last_played_at,
+      COALESCE(
+        (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual'),
+        games.last_played_at
+      ) AS last_played_at,
       (SELECT ROUND(SUM(s.fps_avg * s.fps_samples) / NULLIF(SUM(s.fps_samples), 0), 1)
        FROM sessions s WHERE s.game_id = games.id AND s.is_running = 0 AND s.fps_avg > 0 AND s.fps_samples > 0) AS fps_avg,
       (SELECT ROUND(SUM(s.fps_1pct_low * s.fps_samples) / NULLIF(SUM(CASE WHEN s.fps_1pct_low IS NOT NULL AND s.fps_1pct_low > 0 THEN s.fps_samples ELSE 0 END), 0), 1)
@@ -499,11 +507,11 @@ export function createGame(game: Partial<Game>): Game {
     INSERT INTO games (
       title, exe_name, exe_path, playtime_minutes, user_rating,
       status, cover_url, banner_url, media_folder, completed_at,
-      notes, steam_id, uplay_id, origin_id, amd_game_id, manual_playtime_minutes
+      notes, steam_id, uplay_id, origin_id, amd_game_id, last_played_at, manual_playtime_minutes
     ) VALUES (
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?
     )
   `);
 
@@ -526,6 +534,7 @@ export function createGame(game: Partial<Game>): Game {
     game.uplay_id ?? -1,
     game.origin_id ?? -1,
     game.amd_game_id ?? null,
+    game.last_played_at ?? null,
     Math.max(0, (game.playtime_minutes ?? 0) - Math.max(0, Math.min(
       game.playtime_minutes ?? 0,
       game.recorded_playtime_minutes ?? game.playtime_minutes ?? 0
@@ -581,7 +590,7 @@ export function updateGame(id: number, data: Partial<Game>): Game {
   const allowedFields: Array<keyof Game> = [
     'title', 'exe_name', 'exe_path', 'playtime_minutes', 'user_rating',
     'status', 'cover_url', 'banner_url', 'media_folder', 'completed_at',
-    'notes', 'steam_id', 'uplay_id', 'origin_id', 'amd_game_id'
+    'notes', 'steam_id', 'uplay_id', 'origin_id', 'amd_game_id', 'last_played_at'
   ];
 
   for (const field of allowedFields) {

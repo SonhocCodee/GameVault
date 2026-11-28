@@ -97,6 +97,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     } catch {}
     return 'completed';
   });
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const treeTab: TimelineTreeTab = publicProfileMode ? 'completed' : treeTabState;
 
   const completedCount = useMemo(() => {
@@ -459,45 +460,50 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     }));
   };
 
+  // Check if selectedYear still exists in current timelineData
+  const effectiveSelectedYear = useMemo(() => {
+    if (selectedYear === null) return null;
+    return timelineData.some((yg) => yg.year === selectedYear) ? selectedYear : null;
+  }, [selectedYear, timelineData]);
+
+  const visibleTimelineData = useMemo(() => {
+    if (effectiveSelectedYear === null) return timelineData;
+    return timelineData.filter((yg) => yg.year === effectiveSelectedYear);
+  }, [timelineData, effectiveSelectedYear]);
+
   return (
     <div className="relative pb-24 animate-in fade-in duration-200">
       {/* Timeline Header Info */}
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#2a2e3d] bg-gradient-to-r from-[#161821] via-[#1a1e2c] to-[#161821] p-5 shadow-lg">
-        <div className="flex items-center gap-3.5">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff2a44] to-[#990018] shadow-md shadow-[#ff2a44]/25">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#2a2e3d] bg-gradient-to-r from-[#161821] via-[#1a1e2c] to-[#161821] p-4 shadow-lg">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff2a44] to-[#990018] shadow-md shadow-[#ff2a44]/25">
             <History className="h-5 w-5 text-white" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-white">Dòng thời gian chơi game</h2>
-              <span
-                className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
-                  treeTab === 'completed'
-                    ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
-                    : 'border-blue-400/40 bg-blue-400/15 text-blue-400'
-                }`}
-              >
-                {treeTab === 'completed' ? '🏆 Cột mốc phá đảo' : '🎮 Tất cả game'}
-              </span>
-            </div>
-            <p className="text-xs text-[#8e95a5]">
-              {treeTab === 'completed'
-                ? 'Danh sách game đã về nước theo đúng tháng/năm phá đảo (mỗi game xuất hiện duy nhất 1 lần)'
-                : 'Toàn bộ thư viện trò chơi theo mốc thời gian hoàn thành hoặc chơi gần nhất'}
-            </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-bold text-white">Dòng thời gian chơi game</h2>
+            <span
+              className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
+                treeTab === 'completed'
+                  ? 'border-amber-400/40 bg-amber-400/15 text-amber-300'
+                  : 'border-blue-400/40 bg-blue-400/15 text-blue-400'
+              }`}
+            >
+              {treeTab === 'completed' ? '🏆 Cột mốc phá đảo' : '🎮 Tất cả game'}
+            </span>
           </div>
         </div>
 
-        {/* Actions & Jump Bar */}
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Actions & Unified Year Bar */}
+        <div className="flex flex-wrap items-center gap-2.5">
           {!publicProfileMode && (
             <>
-              {/* Tree View 2-Tab Switcher: Đã phá đảo (chính) | Tất cả game */}
+              {/* Tree View 2-Tab Switcher: Đã phá đảo | Tất cả game */}
               <div className="flex items-center rounded-xl border border-[#2a2e3d] bg-[#12141c] p-1 shadow-sm">
                 <button
                   type="button"
                   onClick={() => {
                     setTreeTab('completed');
+                    setSelectedYear(null);
                     try {
                       localStorage.setItem('gv_tree_view_tab', 'completed');
                     } catch {}
@@ -507,7 +513,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                       ? 'bg-gradient-to-r from-[#ff2a44] to-[#c7001e] text-white shadow-md shadow-[#ff2a44]/30'
                       : 'text-[#8e95a5] hover:text-white'
                   }`}
-                  title="Chỉ hiển thị các tựa game đã phá đảo theo cột mốc tháng/năm hoàn thành (mỗi game xuất hiện đúng 1 lần)"
                 >
                   <Trophy className="h-3.5 w-3.5 text-amber-300" />
                   <span>Đã phá đảo ({completedCount})</span>
@@ -517,6 +522,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                   type="button"
                   onClick={() => {
                     setTreeTab('all');
+                    setSelectedYear(null);
                     try {
                       localStorage.setItem('gv_tree_view_tab', 'all');
                     } catch {}
@@ -526,7 +532,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                       ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/30'
                       : 'text-[#8e95a5] hover:text-white'
                   }`}
-                  title="Hiển thị tất cả trò chơi trong thư viện (mỗi game xuất hiện đúng 1 lần)"
                 >
                   <Gamepad2 className="h-3.5 w-3.5" />
                   <span>Tất cả game ({totalCount})</span>
@@ -547,14 +552,14 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                     setIsPinned(false);
                   }
                 }}
-                className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all shadow-sm ${
+                className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all shadow-sm ${
                   previewEnabled
                     ? 'border-[#ff2a44]/50 bg-[#ff2a44]/15 text-[#ff2a44] hover:bg-[#ff2a44]/25'
                     : 'border-[#2a2e3d] bg-[#12141c] text-[#8e95a5] hover:text-white hover:border-[#3a4055]'
                 }`}
                 title={
                   previewEnabled
-                    ? 'Đang bật: Xem nhanh thông tin & ảnh F6 ở góc màn hình khi rê chuột (không che thẻ game)'
+                    ? 'Đang bật: Xem nhanh thông tin & ảnh F6 ở góc màn hình khi rê chuột'
                     : 'Đang tắt: Nhấp để bật lại tính năng xem nhanh khi rê chuột'
                 }
               >
@@ -573,25 +578,56 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             </>
           )}
 
-          {/* Quick Year Jump Bar */}
+          {/* Unified Year Filter / Jump Pill Bar */}
           {timelineData.length > 0 && (
-            <div className={`flex flex-wrap items-center gap-1.5 ${publicProfileMode ? '' : 'border-l border-[#2a2e3d] pl-3'}`}>
-              <span className="text-[11px] font-semibold text-[#8e95a5] mr-1">Năm:</span>
-              {timelineData.map((yg) => (
-                <a
-                  key={yg.year}
-                  href={`#year-${yg.year}`}
-                  className="rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1 text-xs font-bold text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#ff2a44]/15 hover:text-[#ff2a44] transition-all"
+            <div className="flex flex-wrap items-center gap-1 rounded-xl border border-[#2a2e3d] bg-[#12141c] p-1 shadow-sm">
+              <span className="flex items-center gap-1 px-2 text-[11px] font-semibold text-[#8e95a5]">
+                <Calendar className="h-3 w-3 text-[#ff2a44]" />
+                <span>Năm</span>
+              </span>
+              {timelineData.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedYear(null)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                    effectiveSelectedYear === null
+                      ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                      : 'text-[#8e95a5] hover:bg-[#1b1f2d] hover:text-white'
+                  }`}
                 >
-                  {yg.year === 2020 ? '≤ 2020' : yg.year}
-                </a>
-              ))}
+                  Tất cả
+                </button>
+              )}
+              {timelineData.map((yg) => {
+                const isSelected = effectiveSelectedYear === yg.year;
+                return (
+                  <button
+                    key={yg.year}
+                    type="button"
+                    onClick={() => {
+                      setCollapsedYears((prev) => ({ ...prev, [yg.year]: false }));
+                      if (timelineData.length > 1) {
+                        setSelectedYear(isSelected ? null : yg.year);
+                      } else {
+                        document.getElementById(`year-${yg.year}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                      isSelected
+                        ? 'bg-[#ff2a44] text-white shadow-sm shadow-[#ff2a44]/30'
+                        : 'text-[#8e95a5] hover:bg-[#1b1f2d] hover:text-white'
+                    }`}
+                  >
+                    {yg.year === 2020 ? '≤ 2020' : yg.year}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
 
-      {timelineData.length === 0 ? (
+      {visibleTimelineData.length === 0 ? (
         /* Empty State */
         <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-3xl border border-dashed border-[#2a2e3d] bg-[#161821]/40 p-12 text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#2a2e3d] bg-[#161821] text-[#8e95a5]">
@@ -610,7 +646,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           {/* Vertical Glowing Line (The Spine) */}
           <div className="pointer-events-none absolute left-3 md:left-5 top-4 bottom-4 w-0.5 bg-gradient-to-b from-[#ff2a44] via-[#ff2a44]/50 to-[#2a2e3d]" />
 
-          {timelineData.map((yearGroup) => {
+          {visibleTimelineData.map((yearGroup) => {
             const isCollapsed = !!collapsedYears[yearGroup.year];
             const yearHours = Math.round(yearGroup.totalMinutes / 60);
 

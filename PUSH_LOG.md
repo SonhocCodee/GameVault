@@ -6,6 +6,28 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 16:47] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Phát hành `v1.0.12` — Quét ngày chơi cuối (`last_played_at`) & đồng bộ giao diện Dòng thời gian**:
+  - Thêm cột `games.last_played_at` trong `src/main/db.ts` (`COALESCE(MAX(session.start_time), games.last_played_at)`) để các game quét từ máy hiển thị đúng tháng/năm chơi gần nhất thay vì rơi vào nhóm `2020 về trước`.
+  - Cập nhật `src/main/local-game-scanner.ts` đọc thêm mốc ngày chơi/cập nhật cuối: Steam `localconfig.vdf` (`LastPlayed`) → `appmanifest_*.acf` (`LastUpdated`), GOG `GameTimes.lastPlayedDate`, AMD `RGStats.db` `GameSessions`, và fallback `mtimeMs` của file `.exe` / thư mục game (Epic, Riot, Xbox, Windows).
+  - Làm lại header `src/renderer/components/TimelineView.tsx`: bỏ dòng chú thích dài dưới tiêu đề, đồng bộ bố cục giữa Thư viện và Hồ sơ Cộng đồng, nâng cấp thanh chọn `Năm` thành bộ lọc pill gọn gàng (`Tất cả`, `2026`, `≤ 2020`, ...).
+  - Bổ sung kiểm tra `lastPlayedAt` / `last_played_at` trong `tests/local-game-scanner.test.js`, tăng `version` lên `1.0.12` trong `package.json` và thêm changelog `1.0.12` trong `src/shared/changelog.ts`.
+
+### File chính đã thay đổi
+- `src/main/db.ts`, `src/main/local-game-scanner.ts`, `src/renderer/components/TimelineView.tsx`
+- `tests/local-game-scanner.test.js`, `package.json`, `src/shared/changelog.ts`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass `566/570` (`0` fail, `4` skipped).
+
+### Bàn giao cho máy kia (Notes / Next)
+- GitHub Actions `.github/workflows/release.yml` sẽ tự build và phát hành bản `v1.0.12`. Người dùng chỉ cần bấm lại `Quét game trên máy` để cập nhật `last_played_at` cho các game đã quét trước đó.
+
 ## [2026-11-28 16:38] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc

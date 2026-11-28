@@ -31,7 +31,49 @@ export interface ScannedGameCandidate {
   exePath?: string | null;
   steamId?: number | null;
   playtimeMinutes: number;
+  lastPlayedAt?: string | null;
+  lastPlayedPriority?: number;
   sources: LocalGameScanSource[];
+}
+
+function toLocalIsoTimestamp(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const d = new Date(ms);
+  const year = d.getFullYear();
+  if (isNaN(d.getTime()) || year < 2000 || year > 2100) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function normalizeTimestampToLocalIso(raw?: string | number | null): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') {
+    const ms = raw > 1e12 ? raw : raw * 1000;
+    return toLocalIsoTimestamp(ms);
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    if (n <= 0) return null;
+    return toLocalIsoTimestamp(n > 1e12 ? n : n * 1000);
+  }
+  const parsed = Date.parse(s.includes('T') ? s : s.replace(' ', 'T'));
+  return Number.isFinite(parsed) ? toLocalIsoTimestamp(parsed) : null;
+}
+
+function getPathMtimeIso(targetPath?: string | null, fallbackDir?: string | null): string | null {
+  for (const p of [targetPath, fallbackDir]) {
+    if (!p) continue;
+    try {
+      if (fs.existsSync(p)) {
+        const mtime = fs.statSync(p).mtimeMs;
+        const iso = toLocalIsoTimestamp(mtime);
+        if (iso) return iso;
+      }
+    } catch {}
+  }
+  return null;
 }
 
 export interface LocalGameScanOptions {
@@ -289,8 +331,11 @@ function findBestGameExecutable(installPath: string, gameTitle: string): string 
   return candidates[0].exePath;
 }
 
-function readSteamLocalPlaytimeMap(steamRoot: string, overrideUserdataDir?: string | null): Map<number, number> {
-  const playtimeMap = new Map<number, number>();
+function readSteamLocalPlaytimeMap(
+  steamRoot: string,
+  overrideUserdataDir?: string | null
+): Map<number, { minutes: number; lastPlayedAt: string | null }> {
+  const playtimeMap = new Map<number, { minutes: number; lastPlayedAt: string | null }>();
   const userdataDir = overrideUserdataDir !== undefined
     ? overrideUserdataDir
     : path.join(steamRoot, 'userdata');
@@ -328,8 +373,15 @@ function readSteamLocalPlaytimeMap(steamRoot: string, overrideUserdataDir?: stri
         const appId = parseInt(appIdStr, 10);
         if (!Number.isFinite(appId) || appId <= 0 || !info || typeof info !== 'object') continue;
         const mins = parseInt(String((info as any).playtime ?? '0'), 10);
-        if (Number.isFinite(mins) && mins > 0) {
-          playtimeMap.set(appId, mins);
+        const lastPlayedSec = parseInt(String((info as any).lastplayed ?? '0'), 10);
+        const lastPlayedAt = Number.isFinite(lastPlayedSec) && lastPlayedSec > 0
+          ? toLocalIsoTimestamp(lastPlayedSec * 1000)
+          : null;
+        if ((Number.isFinite(mins) && mins > 0) || lastPlayedAt) {
+          playtimeMap.set(appId, {
+            minutes: Number.isFinite(mins) && mins > 0 ? mins : 0,
+            lastPlayedAt,
+          });
         }
       }
     }
@@ -395,12 +447,21 @@ export async function scanSteamGames(options: LocalGameScanOptions = {}): Promis
         const exeName = exePath ? path.basename(exePath) : null;
         if (isUtilityExeOrTitle(title, exePath)) continue;
 
+        const localInfo = playtimeMap.get(steamId);
+        const lastUpdatedSec = parseInt(String(appState.lastupdated ?? '0'), 10);
+        const acfUpdatedAt = Number.isFinite(lastUpdatedSec) && lastUpdatedSec > 0
+          ? toLocalIsoTimestamp(lastUpdatedSec * 1000)
+          : null;
+        const lastPlayedAt = localInfo?.lastPlayedAt || acfUpdatedAt || getPathMtimeIso(exePath, installPath);
+
         results.push({
           title,
           exeName,
           exePath,
           steamId,
-          playtimeMinutes: playtimeMap.get(steamId) || 0,
+          playtimeMinutes: localInfo?.minutes || 0,
+          lastPlayedAt,
+          lastPlayedPriority: localInfo?.lastPlayedAt ? 2 : 1,
           sources: ['steam'],
         });
       } catch {}
@@ -453,6 +514,8 @@ export function scanEpicGames(options: LocalGameScanOptions = {}): ScannedGameCa
         exePath,
         steamId: null,
         playtimeMinutes: 0,
+        lastPlayedAt: getPathMtimeIso(exePath, installLocation),
+        lastPlayedPriority: 1,
         sources: ['epic'],
       });
     } catch {}
@@ -506,15 +569,21 @@ export function scanGogGames(options: LocalGameScanOptions = {}): ScannedGameCan
       }
     } catch {}
 
-    const minutesByProductId = new Map<number, number>();
+    const minutesByProductId = new Map<number, { minutes: number; lastPlayedAt: string | null }>();
     try {
-      const rows = gogDb.prepare('SELECT releaseKey, minutesInGame FROM GameTimes').all() as any[];
+      const rows = gogDb.prepare('SELECT * FROM GameTimes').all() as any[];
       for (const r of rows) {
         const match = String(r?.releaseKey || '').match(/(\d+)$/);
-        const mins = Number(r?.minutesInGame) || 0;
-        if (match && mins > 0) {
-          const pid = Number(match[1]);
-          minutesByProductId.set(pid, Math.max(minutesByProductId.get(pid) || 0, Math.round(mins)));
+        if (!match) continue;
+        const pid = Number(match[1]);
+        const mins = Math.max(0, Math.round(Number(r?.minutesInGame) || 0));
+        const lp = normalizeTimestampToLocalIso(r?.lastPlayedDate ?? r?.lastPlayed ?? null);
+        const prev = minutesByProductId.get(pid);
+        if (mins > 0 || lp) {
+          minutesByProductId.set(pid, {
+            minutes: Math.max(prev?.minutes || 0, mins),
+            lastPlayedAt: lp || prev?.lastPlayedAt || null,
+          });
         }
       }
     } catch {}
@@ -538,12 +607,15 @@ export function scanGogGames(options: LocalGameScanOptions = {}): ScannedGameCan
       }
       if (!title || isUtilityExeOrTitle(title, exePath)) continue;
 
+      const gt = minutesByProductId.get(productId);
       results.push({
         title,
         exeName: exePath ? path.basename(exePath) : null,
         exePath,
         steamId: null,
-        playtimeMinutes: minutesByProductId.get(productId) || 0,
+        playtimeMinutes: gt?.minutes || 0,
+        lastPlayedAt: gt?.lastPlayedAt || getPathMtimeIso(exePath, installPath),
+        lastPlayedPriority: gt?.lastPlayedAt ? 2 : 1,
         sources: ['gog'],
       });
     }
@@ -606,6 +678,8 @@ export function scanRiotGames(options: LocalGameScanOptions = {}): ScannedGameCa
         exePath,
         steamId: null,
         playtimeMinutes: 0,
+        lastPlayedAt: getPathMtimeIso(exePath, targetPath),
+        lastPlayedPriority: 1,
         sources: ['riot'],
       });
     }
@@ -662,6 +736,8 @@ export function scanXboxGames(options: LocalGameScanOptions = {}): ScannedGameCa
           exePath,
           steamId: null,
           playtimeMinutes: 0,
+          lastPlayedAt: getPathMtimeIso(exePath, contentDir),
+          lastPlayedPriority: 1,
           sources: ['xbox'],
         });
       } catch {}
@@ -681,9 +757,18 @@ export function scanAmdInstalledGames(options: LocalGameScanOptions = {}): Scann
 
   let amdDb: DatabaseSync | null = null;
   let rawGames: any[] = [];
+  const amdSessionLastPlayed = new Map<number, string>();
   try {
     amdDb = new DatabaseSync(amdDbPath, { readOnly: true });
-    rawGames = amdDb.prepare('SELECT Title, ExePath, SteamID, PlayTotal FROM InstalledGames').all() as any[];
+    rawGames = amdDb.prepare('SELECT GameID, Title, ExePath, SteamID, PlayTotal FROM InstalledGames').all() as any[];
+    try {
+      const sessRows = amdDb.prepare("SELECT GameID, MAX(COALESCE(NULLIF(End, ''), Start)) AS lastPlayed FROM GameSessions GROUP BY GameID").all() as any[];
+      for (const sr of sessRows) {
+        const gid = Number(sr?.GameID);
+        const lp = normalizeTimestampToLocalIso(sr?.lastPlayed);
+        if (Number.isFinite(gid) && lp) amdSessionLastPlayed.set(gid, lp);
+      }
+    } catch {}
   } catch {
     rawGames = [];
   } finally {
@@ -734,12 +819,15 @@ export function scanAmdInstalledGames(options: LocalGameScanOptions = {}): Scann
       } catch {}
     }
 
+    const sessionLp = typeof g.GameID === 'number' ? amdSessionLastPlayed.get(g.GameID) || null : null;
     results.push({
       title,
       exeName: exePath ? path.basename(exePath) : null,
       exePath: exePath || null,
       steamId,
       playtimeMinutes,
+      lastPlayedAt: sessionLp || (existsOnDisk ? getPathMtimeIso(exePath) : null),
+      lastPlayedPriority: sessionLp ? 2 : 1,
       sources: ['amd'],
     });
   }
@@ -807,6 +895,8 @@ export async function scanWindowsGameConfigStore(
       exePath: normalized,
       steamId,
       playtimeMinutes: 0,
+      lastPlayedAt: getPathMtimeIso(normalized),
+      lastPlayedPriority: 1,
       sources: ['windows'],
     });
   }
@@ -847,6 +937,18 @@ export function mergeScannedCandidates(candidates: ScannedGameCandidate[]): Scan
     }
 
     existing.playtimeMinutes = Math.max(existing.playtimeMinutes, item.playtimeMinutes || 0);
+    if (item.lastPlayedAt) {
+      const prevPriority = existing.lastPlayedPriority || 0;
+      const nextPriority = item.lastPlayedPriority || 0;
+      if (
+        !existing.lastPlayedAt ||
+        nextPriority > prevPriority ||
+        (nextPriority === prevPriority && item.lastPlayedAt > existing.lastPlayedAt)
+      ) {
+        existing.lastPlayedAt = item.lastPlayedAt;
+        existing.lastPlayedPriority = nextPriority;
+      }
+    }
     if (!existing.steamId && steamId) {
       existing.steamId = steamId;
       bySteamId.set(steamId, existing);
@@ -973,6 +1075,7 @@ export async function scanAndImportLocalGames(
       if (!existing.exe_path && candidate.exePath) patch.exe_path = candidate.exePath;
       if (!existing.exe_name && candidate.exeName) patch.exe_name = candidate.exeName;
       if ((!existing.steam_id || existing.steam_id <= 0) && steamId) patch.steam_id = steamId;
+      if (!existing.last_played_at && candidate.lastPlayedAt) patch.last_played_at = candidate.lastPlayedAt;
 
       if (Object.keys(patch).length > 0) {
         try {
@@ -1002,6 +1105,7 @@ export async function scanAndImportLocalGames(
       steam_id: steamId ?? -1,
       status: 'playing',
       playtime_minutes: candidate.playtimeMinutes,
+      last_played_at: candidate.lastPlayedAt ?? null,
       // Baseline local hours belong to personal total only — never credit
       // community ranked playtime (`recorded_playtime_minutes`).
       recorded_playtime_minutes: 0,
