@@ -77,6 +77,7 @@ export function DesktopCommunity({
   initialGame,
   profileRequest,
   notificationRequest,
+  discoverRequest,
   onLocalGame,
 }: {
   onBack?: () => void;
@@ -85,6 +86,7 @@ export function DesktopCommunity({
   initialGame?: PublicGame | null;
   profileRequest?: number;
   notificationRequest?: number;
+  discoverRequest?: number;
   onLocalGame?: (id: number) => void;
 }) {
   const [base, setBase] = useState("");
@@ -174,6 +176,7 @@ export function DesktopCommunity({
         initialGame={initialGame}
         profileRequest={profileRequest}
         notificationRequest={notificationRequest}
+        discoverRequest={discoverRequest}
         onLocalGame={onLocalGame}
         games={games.map(gameToPublic)}
         onAdd={async (g) => {

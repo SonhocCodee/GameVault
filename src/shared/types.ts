@@ -2,6 +2,19 @@ export type GameStatus = 'playing' | 'completed' | 'paused' | 'dropped' | 'backl
 
 export type SessionSource = 'amd_import' | 'tracker' | 'manual';
 
+export type LocalGameScanSource = 'steam' | 'epic' | 'gog' | 'riot' | 'xbox' | 'amd' | 'windows';
+
+export interface LocalGameScanSummary {
+  scannedSources: LocalGameScanSource[];
+  detectedCount: number;
+  importedGames: number;
+  updatedGames: number;
+  skippedGames: number;
+  gamesWithPlaytime: number;
+  totalPlaytimeMinutes: number;
+  importedTitles: string[];
+}
+
 export interface Game {
   id: number;
   title: string;
@@ -784,6 +797,7 @@ export interface ElectronAPI {
   getBugReports?(scope?: 'mine' | 'all'): Promise<{ ok: boolean; bugs: BugReportItem[]; error?: string }>;
   sendDiagnosticLog?(note?: string): Promise<{ ok: boolean; id?: number; error?: string }>;
   openLogFolder?(): Promise<string>;
+  scanLocalGames?(): Promise<LocalGameScanSummary>;
 }
 
 export interface AppUpdateStatus {

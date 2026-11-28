@@ -6,6 +6,30 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 16:38] — Máy: CNTT-PM6 — Branch: main
+
+### Tóm tắt công việc
+- **Phát hành `v1.0.11` — Tự động quét game trên máy, gợi ý Top game & sửa badge Dòng thời gian**:
+  - Thêm bộ quét đa nguồn không phụ thuộc GPU (`src/main/local-game-scanner.ts`): Steam (`libraryfolders.vdf`, `appmanifest_*.acf`, `localconfig.vdf` `Playtime`), Epic Games (`*.item`), GOG Galaxy (`galaxy-2.0.db` + `GameTimes`), Riot Games (`RiotClientInstalls.json`), Xbox (`MicrosoftGame.Config`), AMD Adrenalin (`RGStats.db` + `gmdb.blb` read-only) và Windows `GameConfigStore` (chỉ nhận `.exe` đã xác thực). Giờ chơi cũ nạp vào giờ cá nhân (`recorded_playtime_minutes = 0`), tôn trọng `deleted_games` và guest isolation.
+  - Thêm IPC `games:scanLocal`, tùy chọn quét sẵn ở Bước 2 `FirstRunSetupModal.tsx`, nút `Quét game trên máy` ở màn hình thư viện trống, thanh công cụ `Tất cả game`, modal `+ Thêm game` (`AddGameModal.tsx`) và menu `Công cụ` (`Navbar.tsx`), cùng nút `Gợi ý game (Top game)` nối thẳng tới tab `Top game` (`CommunityHub.tsx`).
+  - Sửa đè badge trạng thái & badge giờ chơi dài (4 chữ số) trên thẻ game ở `TimelineView.tsx` bằng flex layout, `formatCompactPlaytime`, badge `9.5px` và lưới `lg:grid-cols-6 xl:grid-cols-7` vừa gọn chiều cao vừa không bị cắt `...`.
+  - Tăng `version` lên `1.0.11` trong `package.json`, thêm nhật ký `1.0.11` trong `src/shared/changelog.ts`, làm sạch `PENDING_PUSH.md`.
+
+### File chính đã thay đổi
+- `src/main/local-game-scanner.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/types.ts`, `src/shared/changelog.ts`
+- `src/renderer/App.tsx`, `src/renderer/components/AddGameModal.tsx`, `src/renderer/components/FirstRunSetupModal.tsx`, `src/renderer/components/Navbar.tsx`, `src/renderer/components/TimelineView.tsx`
+- `src/renderer/components/CommunityView.tsx`, `src/renderer/community/DesktopCommunity.tsx`, `src/renderer/community/CommunityHub.tsx`
+- `tests/local-game-scanner.test.js`, `package.json`, `PENDING_PUSH.md`, `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npx tsc --noEmit -p worker/tsconfig.json`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass `566/570` (`0` fail, `4` skipped).
+
+### Bàn giao cho máy kia (Notes / Next)
+- GitHub Actions `.github/workflows/release.yml` sẽ tự build và phát hành bản `v1.0.11` cho auto-update.
+
 ## [2026-11-28 15:03] — Máy: DESKTOP-BU4IIOC — Branch: main
 
 ### Tóm tắt công việc

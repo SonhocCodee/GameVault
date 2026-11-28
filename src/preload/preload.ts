@@ -53,6 +53,7 @@ import type {
   AdminCoversResponse,
   AdminUpdateCoverPayload,
   AppUpdateStatus,
+  LocalGameScanSummary,
 } from '../shared/types.js';
 
 const electronAPI: ElectronAPI = {
@@ -465,6 +466,9 @@ const electronAPI: ElectronAPI = {
   },
   getBugReports: (scope?: 'mine' | 'all') => {
     return ipcRenderer.invoke('bugs:list', scope);
+  },
+  scanLocalGames: (): Promise<LocalGameScanSummary> => {
+    return ipcRenderer.invoke('games:scanLocal');
   },
 };
 

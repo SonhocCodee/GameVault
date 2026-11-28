@@ -53,6 +53,8 @@ export interface NavbarProps {
   onOpenCommunity?: () => void;
   onOpenProfile?: () => void;
   onEnrichCovers?: () => void | Promise<void>;
+  onScanLocalGames?: () => void | Promise<void>;
+  scanningLocalGames?: boolean;
   libraryLayout?: 'grid' | 'timeline';
   onLibraryLayoutChange?: (layout: 'grid' | 'timeline') => void;
 }
@@ -100,6 +102,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCommunity,
   onOpenProfile,
   onEnrichCovers,
+  onScanLocalGames,
+  scanningLocalGames = false,
   libraryLayout = 'grid',
   onLibraryLayoutChange,
 }) => {
@@ -344,6 +348,31 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <div className="text-[10px] text-[#8e95a5]">Cut ảnh sang HDD E &amp; đẩy lên Google Drive</div>
                   </div>
                 </button>
+
+                {onScanLocalGames && (
+                  <button
+                    disabled={scanningLocalGames}
+                    onClick={async () => {
+                      setToolsOpen(false);
+                      await onScanLocalGames();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors hover:bg-[#202433] disabled:opacity-50 group"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-rose-500/10 text-[#ff2a44] group-hover:bg-[#ff2a44] group-hover:text-white transition-colors">
+                      {scanningLocalGames ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Gamepad2 className="h-3.5 w-3.5" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-white group-hover:text-[#ff2a44]">
+                        {scanningLocalGames ? 'Đang quét game trên máy...' : 'Quét game trên máy'}
+                      </div>
+                      <div className="text-[10px] text-[#8e95a5]">Steam, Epic, GOG, Riot, Xbox &amp; GPU</div>
+                    </div>
+                  </button>
+                )}
 
                 {onEnrichCovers && (
                   <button

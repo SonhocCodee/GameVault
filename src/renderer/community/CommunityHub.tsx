@@ -116,6 +116,7 @@ export function CommunityHub({
   initialGame,
   profileRequest = 0,
   notificationRequest = 0,
+  discoverRequest = 0,
   onLocalGame,
 }: {
   searchRequest?: CommunitySearchRequest;
@@ -128,6 +129,7 @@ export function CommunityHub({
   initialGame?: PublicGame | null;
   profileRequest?: number;
   notificationRequest?: number;
+  discoverRequest?: number;
   onLocalGame?: (id: number) => void;
 }) {
   const [tab, setTab] = useState<Tab>(
@@ -135,7 +137,9 @@ export function CommunityHub({
       ? "profile"
       : notificationRequest
         ? "notifications"
-        : "feed",
+        : discoverRequest
+          ? "discover"
+          : "feed",
   );
   const [route, setRoute] = useState<Route>(() =>
     initialGame ? { game: initialGame } : embedded ? {} : initialRoute(),
@@ -615,8 +619,8 @@ export function CommunityHub({
   useEffect(() => {
     if (!embedded) return;
     if (initialGame) navigate({ game: initialGame });
-    else switchTab(profileRequest ? "profile" : "feed");
-  }, [embedded, initialGame, profileRequest]);
+    else switchTab(profileRequest ? "profile" : notificationRequest ? "notifications" : discoverRequest ? "discover" : "feed");
+  }, [embedded, initialGame, profileRequest, notificationRequest, discoverRequest]);
 
   const searchCommunity = (request: CommunitySearchRequest) => {
     setSearchVersion((version) => version + 1);

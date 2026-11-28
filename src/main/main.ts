@@ -65,6 +65,7 @@ import {
   detectSteamAppIdCached,
 } from './covers.js';
 import { extractTitleFromExe } from './importer.js';
+import { scanAndImportLocalGames } from './local-game-scanner.js';
 import {
   searchWishlistGames,
   addWishlistGame,
@@ -597,6 +598,30 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('tracker:scanRunning', async () => {
     return getTracker().scanRunningProcesses();
+  });
+
+  ipcMain.handle('games:scanLocal', async () => {
+    const summary = await scanAndImportLocalGames({ enrichCovers: false });
+    if (summary.importedGames > 0 || summary.updatedGames > 0) {
+      const beforeCovers = new Map<number, string>();
+      for (const g of getGames({})) {
+        beforeCovers.set(g.id, `${g.cover_url || ''}\0${g.banner_url || ''}`);
+      }
+      void autoEnrichAllGameCovers()
+        .then((enriched) => {
+          if (enriched > 0 && mainWindow && !mainWindow.isDestroyed()) {
+            for (const g of getGames({})) {
+              const prev = beforeCovers.get(g.id);
+              const next = `${g.cover_url || ''}\0${g.banner_url || ''}`;
+              if (prev !== next) {
+                mainWindow.webContents.send('game:updated', g);
+              }
+            }
+          }
+        })
+        .catch(() => {});
+    }
+    return summary;
   });
 
   // Save Vault (backup / restore save game) — initialized lazily on first

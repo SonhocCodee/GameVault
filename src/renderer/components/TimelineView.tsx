@@ -58,6 +58,14 @@ export interface TimelineYearGroup {
   months: TimelineMonthGroup[];
 }
 
+export function formatCompactPlaytime(minutes?: number | null): string {
+  if (!minutes || minutes <= 0) return '0p';
+  if (minutes >= 6000) {
+    return `${Math.round(minutes / 60)}h`;
+  }
+  return formatPlaytime(minutes);
+}
+
 export function formatSafeDate(d?: string | null): string {
   if (!d) return '';
   try {
@@ -686,7 +694,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                           </div>
 
                           {/* Games Grid in this Month */}
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 sm:gap-3.5">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-3 sm:gap-3.5">
                             {monthGroup.games.map((item) => {
                               const isActive = trackerStatus?.activeGameTitle
                                 ? item.game.title.toLowerCase() ===
@@ -735,35 +743,41 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                                       </div>
                                     )}
 
-                                    {/* Top-left Badge based on treeTab */}
-                                    {treeTab === 'completed' ? (
-                                      <div
-                                        className="absolute top-2 left-2 z-10 flex h-5 w-5 items-center justify-center rounded-md border border-amber-400/50 bg-amber-950/85 text-amber-300 shadow-sm backdrop-blur-md"
-                                        title={
-                                          item.game.completed_at && parseInt(item.game.completed_at.slice(0, 4), 10) > 2020
-                                            ? `Đã phá đảo: ${formatSafeDate(item.game.completed_at)}`
-                                            : 'Đã phá đảo'
-                                        }
-                                      >
-                                        <Trophy className="h-3 w-3" />
-                                      </div>
-                                    ) : (
-                                      <div
-                                        className={`absolute top-2 left-2 z-10 flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-md ${
-                                          getStatusMeta(item.game.status).colorClass
-                                        }`}
-                                      >
-                                        {item.game.status === 'completed' && (
-                                          <Trophy className="h-2.5 w-2.5" />
-                                        )}
-                                        <span className="truncate max-w-[65px]">{getStatusMeta(item.game.status).label}</span>
-                                      </div>
-                                    )}
+                                    {/* Top Badges Row (flex layout prevents overlap even on narrow cards or 4-digit hours) */}
+                                    <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-1 p-1.5">
+                                      {treeTab === 'completed' ? (
+                                        <div
+                                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-amber-400/50 bg-amber-950/85 text-amber-300 shadow-sm backdrop-blur-md"
+                                          title={
+                                            item.game.completed_at && parseInt(item.game.completed_at.slice(0, 4), 10) > 2020
+                                              ? `Đã phá đảo: ${formatSafeDate(item.game.completed_at)}`
+                                              : 'Đã phá đảo'
+                                          }
+                                        >
+                                          <Trophy className="h-3 w-3" />
+                                        </div>
+                                      ) : (
+                                        <div
+                                          className={`flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9.5px] font-bold shadow-sm backdrop-blur-md ${
+                                            getStatusMeta(item.game.status).colorClass
+                                          }`}
+                                          title={getStatusMeta(item.game.status).label}
+                                        >
+                                          {item.game.status === 'completed' && (
+                                            <Trophy className="h-2.5 w-2.5 shrink-0" />
+                                          )}
+                                          <span className="truncate">{getStatusMeta(item.game.status).label}</span>
+                                        </div>
+                                      )}
 
-                                    {/* Top-right Playtime Badge */}
-                                    <div className="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-md border border-[#2a2e3d] bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 shadow-sm backdrop-blur-md">
-                                      <Clock className="h-2.5 w-2.5" />
-                                      <span>{formatPlaytime(item.game.playtime_minutes)}</span>
+                                      {/* Playtime Badge */}
+                                      <div
+                                        className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-md border border-[#2a2e3d] bg-black/75 px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-300 shadow-sm backdrop-blur-md"
+                                        title={`Tổng thời gian: ${formatPlaytime(item.game.playtime_minutes)}`}
+                                      >
+                                        <Clock className="h-2.5 w-2.5 shrink-0" />
+                                        <span>{formatCompactPlaytime(item.game.playtime_minutes)}</span>
+                                      </div>
                                     </div>
 
                                     {/* Gradient overlay at bottom */}

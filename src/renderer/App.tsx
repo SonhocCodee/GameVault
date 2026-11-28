@@ -38,6 +38,7 @@ import {
   ArrowLeft,
   Library,
   SlidersHorizontal,
+  Compass,
 } from 'lucide-react';
 
 // Normalizes a title for alphanumeric matching (library titles vs Steam results)
@@ -74,6 +75,7 @@ export default function App() {
   const [communityGame, setCommunityGame] = useState<PublicGame | null>(null);
   const [profileRequest, setProfileRequest] = useState(0);
   const [notificationRequest, setNotificationRequest] = useState(0);
+  const [discoverRequest, setDiscoverRequest] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [updateBanner, setUpdateBanner] = useState<{
@@ -109,6 +111,33 @@ export default function App() {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToastMsg(null), 4500);
   }, []);
+
+  const [scanningLocalGames, setScanningLocalGames] = useState<boolean>(false);
+
+  const handleScanLocalGames = async () => {
+    if (scanningLocalGames || !window.electronAPI?.scanLocalGames) return;
+    setScanningLocalGames(true);
+    try {
+      const summary = await window.electronAPI.scanLocalGames();
+      await fetchGames();
+      if (summary.importedGames > 0) {
+        const hoursNote = summary.gamesWithPlaytime > 0
+          ? ` (kèm ${Math.round(summary.totalPlaytimeMinutes / 60)}h giờ chơi cá nhân)`
+          : '';
+        showToast(`🎮 Đã quét và thêm ${summary.importedGames} game có sẵn trên máy${hoursNote}!`);
+      } else if (summary.updatedGames > 0) {
+        showToast(`✨ Đã cập nhật thông tin cho ${summary.updatedGames} game trên máy.`);
+      } else if (summary.detectedCount > 0) {
+        showToast(`✅ Toàn bộ ${summary.detectedCount} game tìm thấy trên máy đã có trong thư viện.`);
+      } else {
+        showToast('🔍 Chưa tìm thấy game cài sẵn từ Steam, Epic, GOG, Riot, Xbox hoặc Windows.');
+      }
+    } catch (err: any) {
+      showToast(`❌ Lỗi quét game trên máy: ${err?.message || 'Không xác định'}`);
+    } finally {
+      setScanningLocalGames(false);
+    }
+  };
 
   const handleEnrichCovers = async () => {
     try {
@@ -233,6 +262,7 @@ export default function App() {
     appStartupEnabled: true,
     fpsAutoCaptureEnabled: true,
     fpsAutoShareEnabled: true,
+    autoScanGames: true,
   });
 
   const refreshOnboardingState = useCallback(async () => {
@@ -260,6 +290,7 @@ export default function App() {
             appStartupEnabled: s.appStartupEnabled !== undefined ? s.appStartupEnabled : false,
             fpsAutoCaptureEnabled: s.fpsAutoCaptureEnabled !== undefined ? s.fpsAutoCaptureEnabled : true,
             fpsAutoShareEnabled: s.fpsAutoShareEnabled !== undefined ? s.fpsAutoShareEnabled : true,
+            autoScanGames: true,
           });
           setFirstRunOpen(true);
         } else {
@@ -331,9 +362,23 @@ export default function App() {
       }
     }
 
+    let scanSummary: Awaited<ReturnType<NonNullable<typeof window.electronAPI.scanLocalGames>>> | null = null;
+    if (firstRunPaths.autoScanGames && window.electronAPI?.scanLocalGames) {
+      try {
+        scanSummary = await window.electronAPI.scanLocalGames();
+      } catch (error) {
+        console.warn('[scanner] First-run local game scan failed:', error);
+      }
+    }
+
     setFirstRunOpen(false);
     fetchGames();
-    if (fpsAutoCaptureEnabled) {
+    if (scanSummary && scanSummary.importedGames > 0) {
+      const hoursNote = scanSummary.gamesWithPlaytime > 0
+        ? ` (kèm ${Math.round(scanSummary.totalPlaytimeMinutes / 60)}h giờ chơi cá nhân)`
+        : '';
+      showToast(`🎮 Đã quét sẵn ${scanSummary.importedGames} game trên máy${hoursNote}!`);
+    } else if (fpsAutoCaptureEnabled) {
       showToast(
         fpsSetupOk
           ? firstRunPaths.fpsAutoShareEnabled
@@ -442,6 +487,7 @@ export default function App() {
     const unsubNotify = window.electronAPI?.onCommunityNotifyOpen?.(() => {
       setCommunitySearch(undefined);
       setProfileRequest(0);
+      setDiscoverRequest(0);
       setCommunityGame(null);
       setNotificationRequest((request) => request + 1);
       setView('community');
@@ -762,9 +808,12 @@ export default function App() {
         }}
         hasUpdateBadge={updateBanner?.state === 'downloaded' || Boolean(postUpdateInfo?.justUpdated)}
         onEnrichCovers={handleEnrichCovers}
+        onScanLocalGames={handleScanLocalGames}
+        scanningLocalGames={scanningLocalGames}
         onOpenCommunity={() => {
           setCommunitySearch(undefined);
           setProfileRequest(0);
+          setDiscoverRequest(0);
           setCommunityGame(null);
           setNotificationRequest(0);
           setView('community');
@@ -773,6 +822,7 @@ export default function App() {
         onOpenProfile={() => {
           setCommunitySearch(undefined);
           setCommunityGame(null);
+          setDiscoverRequest(0);
           setProfileRequest((request) => request + 1);
           setNotificationRequest(0);
           setView('community');
@@ -783,7 +833,7 @@ export default function App() {
       {/* Main View Router */}
       <main className="mx-auto max-w-7xl">
         {view === 'community' ? (
-          <CommunityView searchRequest={communitySearch} onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} profileRequest={profileRequest} notificationRequest={notificationRequest} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
+          <CommunityView searchRequest={communitySearch} onBack={() => setView('library')} authStatus={authStatus} initialGame={communityGame} profileRequest={profileRequest} notificationRequest={notificationRequest} discoverRequest={discoverRequest} onLocalGame={(id) => { setSelectedGameId(id); setView('detail'); window.scrollTo({ top: 0 }); }} />
         ) : view === 'detail' && selectedGameId !== null ? (
           <GameDetail
             gameId={selectedGameId}
@@ -792,6 +842,7 @@ export default function App() {
             onShowToast={showToast}
             onOpenCommunity={(game) => {
               setProfileRequest(0);
+              setDiscoverRequest(0);
               setCommunityGame(game);
               setCommunitySearch(undefined);
               setView('community');
@@ -821,11 +872,40 @@ export default function App() {
 
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
                   <button
+                    type="button"
+                    disabled={scanningLocalGames}
+                    onClick={handleScanLocalGames}
+                    className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold text-emerald-300 hover:border-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition-all"
+                  >
+                    {scanningLocalGames ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                    ) : (
+                      <Search className="h-4 w-4 text-emerald-400" />
+                    )}
+                    <span>{scanningLocalGames ? 'Đang quét game trên máy...' : 'Quét game trên máy'}</span>
+                  </button>
+                  <button
                     onClick={openAddGameModal}
                     className="flex items-center gap-2 rounded-xl border border-[#2a2e3d] bg-[#161821] px-4 py-2.5 text-xs font-bold text-[#f1f3f7] hover:border-[#ff2a44] hover:bg-[#1f2230] transition-all"
                   >
                     <Plus className="h-4 w-4 text-[#ff2a44]" />
                     <span>Thêm game thủ công</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommunitySearch(undefined);
+                      setProfileRequest(0);
+                      setCommunityGame(null);
+                      setNotificationRequest(0);
+                      setDiscoverRequest((request) => request + 1);
+                      setView('community');
+                      window.scrollTo({ top: 0 });
+                    }}
+                    className="flex items-center gap-2 rounded-xl border border-[#ff2a44]/40 bg-[#ff2a44]/10 px-4 py-2.5 text-xs font-bold text-white hover:border-[#ff2a44] hover:bg-[#ff2a44]/20 transition-all"
+                  >
+                    <Compass className="h-4 w-4 text-[#ff2a44]" />
+                    <span>Gợi ý game (Top game)</span>
                   </button>
                 </div>
               </div>
@@ -1010,6 +1090,21 @@ export default function App() {
                               <option value="rating_desc" className="bg-[#161821] text-[#f1f3f7]">Điểm đánh giá cao nhất</option>
                             </select>
                           </div>
+
+                          <button
+                            type="button"
+                            disabled={scanningLocalGames}
+                            onClick={handleScanLocalGames}
+                            className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300 transition-all hover:border-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
+                            title="Quét lại game có sẵn trên máy (Steam, Epic, GOG, Riot, Xbox, Windows/GPU)"
+                          >
+                            {scanningLocalGames ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                            ) : (
+                              <Search className="h-3.5 w-3.5 text-emerald-400" />
+                            )}
+                            <span>{scanningLocalGames ? 'Đang quét...' : 'Quét game trên máy'}</span>
+                          </button>
                         </div>
                       </div>
 
@@ -1149,6 +1244,8 @@ export default function App() {
         isOpen={addGameModalOpen}
         onClose={closeAddGameModal}
         onCreated={handleGameCreated}
+        onScanLocalGames={handleScanLocalGames}
+        scanningLocalGames={scanningLocalGames}
       />
 
       <ConfirmModal
@@ -1220,12 +1317,14 @@ export default function App() {
           appStartupEnabled={firstRunPaths.appStartupEnabled}
           fpsAutoCaptureEnabled={firstRunPaths.fpsAutoCaptureEnabled}
           fpsAutoShareEnabled={firstRunPaths.fpsAutoShareEnabled}
+          autoScanGames={firstRunPaths.autoScanGames}
           onHddModeChange={(enabled) => setFirstRunPaths((p) => ({ ...p, hddMode: enabled }))}
           onScreenshotEnabledChange={(enabled) => setFirstRunPaths((p) => ({ ...p, screenshotEnabled: enabled }))}
           onScreenshotHotkeyChange={(hotkey) => setFirstRunPaths((p) => ({ ...p, screenshotHotkey: hotkey }))}
           onAppStartupChange={(enabled) => setFirstRunPaths((p) => ({ ...p, appStartupEnabled: enabled }))}
           onFpsAutoCaptureChange={(enabled) => setFirstRunPaths((p) => ({ ...p, fpsAutoCaptureEnabled: enabled }))}
           onFpsAutoShareChange={(enabled) => setFirstRunPaths((p) => ({ ...p, fpsAutoShareEnabled: enabled }))}
+          onAutoScanGamesChange={(enabled) => setFirstRunPaths((p) => ({ ...p, autoScanGames: enabled }))}
           onFieldChange={(field, value) => {
             if (field === 'media') setFirstRunPaths((p) => ({ ...p, mediaBaseDir: value }));
             else if (field === 'screenshots') setFirstRunPaths((p) => ({ ...p, screenshotsDir: value }));

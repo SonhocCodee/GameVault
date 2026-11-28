@@ -29,12 +29,14 @@ export interface FirstRunSetupModalProps {
   appStartupEnabled: boolean;
   fpsAutoCaptureEnabled: boolean;
   fpsAutoShareEnabled: boolean;
+  autoScanGames: boolean;
   onHddModeChange: (enabled: boolean) => void;
   onScreenshotEnabledChange: (enabled: boolean) => void;
   onScreenshotHotkeyChange: (hotkey: string) => void;
   onAppStartupChange: (enabled: boolean) => void;
   onFpsAutoCaptureChange: (enabled: boolean) => void;
   onFpsAutoShareChange: (enabled: boolean) => void;
+  onAutoScanGamesChange: (enabled: boolean) => void;
   onFieldChange: (field: 'media' | 'screenshots' | 'vault', value: string) => void;
   onBrowseFolder: (field: 'media' | 'screenshots' | 'vault') => Promise<void>;
   onGoogleLogin: () => Promise<void>;
@@ -58,12 +60,14 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
   appStartupEnabled,
   fpsAutoCaptureEnabled,
   fpsAutoShareEnabled,
+  autoScanGames,
   onHddModeChange,
   onScreenshotEnabledChange,
   onScreenshotHotkeyChange,
   onAppStartupChange,
   onFpsAutoCaptureChange,
   onFpsAutoShareChange,
+  onAutoScanGamesChange,
   onFieldChange,
   onBrowseFolder,
   onGoogleLogin,
@@ -479,6 +483,34 @@ export const FirstRunSetupModal: React.FC<FirstRunSetupModalProps> = ({
                   Windows cần xác nhận UAC một lần để bật đo nền. Những phiên sau không hỏi lại.
                 </p>
               )}
+            </div>
+
+            <div className="mt-3.5 rounded-xl border border-[#2a2e3d] bg-[#161822] p-3.5 flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Gamepad2 className="mt-0.5 h-4 w-4 shrink-0 text-[#ff2a44]" />
+                <div>
+                  <span className="text-xs font-bold text-white">Tự động quét game có sẵn trên máy</span>
+                  <p className="mt-1 text-[11px] text-[#8e95a5]">
+                    Tìm nhanh game từ Steam, Epic, GOG, Riot, Xbox &amp; lịch sử Windows/GPU (kèm giờ chơi cá nhân nếu có; giờ tính top vẫn chỉ tính khi app theo dõi).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoScanGames}
+                aria-label="Tự động quét game có sẵn trên máy"
+                onClick={() => onAutoScanGamesChange(!autoScanGames)}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                  autoScanGames ? 'bg-emerald-500' : 'bg-[#2a2e3d]'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    autoScanGames ? 'translate-x-4.5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
 
             {error && <p className="mt-3 text-xs font-semibold text-[#ff2a44]">{error}</p>}

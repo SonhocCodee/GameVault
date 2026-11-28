@@ -14,6 +14,19 @@ export interface ChangelogEntry {
  */
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: '1.0.11',
+    date: '2026-11-28',
+    summary: 'Tự động quét game có sẵn trên máy (kèm giờ chơi cá nhân), thêm nút Gợi ý game khi thư viện trống và sửa đè badge giờ chơi ở Dòng thời gian.',
+    features: [
+      'Tự động quét sẵn game trên máy (Steam, Epic Games, GOG Galaxy, Riot Games, Xbox & Windows/AMD) ngay khi hoàn tất thiết lập lần đầu và qua nút "Quét game trên máy" ở màn hình trống hoặc menu Công cụ.',
+      'Tự đọc giờ chơi cá nhân trên máy (Steam localconfig.vdf, GOG GameTimes, AMD RGStats/gmdb) và giữ nguyên quy tắc giờ xếp hạng Cộng đồng chỉ tính khi app theo dõi.',
+      'Thêm nút "Gợi ý game (Top game)" ở màn hình thư viện trống để mở thẳng tab Top game trong Cộng đồng.',
+    ],
+    fixes: [
+      'Sửa lỗi badge trạng thái và badge giờ chơi dài (4 chữ số) đè lên nhau trên thẻ game ở chế độ Dòng thời gian (TimelineView).',
+    ],
+  },
+  {
     version: '1.0.10',
     date: '2026-11-28',
     summary: 'Đồng bộ đầy đủ chi tiết cấu hình đồ họa khi chia sẻ FPS lên Cộng đồng và cải thiện giao diện Community Hub.',

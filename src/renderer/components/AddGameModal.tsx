@@ -21,6 +21,8 @@ export interface AddGameModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreated: (game: Game) => void;
+  onScanLocalGames?: () => void | Promise<void>;
+  scanningLocalGames?: boolean;
 }
 
 const STEAM_HEADER_CDN_BASE = 'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps';
@@ -49,7 +51,13 @@ const handleSteamImgError = (e: React.SyntheticEvent<HTMLImageElement>, appId: n
  * - Hỗ trợ chọn file .exe trên máy để tự động đọc PE VersionInfo / steam_appid và nhận diện đúng game.
  * - Vẫn hỗ trợ thêm thủ công (game ngoài Steam) nếu không chọn kết quả từ Steam.
  */
-export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onCreated }) => {
+export const AddGameModal: React.FC<AddGameModalProps> = ({
+  isOpen,
+  onClose,
+  onCreated,
+  onScanLocalGames,
+  scanningLocalGames = false,
+}) => {
   const [title, setTitle] = useState('');
   const [exeName, setExeName] = useState('');
   const [exePath, setExePath] = useState<string | null>(null);
@@ -299,6 +307,33 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onC
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-400">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {onScanLocalGames && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs">
+            <div className="min-w-0">
+              <p className="font-bold text-emerald-300">Có game đã cài sẵn trên máy?</p>
+              <p className="text-[11px] text-[#8e95a5]">
+                Quét nhanh từ Steam, Epic, GOG, Riot, Xbox &amp; Windows/GPU.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={scanningLocalGames || submitting}
+              onClick={() => {
+                onClose();
+                void onScanLocalGames();
+              }}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-400/50 bg-emerald-600/25 px-3 py-1.5 font-bold text-emerald-200 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"
+            >
+              {scanningLocalGames ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
+              <span>Quét tự động</span>
+            </button>
           </div>
         )}
 
