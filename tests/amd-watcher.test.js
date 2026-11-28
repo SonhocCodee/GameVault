@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { AMDWatcher } from '../src/main/amd-watcher.ts';
+import { parseAmdGpaFrametimes, syncAmdGameReportFps } from '../src/main/importer.ts';
 import { getDb } from '../src/main/db.ts';
 import { createTestDb, SCHEMA_SQL } from './test-helpers.js';
 
@@ -120,5 +121,36 @@ describe('AMD Adrenalin Real-time Live Watcher Suite', () => {
 
     const amdUtil = mockVaultDb.prepare('SELECT * FROM games WHERE title LIKE ?').get('%AMDRSSrc%');
     assert.equal(amdUtil, undefined);
+  });
+
+  it('auto-scans AMD GameReport gpa.bin frametimes onto matching finished sessions', () => {
+    const metrics = parseAmdGpaFrametimes('10000 10000 10000 10000 10000 10000 10000 10000 10000 20000');
+    assert.ok(metrics);
+    assert.equal(metrics.fps_samples, 10);
+    assert.equal(metrics.fps_avg, 90.9);
+    assert.equal(metrics.fps_1pct_low, 50);
+
+    const game = mockVaultDb.prepare("SELECT id FROM games WHERE title = 'Hades'").get();
+    const endIso = '2026-11-28T09:00:00';
+    const sessionId = Number(
+      mockVaultDb
+        .prepare("INSERT INTO sessions(game_id, start_time, end_time, duration_minutes, is_running, source) VALUES (?, '2026-11-28T08:00:00', ?, 60, 0, 'amd_import')")
+        .run(game.id, endIso).lastInsertRowid
+    );
+
+    const reportFolder = path.join(tmpDir, 'GameReport', 'Hades.exe');
+    fs.mkdirSync(reportFolder, { recursive: true });
+    const gpaPath = path.join(reportFolder, 'gpa.bin');
+    fs.writeFileSync(gpaPath, Array(20).fill('12500').join(' '), 'utf8');
+    const endDate = new Date(endIso);
+    fs.utimesSync(gpaPath, endDate, endDate);
+
+    const updated = syncAmdGameReportFps(mockVaultDb, mockAmdPath);
+    assert.equal(updated, 1);
+
+    const row = mockVaultDb.prepare('SELECT fps_avg, fps_samples, fps_1pct_low FROM sessions WHERE id = ?').get(sessionId);
+    assert.equal(row.fps_avg, 80);
+    assert.equal(row.fps_samples, 20);
+    assert.equal(row.fps_1pct_low, 80);
   });
 });

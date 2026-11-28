@@ -110,9 +110,7 @@ export function loadAppSettings(customDb?: DatabaseSync): AppSettings {
     appStartupEnabled: appStartupStr === null ? false : appStartupStr === 'true',
     setupCompleted: setupCompletedStr === null ? false : setupCompletedStr === 'true',
     fpsAutoCaptureEnabled: fpsAutoCaptureStr === null ? true : fpsAutoCaptureStr === 'true',
-    fpsAutoShareEnabled: fpsAutoShareStr === null
-      ? setupCompletedStr !== 'true'
-      : fpsAutoShareStr === 'true',
+    fpsAutoShareEnabled: fpsAutoShareStr === null ? true : fpsAutoShareStr === 'true',
     // Watchdog defaults ON: installed from first run, keeps counting playtime
     // while GameVault itself is closed
     playtimeWatchEnabled: playtimeWatchStr === null ? true : playtimeWatchStr === 'true',

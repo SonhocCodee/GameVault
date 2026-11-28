@@ -147,14 +147,17 @@ export function getPerformancePreview(gameId: number): PerformancePreview {
     WHERE s.game_id=? AND s.is_running=0 AND s.fps_avg>0 ORDER BY s.start_time DESC LIMIT 50`,
     )
     .all(gameId) as any[];
+  const currentContext = getGameGraphics(gameId);
   const reports = rows.map((row) => {
     let hardware: HardwareInfo | null = null,
       graphics: GraphicsContext = {
-        ...EMPTY_GRAPHICS,
+        ...currentContext,
       };
     try {
       if (row.hardware_json) {
         hardware = JSON.parse(row.hardware_json);
+      }
+      if (row.graphics_json) {
         graphics = validateGraphicsContext(JSON.parse(row.graphics_json));
       }
     } catch {}
@@ -212,4 +215,105 @@ export function prepareMeasuredReport(
     );
   const { sessionId: _, snapshotAvailable: __, ...report } = r;
   return report;
+}
+
+export type PreviewReportEntry = PerformancePreview["reports"][number];
+
+/**
+ * Picks the best measured session to represent this game on the Community Hub.
+ * Prefers sessions that have a saved hardware snapshot and detected graphics
+ * resolution, falling back to the most recent valid measured session.
+ */
+export function selectBestMeasuredReport(
+  reports: PreviewReportEntry[],
+  preferredSessionId?: number,
+): PreviewReportEntry | null {
+  const valid = (reports || []).filter(
+    (r) => Number.isFinite(r.fpsAverage) && r.fpsAverage > 0 && (r.samples || 0) >= 10,
+  );
+  if (valid.length === 0) return null;
+  if (preferredSessionId) {
+    const exact = valid.find((r) => r.sessionId === preferredSessionId);
+    if (exact) return exact;
+  }
+  const withFullContext = valid.find(
+    (r) =>
+      r.snapshotAvailable &&
+      r.cpu &&
+      r.gpu &&
+      r.ramGb > 0 &&
+      r.graphics.width &&
+      r.graphics.height,
+  );
+  if (withFullContext) return withFullContext;
+
+  const withSnapshot = valid.find(
+    (r) => r.snapshotAvailable && r.cpu && r.gpu && r.ramGb > 0,
+  );
+  if (withSnapshot) return withSnapshot;
+
+  return valid[0];
+}
+
+/**
+ * Builds a community-ready performance report for a game by auto-selecting the
+ * best measured FPS session and filling missing hardware/config fields from
+ * automatic local system & config-file detection (never manual input).
+ */
+export async function buildAutoCommunityPerformanceReport(
+  gameId: number,
+  preferredSessionId?: number,
+): Promise<(PerformanceReport & { sessionId: number }) | null> {
+  const preview = getPerformancePreview(gameId);
+  const chosen = selectBestMeasuredReport(preview.reports, preferredSessionId);
+  if (!chosen) return null;
+
+  let cpu = chosen.cpu;
+  let gpu = chosen.gpu;
+  let ramGb = chosen.ramGb;
+  if (!cpu || !gpu || !(ramGb > 0)) {
+    try {
+      const hw = await getHardwareInfo();
+      if (!cpu) cpu = hw?.cpu_name || "";
+      if (!gpu) gpu = hw?.gpus?.map((g) => g.name).filter(Boolean).join(" / ") || "";
+      if (!(ramGb > 0)) ramGb = hw?.ram_gb || 0;
+    } catch {}
+  }
+
+  if (!cpu || !gpu || !(ramGb > 0)) return null;
+
+  const detectedGraphics =
+    chosen.graphics.width && chosen.graphics.height
+      ? chosen.graphics
+      : preview.context.width && preview.context.height
+        ? preview.context
+        : chosen.graphics;
+
+  const normalizedGraphics: GraphicsContext = {
+    width: detectedGraphics.width ?? null,
+    height: detectedGraphics.height ?? null,
+    preset: detectedGraphics.preset || "",
+    upscaling: detectedGraphics.upscaling || "",
+    frameGeneration: detectedGraphics.frameGeneration || "",
+    rayTracing: detectedGraphics.rayTracing || "",
+    source: detectedGraphics.source === "config" ? "config" : "unknown",
+  };
+
+  return {
+    gameKey: chosen.gameKey,
+    title: chosen.title,
+    steamId: chosen.steamId ?? null,
+    coverUrl: chosen.coverUrl ?? null,
+    completionStatus: chosen.completionStatus,
+    cpu,
+    gpu,
+    ramGb,
+    fpsAverage: chosen.fpsAverage,
+    fpsLow: chosen.fpsLow ?? null,
+    samples: chosen.samples,
+    graphics: normalizedGraphics,
+    source: "presentmon",
+    measuredAt: chosen.measuredAt,
+    sessionId: chosen.sessionId,
+  };
 }

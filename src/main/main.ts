@@ -84,10 +84,13 @@ import {
   getLeaderboard,
   getMyHardwareProfile,
   setMyHardwareProfile,
+  syncCurrentMachineHardwareProfile,
   getCurrentPick,
   votePick,
   unvotePick,
   syncLibraryWithCloud,
+  syncLocalPerformanceToCommunity,
+  syncSingleGamePerformanceToCommunity,
   getCloudLibrary,
   adminGetCloudCovers,
   adminUpdateCloudCover,
@@ -190,6 +193,9 @@ async function changeAccount<T>(operation: () => Promise<T>): Promise<T> {
     const db = openAccountLibrary(uid, app.getPath('userData'));
     getTracker().useDatabase(db);
     setMediaBaseDir(loadAppSettings().mediaBaseDir);
+    if (uid) {
+      syncCurrentMachineHardwareProfile(false).catch(() => {});
+    }
     // Recreate renderer state, pending selections and account-specific caches.
     setTimeout(() => mainWindow?.webContents.reload(), 0);
     return result;
@@ -401,6 +407,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle('performance:preview', (_event, gameId) => getPerformancePreview(gameId));
   ipcMain.handle('performance:saveGraphics', (_event, gameId, graphics) => saveGameGraphics(gameId, graphics));
   ipcMain.handle('performance:prepareReport', (_event, gameId, sessionId) => prepareMeasuredReport(gameId, sessionId));
+  ipcMain.handle('performance:syncGame', (_event, gameId: number) => syncSingleGamePerformanceToCommunity(gameId));
+  ipcMain.handle('performance:syncAll', () => syncLocalPerformanceToCommunity({ maxUploads: 4 }));
   ipcMain.handle('gameSettings:choose', async (_event, gameId) => {
     const chosen = await dialog.showOpenDialog({ title: 'Choose a game configuration file', properties: ['openFile'], filters: [{ name: 'Game configuration', extensions: ['ini','cfg','json','xml','settings'] }] });
     if (!chosen.canceled && chosen.filePaths[0]) registerManualConfig(gameId, chosen.filePaths[0]);
@@ -879,6 +887,10 @@ function registerIpcHandlers(): void {
     return setMyHardwareProfile(profile);
   });
 
+  ipcMain.handle('community:syncMyHardwareProfile', async (_event, force?: boolean) => {
+    return syncCurrentMachineHardwareProfile(Boolean(force));
+  });
+
   ipcMain.handle('community:getCurrentPick', async () => {
     return getCurrentPick();
   });
@@ -1232,48 +1244,27 @@ app.whenReady().then(() => {
         mainWindow?.webContents.send('game:updated', activeGame);
       }
     } catch {}
+    capturePerformanceContext(info.sessionId, info.gameId).catch((error) =>
+      console.warn('[performance] Snapshot failed:', error)
+    );
     fpsMonitor
       .startCapture({
         sessionId: info.sessionId,
         exeName: info.processName,
         processId: info.pid,
       })
-      .then((started) => {
-        if (started) {
-          capturePerformanceContext(info.sessionId, info.gameId).catch((error) =>
-            console.warn('[performance] Snapshot failed:', error)
-          );
-        }
-      })
       .catch(() => {});
   };
   tracker.onSessionClosed = (result) => {
     void fpsMonitor.finishCapture(result).then(async () => {
-      if (
-        result.discarded ||
-        !result.gameId ||
-        !result.sessionId ||
-        !loadAppSettings().fpsAutoShareEnabled
-      ) {
+      if (result.discarded || !result.gameId || !result.sessionId) {
         return;
       }
       try {
-        const preview = getPerformancePreview(result.gameId);
-        const report = preview.reports.find((entry) => entry.sessionId === result.sessionId);
-        if (!report || !report.snapshotAvailable || !report.cpu || !report.gpu || report.ramGb <= 0) {
-          return;
+        const res = await syncSingleGamePerformanceToCommunity(result.gameId, result.sessionId);
+        if (res.synced > 0) {
+          console.log(`[performance] Auto-shared session ${result.sessionId} for game ${result.gameId}`);
         }
-        const communityReport = {
-          ...report,
-          sessionId: undefined,
-          snapshotAvailable: undefined,
-        };
-        await communityRequest(
-          `/api/community/games/${encodeURIComponent(report.gameKey)}/performance`,
-          'POST',
-          communityReport,
-        );
-        console.log(`[performance] Auto-shared session ${result.sessionId} for ${report.gameKey}`);
       } catch (error) {
         console.warn('[performance] Automatic community share failed:', error);
       }
@@ -1287,7 +1278,10 @@ app.whenReady().then(() => {
       } catch {}
     }
   };
-  if (getAuthStatus().loggedIn) tracker.start((appSettings.pollIntervalSeconds || 5) * 1000);
+  if (getAuthStatus().loggedIn) {
+    tracker.start((appSettings.pollIntervalSeconds || 5) * 1000);
+    syncCurrentMachineHardwareProfile(false).catch(() => {});
+  }
   initDiscordDetectable();
 
   // Máy NVIDIA không có PresentMon bundle như AMD — tự tải bản chính thức

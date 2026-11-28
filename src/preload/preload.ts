@@ -62,6 +62,8 @@ const electronAPI: ElectronAPI = {
   getPerformancePreview: (gameId) => ipcRenderer.invoke('performance:preview', gameId),
   saveGameGraphics: (gameId, graphics) => ipcRenderer.invoke('performance:saveGraphics', gameId, graphics),
   prepareMeasuredReport: (gameId, sessionId) => ipcRenderer.invoke('performance:prepareReport', gameId, sessionId),
+  syncGamePerformance: (gameId) => ipcRenderer.invoke('performance:syncGame', gameId),
+  syncAllPerformance: () => ipcRenderer.invoke('performance:syncAll'),
   chooseGameConfig: (gameId) => ipcRenderer.invoke('gameSettings:choose', gameId),
   exportGameSettings: (gameId, selectedPaths) => ipcRenderer.invoke('gameSettings:export', gameId, selectedPaths),
   // Database Operations
@@ -284,6 +286,9 @@ const electronAPI: ElectronAPI = {
   },
   setMyHardwareProfile: (profile: HardwareProfile): Promise<HardwareProfile> => {
     return ipcRenderer.invoke('community:setMyHardwareProfile', profile);
+  },
+  syncMyHardwareProfile: (force?: boolean): Promise<HardwareProfile | null> => {
+    return ipcRenderer.invoke('community:syncMyHardwareProfile', Boolean(force));
   },
   getCurrentPick: (): Promise<CommunityPick | null> => {
     return ipcRenderer.invoke('community:getCurrentPick');

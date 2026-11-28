@@ -24,6 +24,8 @@ export interface Game {
   origin_id?: number;
   amd_game_id?: number | null;
   last_played_at?: string | null;
+  fps_avg?: number | null;
+  fps_1pct_low?: number | null;
   created_at: string;
   updated_at: string;
   reviewSync?: ReviewSyncResult;
@@ -625,6 +627,8 @@ export interface ElectronAPI {
   getPerformancePreview?(gameId: number): Promise<import('./community.ts').PerformancePreview>;
   saveGameGraphics?(gameId: number, graphics: Partial<import('./community.ts').GraphicsContext>): Promise<import('./community.ts').GraphicsContext>;
   prepareMeasuredReport?(gameId: number, sessionId: number): Promise<import('./community.ts').PerformanceReport>;
+  syncGamePerformance?(gameId: number): Promise<{ synced: number; skipped?: boolean }>;
+  syncAllPerformance?(): Promise<{ synced: number }>;
   chooseGameConfig?(gameId: number): Promise<import('./community.ts').ConfigCandidate[]>;
   exportGameSettings?(gameId: number, selectedPaths: string[]): Promise<{ files: number; destination: string } | null>;
   // Database Operations
@@ -734,6 +738,7 @@ export interface ElectronAPI {
   deleteMyReview?(gameId: number): Promise<boolean>;
   getMyHardwareProfile?(): Promise<HardwareProfile | null>;
   setMyHardwareProfile?(profile: HardwareProfile): Promise<HardwareProfile>;
+  syncMyHardwareProfile?(force?: boolean): Promise<HardwareProfile | null>;
   getCurrentPick?(): Promise<CommunityPick | null>;
   votePick?(gameId: number): Promise<CommunityPick>;
   unvotePick?(): Promise<CommunityPick>;

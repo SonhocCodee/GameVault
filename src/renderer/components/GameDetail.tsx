@@ -29,7 +29,9 @@ import {
   Trash2,
   BookmarkCheck,
   MessageSquareText,
-  Users
+  Users,
+  HardDrive,
+  LayoutGrid
 } from 'lucide-react';
 import { formatScore } from '../community/CommunityWidgets.tsx';
 import type { Game, GameStatus, MediaItem, Session } from '../../shared/types.js';
@@ -83,6 +85,13 @@ export const GameDetail: React.FC<GameDetailProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [syncingF6, setSyncingF6] = useState<boolean>(false);
+
+  // Active detail tab
+  const [activeTab, setActiveTab] = useState<'overview' | 'saves'>('overview');
+
+  useEffect(() => {
+    setActiveTab('overview');
+  }, [gameId]);
 
   // Media Gallery state
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -621,6 +630,40 @@ const filteredMedia = useMemo(() => {
           </div>
         </div>
 
+        {/* Detail View Tab Bar */}
+        <div className="mt-8 flex items-center gap-2 border-b border-[#2a2e3d] pb-3">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+              activeTab === 'overview'
+                ? 'bg-[#ff2a44] text-white shadow-md shadow-[#ff2a44]/25'
+                : 'border border-[#2a2e3d] bg-[#161821] text-[#8e95a5] hover:border-[#373c4e] hover:text-white'
+            }`}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            <span>Tổng quan &amp; Media</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('saves')}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+              activeTab === 'saves'
+                ? 'bg-amber-500 text-black shadow-md shadow-amber-500/25'
+                : 'border border-[#2a2e3d] bg-[#161821] text-[#8e95a5] hover:border-amber-500/50 hover:text-white'
+            }`}
+          >
+            <HardDrive className="h-4 w-4" />
+            <span>Lưu trữ Save</span>
+          </button>
+        </div>
+
+        {activeTab === 'saves' ? (
+          <div className="mt-6">
+            <SaveVaultSection gameId={game.id} />
+          </div>
+        ) : (
+          <>
         {/* Status, Score & Impression Hub */}
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Status & Rating Panel */}
@@ -969,10 +1012,9 @@ const filteredMedia = useMemo(() => {
           )}
         </div>
 
-        {/* Save Vault Section — backup / restore save game */}
+        {/* Share & Performance */}
         <ScreenshotShare game={game} media={mediaItems} />
         <PerformancePanel gameId={game.id} status={game.status} />
-        <SaveVaultSection gameId={game.id} />
 
         {/* Performance & Historic Sessions Section */}
         {sessions.length > 0 && (
@@ -1033,6 +1075,8 @@ const filteredMedia = useMemo(() => {
               ))}
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
 

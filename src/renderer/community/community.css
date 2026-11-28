@@ -32,40 +32,109 @@
   align-items: center;
   min-width: 0;
   width: 100%;
+  height: 36px;
   border: 1px solid #2a2e3d;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #161821;
   color: #f1f3f7;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
-.community-search:focus-within { border-color: #38bdf8; }
-.gv-community .community-search select,
-.gv-community .community-search input,
-.gv-community .community-search button {
-  min-height: 36px;
+.community-search:hover {
+  border-color: #3a4054;
+}
+.community-search:focus-within {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.16);
+}
+.community-search select,
+.community-search input,
+.community-search button {
+  height: 100%;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   font-size: 12px;
-  padding: 8px 10px;
+  outline: none;
 }
-.gv-community .community-search select {
+.community-search select {
   appearance: none;
-  max-width: 150px;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  max-width: 164px;
   border: 0;
   border-right: 1px solid #2a2e3d;
   border-radius: 0;
-  background-color: transparent;
-  padding: 8px 28px 8px 10px;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c3cad9' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-color: rgba(255, 255, 255, 0.03);
+  color: #d5dae6;
+  font-weight: 600;
+  padding: 0 28px 0 12px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa2b5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
-.community-search option { background: #161821; }
-.community-search input { flex: 1; width: 0; min-width: 64px; }
-.community-search input::placeholder { color: #9aa2b5; }
-.community-search button { cursor: pointer; color: #7dd3fc; flex-shrink: 0; }
-.community-search :focus-visible { outline: 2px solid #38bdf8; outline-offset: -2px; }
+.community-search select:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+.community-search option {
+  background: #161821;
+  color: #f1f3f7;
+}
+.community-search input {
+  flex: 1;
+  width: 0;
+  min-width: 64px;
+  padding: 0 10px 0 12px;
+}
+.community-search input::placeholder {
+  color: #7b8396;
+}
+.community-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px !important;
+  margin-right: 2px;
+  border-radius: 6px;
+  color: #8e95a5;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.community-search-clear:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f3f7;
+}
+.community-search-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px !important;
+  margin-right: 4px;
+  border-radius: 7px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.community-search-submit:hover {
+  background: rgba(56, 189, 248, 0.24);
+  color: #7dd3fc;
+}
+.community-search :focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: -2px;
+}
+.community-search input:focus-visible {
+  outline: none;
+}
 .gv-library-return { margin-bottom: 16px; }
 .gv-community > .community-search { margin-bottom: 16px; }
 .gv-player-search-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--gv-border); }
@@ -74,7 +143,7 @@
 .gv-player-search-identity .gv-muted { display: block; font-weight: 400; }
 @media (max-width: 600px) {
   .gv-player-search-row { flex-wrap: wrap; gap: 8px; }
-  .gv-community .community-search select { max-width: 132px; }
+  .community-search select { max-width: 132px; }
 }
 
 .gv-community * {
@@ -1641,6 +1710,15 @@
   gap: 12px;
 }
 
+.gv-perf-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gv-muted);
+  margin-bottom: 4px;
+}
+
 .gv-perf-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1649,7 +1727,13 @@
   border-radius: 14px;
   background: rgba(22, 24, 33, 0.9);
   border: 1px solid var(--gv-border);
-  align-items: start;
+  align-items: center;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.gv-perf-card:hover {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(26, 29, 40, 0.95);
 }
 
 .gv-fps-box {

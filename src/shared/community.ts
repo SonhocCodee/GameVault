@@ -143,6 +143,7 @@ export interface PerformanceReport extends PublicGame {
   id?: string;
   uid?: string;
   nickname?: string;
+  avatarUrl?: string | null;
   completionStatus: "played" | "completed";
   cpu: string;
   gpu: string;

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_AMD_DB_PATH, importAMDDatabase } from './importer.ts';
+import { DEFAULT_AMD_DB_PATH, importAMDDatabase, syncAmdGameReportFps } from './importer.ts';
 import { ensureGameFolder } from './media.ts';
 import { autoEnrichAllGameCovers } from './covers.ts';
 import { getDb } from './db.ts';
@@ -9,9 +9,11 @@ import type { Game } from '../shared/types.ts';
 export class AMDWatcher {
   private amdDbPath: string;
   private blbPath: string;
+  private gameReportDir: string;
   private targetDb?: any;
   private lastDbMtime: number = 0;
   private lastBlbMtime: number = 0;
+  private lastReportMtime: number = 0;
   private checkInterval: NodeJS.Timeout | null = null;
   public onGameAdded?: (game: Game) => void;
   public onPlaytimeUpdated?: (info: { gameTitle: string; totalMinutes: number }) => void;
@@ -19,6 +21,7 @@ export class AMDWatcher {
   constructor(customPath?: string, targetDb?: any) {
     this.amdDbPath = customPath || DEFAULT_AMD_DB_PATH;
     this.blbPath = path.join(path.dirname(this.amdDbPath), 'gmdb.blb');
+    this.gameReportDir = path.join(path.dirname(this.amdDbPath), 'GameReport');
     this.targetDb = targetDb;
   }
 
@@ -27,8 +30,23 @@ export class AMDWatcher {
    * and synchronizes new games, playtimes, and sessions.
    */
   public checkAndSync(customVaultDb?: any): { newlyImported: number; updated: boolean } {
+    const db = customVaultDb || this.targetDb || getDb();
+    let reportChanged = false;
+    try {
+      if (fs.existsSync(this.gameReportDir)) {
+        const repStat = fs.statSync(this.gameReportDir);
+        if (repStat.mtimeMs > this.lastReportMtime) {
+          this.lastReportMtime = repStat.mtimeMs;
+          reportChanged = true;
+        }
+      }
+    } catch {}
+
     if (!fs.existsSync(this.amdDbPath)) {
-      return { newlyImported: 0, updated: false };
+      if (reportChanged) {
+        try { syncAmdGameReportFps(db, this.amdDbPath); } catch {}
+      }
+      return { newlyImported: 0, updated: reportChanged };
     }
 
     let changed = false;
@@ -51,10 +69,14 @@ export class AMDWatcher {
     } catch {}
 
     if (!changed) {
+      if (reportChanged) {
+        try {
+          const fpsUpdated = syncAmdGameReportFps(db, this.amdDbPath);
+          return { newlyImported: 0, updated: fpsUpdated > 0 };
+        } catch {}
+      }
       return { newlyImported: 0, updated: false };
     }
-
-    const db = customVaultDb || this.targetDb || getDb();
     // Snapshot existing game titles and playtimes before import
     const existingMap = new Map<string, number>();
     try {

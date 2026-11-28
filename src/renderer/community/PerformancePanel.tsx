@@ -1,95 +1,76 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Download, FileCode2, FolderOpen, Gauge, RefreshCw, Save } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Cpu, FileCode2, Gauge, Monitor, RefreshCw } from "lucide-react";
 import type {
   ConfigCandidate,
-  GraphicsContext,
   PerformancePreview,
-  PerformanceReport,
 } from "../../shared/community.ts";
-import { createDesktopAdapter } from "./DesktopCommunity.tsx";
-import {
-  GraphicsFields,
-  PerformanceShareForm,
-} from "./PerformanceShareForm.tsx";
+import type { FpsStatus, HardwareInfo } from "../../shared/types.js";
 import { communityError } from "./client.ts";
 import "./community.css";
 
-const blank: GraphicsContext = {
-  width: null,
-  height: null,
-  preset: "",
-  upscaling: "",
-  frameGeneration: "",
-  rayTracing: "",
-  source: "manual",
-};
+function pickBestReportSessionId(preview: PerformancePreview | null): number | null {
+  const reports = (preview?.reports || []).filter(
+    (r) => Number.isFinite(r.fpsAverage) && r.fpsAverage > 0 && (r.samples || 0) >= 10,
+  );
+  if (reports.length === 0) return null;
+  const full = reports.find(
+    (r) => r.snapshotAvailable && r.cpu && r.gpu && r.ramGb > 0 && r.graphics.width && r.graphics.height,
+  );
+  if (full) return full.sessionId;
+  const snap = reports.find((r) => r.snapshotAvailable && r.cpu && r.gpu && r.ramGb > 0);
+  if (snap) return snap.sessionId;
+  return reports[0].sessionId;
+}
 
 export function PerformancePanel({
   gameId,
-  status,
   onShared,
 }: {
   gameId: number;
-  status: string;
+  status?: string;
   onShared?: () => void;
 }) {
   const [preview, setPreview] = useState<PerformancePreview | null>(null);
-  const [graphics, setGraphics] = useState(blank);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [base, setBase] = useState("");
-  const [session, setSession] = useState("");
-  const [measured, setMeasured] = useState<PerformanceReport | undefined>();
-  const [share, setShare] = useState(false);
+  const [hardware, setHardware] = useState<HardwareInfo | null>(null);
+  const [fpsStatus, setFpsStatus] = useState<FpsStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncNotice, setSyncNotice] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [hardware, setHardware] = useState<Partial<PerformanceReport>>({});
 
-  const api = useMemo(() => createDesktopAdapter(base), [base]);
-
-  const load = async () => {
-    try {
-      const [p, b] = await Promise.all([
-        window.electronAPI.getPerformancePreview!(gameId),
-        window.electronAPI.getCommunityBaseUrl!(),
-      ]);
-      setPreview(p);
-      setGraphics(p.context);
-      setBase(b);
-      try {
-        const h = await window.electronAPI.getHardwareInfo?.();
-        if (h)
-          setHardware({
-            cpu: h.cpu_name,
-            gpu: h.gpus.map((g) => g.name).join(" / "),
-            ramGb: h.ram_gb,
-          });
-      } catch {}
-    } catch (e) {
-      setError(communityError(e));
-    }
-  };
-
-  useEffect(() => {
-    void load();
-    setShare(false);
-    setSelected([]);
-    setMeasured(undefined);
-    setSession("");
-  }, [gameId]);
-
-  const run = async (fn: () => Promise<void>) => {
+  const load = useCallback(async (triggerSync = false) => {
+    if (!window.electronAPI?.getPerformancePreview) return;
     setBusy(true);
     setError("");
-    setNotice("");
     try {
-      await fn();
+      if (triggerSync && window.electronAPI.syncGamePerformance) {
+        const res = await window.electronAPI.syncGamePerformance(gameId).catch(() => null);
+        if (res?.synced) {
+          setSyncNotice("Đã tự động chọn phiên FPS đo được và đồng bộ lên Cộng đồng.");
+          onShared?.();
+        }
+      }
+      const [p, hw, status] = await Promise.all([
+        window.electronAPI.getPerformancePreview(gameId),
+        window.electronAPI.getHardwareInfo?.().catch(() => null) ?? Promise.resolve(null),
+        window.electronAPI.getFpsStatus?.().catch(() => null) ?? Promise.resolve(null),
+      ]);
+      setPreview(p);
+      if (hw) setHardware(hw);
+      if (status) setFpsStatus(status);
     } catch (e) {
       setError(communityError(e));
     } finally {
       setBusy(false);
     }
-  };
+  }, [gameId, onShared]);
+
+  useEffect(() => {
+    setSyncNotice("");
+    void load(true);
+  }, [load]);
+
+  const bestSessionId = useMemo(() => pickBestReportSessionId(preview), [preview]);
+  const gpuLabel = hardware?.gpus?.map((g) => g.name).filter(Boolean).join(" / ") || "";
 
   return (
     <section className="gv-community" style={{ padding: "12px 0" }}>
@@ -98,17 +79,29 @@ export function PerformancePanel({
           <div>
             <h3 style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <Gauge size={18} className="gv-text-cyan" />
-              Cấu hình đồ họa & Hiệu năng máy của bạn
+              Phần cứng, Đồ họa &amp; FPS tự động quét
             </h3>
             <p className="gv-muted">
-              Thiết lập độ phân giải và mức đồ họa trong game để các phiên đo FPS tiếp theo tự động gắn bối cảnh chính xác.
+              App tự động quét phần cứng máy, file cấu hình game và dữ liệu đo FPS (PresentMon / AMD GameReport) rồi đồng bộ lên Cộng đồng — không cần nhập thủ công.
             </p>
           </div>
-          {hardware.gpu && (
-            <span className="gv-pill gv-pill-cyan">
-              {hardware.gpu} · {hardware.ramGb} GB RAM
-            </span>
-          )}
+          <div className="gv-actions" style={{ gap: 8 }}>
+            {fpsStatus && (
+              <span className={`gv-pill ${fpsStatus.ready ? "gv-pill-emerald" : "gv-pill-amber"}`}>
+                {fpsStatus.ready ? "PresentMon sẵn sàng" : "Chưa bật PresentMon"}
+              </span>
+            )}
+            <button
+              type="button"
+              className="gv-icon-btn"
+              title="Quét lại dữ liệu phần cứng & FPS"
+              aria-label="Quét lại dữ liệu phần cứng & FPS"
+              disabled={busy}
+              onClick={() => void load(true)}
+            >
+              <RefreshCw size={14} className={busy ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -116,115 +109,86 @@ export function PerformancePanel({
             {error}
           </p>
         )}
-        {notice && (
+        {syncNotice && (
           <p className="gv-notice" role="status">
-            {notice}
+            <CheckCircle2 size={15} />
+            {syncNotice}
           </p>
         )}
 
-        <form
-          className="gv-card-subtle gv-stack"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void run(async () => {
-              setGraphics(
-                await window.electronAPI.saveGameGraphics!(gameId, graphics),
-              );
-              setNotice("Đã lưu cấu hình cho các phiên đo tiếp theo.");
-            });
-          }}
-        >
-          <GraphicsFields value={graphics} onChange={setGraphics} />
-          <div>
-            <button className="gv-primary" disabled={busy}>
-              <Save size={14} />
-              Lưu cấu hình phiên tiếp theo
-            </button>
-          </div>
-        </form>
-
-        <div className="gv-card-subtle gv-stack">
+        {/* Auto-scanned hardware & graphics context */}
+        <div className="gv-card-subtle gv-stack-sm">
           <div className="gv-top">
-            <div>
-              <h3 style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <FileCode2 size={16} className="gv-text-amber" />
-                File cấu hình (INI / CFG / JSON / XML)
-              </h3>
-              <p className="gv-muted">
-                Tự phát hiện hoặc chọn thủ công để đọc độ phân giải / xuất ZIP tại máy.
-              </p>
-            </div>
-            <div className="gv-actions">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const candidates =
-                      await window.electronAPI.chooseGameConfig!(gameId);
-                    if (preview) setPreview({ ...preview, candidates });
-                    setSelected([]);
-                  })
-                }
-              >
-                <FolderOpen size={15} />
-                Chọn file thủ công
-              </button>
-              <button
-                type="button"
-                disabled={busy || selected.length === 0}
-                onClick={() =>
-                  void run(async () => {
-                    const result =
-                      await window.electronAPI.exportGameSettings!(
-                        gameId,
-                        selected,
-                      );
-                    if (result)
-                      setNotice(
-                        `Đã xuất ${result.files} file đến ${result.destination}`,
-                      );
-                  })
-                }
-              >
-                <Download size={15} />
-                Xuất ZIP ({selected.length})
-              </button>
-            </div>
+            <span style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700, fontSize: 13 }}>
+              <Cpu size={15} className="gv-text-cyan" />
+              Cấu hình hệ thống &amp; Đồ họa nhận diện được
+            </span>
+            <span className="gv-pill gv-pill-cyan">Tự động quét 100%</span>
           </div>
 
+          <div className="gv-actions" style={{ gap: 8, flexWrap: "wrap" }}>
+            <span className="gv-pill">
+              <Monitor size={12} /> {gpuLabel || "Đang quét GPU..."}
+            </span>
+            <span className="gv-pill">{hardware?.cpu_name || "Đang quét CPU..."}</span>
+            <span className="gv-pill">{hardware?.ram_gb ? `${hardware.ram_gb} GB RAM` : "RAM —"}</span>
+            {hardware?.display?.width && hardware?.display?.height && (
+              <span className="gv-pill">
+                Màn hình: {hardware.display.width}×{hardware.display.height}
+                {hardware.display.refresh_hz ? ` @ ${hardware.display.refresh_hz}Hz` : ""}
+              </span>
+            )}
+          </div>
+
+          <div className="gv-actions" style={{ gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+            <span className="gv-pill gv-pill-cyan">
+              Độ phân giải game:{" "}
+              {preview?.context.width && preview?.context.height
+                ? `${preview.context.width}×${preview.context.height}`
+                : "Chưa phát hiện file cấu hình"}
+            </span>
+            <span className="gv-pill">
+              Preset: {preview?.context.preset || "Tự động / Chưa nhận diện"}
+            </span>
+            {preview?.context.upscaling && (
+              <span className="gv-pill">Upscaling: {preview.context.upscaling}</span>
+            )}
+            {preview?.context.frameGeneration && (
+              <span className="gv-pill">FG: {preview.context.frameGeneration}</span>
+            )}
+            {preview?.context.rayTracing && (
+              <span className="gv-pill">RT: {preview.context.rayTracing}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Auto-detected config files (read-only) */}
+        <div className="gv-card-subtle gv-stack-sm">
+          <div className="gv-top">
+            <h3 style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <FileCode2 size={16} className="gv-text-amber" />
+              File cấu hình tự phát hiện (INI / CFG / JSON / XML)
+            </h3>
+            <span className="gv-muted" style={{ fontSize: 12 }}>
+              {preview?.candidates.length ? `${preview.candidates.length} file` : "Không có"}
+            </span>
+          </div>
           {preview?.candidates.length ? (
             <div className="gv-stack-sm">
               {preview.candidates.map((c: ConfigCandidate) => (
-                <div className="gv-card-subtle" key={c.path} style={{ padding: "10px 12px" }}>
+                <div className="gv-card-subtle" key={c.path} style={{ padding: "8px 12px" }}>
                   <div className="gv-top">
-                    <label className="gv-check">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(c.path)}
-                        onChange={(e) =>
-                          setSelected(
-                            e.target.checked
-                              ? [...selected, c.path]
-                              : selected.filter((p) => p !== c.path),
-                          )
-                        }
-                      />
+                    <div className="gv-actions" style={{ gap: 8 }}>
                       <strong>{c.name}</strong>
                       <span className="gv-pill">{c.adapter}</span>
                       <span className="gv-muted">{(c.size / 1024).toFixed(1)} KB</span>
-                    </label>
-                    {c.graphics.width && (
-                      <button
-                        type="button"
-                        className="gv-link"
-                        onClick={() =>
-                          setGraphics({ ...graphics, ...c.graphics })
-                        }
-                      >
-                        Áp dụng {c.graphics.width}×{c.graphics.height}
-                      </button>
-                    )}
+                      {c.graphics.width && c.graphics.height && (
+                        <span className="gv-pill gv-pill-cyan">
+                          {c.graphics.width}×{c.graphics.height}
+                          {c.graphics.preset ? ` · ${c.graphics.preset}` : ""}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="gv-muted" style={{ fontSize: 11, marginTop: 4, overflowWrap: "anywhere" }}>
                     {c.path}
@@ -234,85 +198,74 @@ export function PerformancePanel({
             </div>
           ) : (
             <p className="gv-muted">
-              Chưa tự phát hiện file setting hỗ trợ. Bạn có thể bấm "Chọn file thủ công".
+              Game này chưa có file cấu hình nằm trong danh sách tự nhận diện.
             </p>
           )}
         </div>
 
-        <div className="gv-card-subtle gv-stack">
-          <h3>Chia sẻ FPS & cấu hình lên cộng đồng</h3>
-          {status !== "completed" ? (
+        {/* Measured FPS sessions (100% auto-scanned) */}
+        <div className="gv-card-subtle gv-stack-sm">
+          <div className="gv-top">
+            <h3>Các phiên FPS đã tự động ghi nhận</h3>
+            <span className="gv-muted" style={{ fontSize: 12 }}>
+              Tự chọn phiên đại diện khi đồng bộ
+            </span>
+          </div>
+
+          {preview && preview.reports.length === 0 ? (
             <p className="gv-muted">
-              Đánh dấu game đã hoàn thành để chia sẻ kết quả chơi thực tế của bạn lên cộng đồng.
+              Chưa có dữ liệu FPS cho game này. Khi bạn chơi qua tracker (PresentMon) hoặc có báo cáo mới từ AMD GameReport, app sẽ tự quét và cập nhật tại đây.
             </p>
           ) : (
-            <>
-              {preview && preview.reports.length === 0 && (
-                <p className="gv-muted">
-                  Chưa có phiên PresentMon cho game này — bạn vẫn có thể chia sẻ kết quả tự khai báo (CPU/GPU/RAM đã điền sẵn từ máy bạn).
-                </p>
-              )}
-              <div className="gv-actions">
-                <select
-                  style={{ maxWidth: 360 }}
-                  value={session}
-                  onChange={(e) => setSession(e.target.value)}
-                >
-                  <option value="">Chọn phiên FPS đã đo</option>
-                  {preview?.reports.map((r) => (
-                    <option key={r.sessionId} value={r.sessionId}>
-                      {new Date(r.measuredAt).toLocaleDateString("vi-VN")} ·{" "}
-                      {r.fpsAverage.toFixed(1)} FPS ·{" "}
-                      {r.snapshotAvailable && r.graphics.width && r.graphics.preset
-                        ? "Có snapshot"
-                        : "Thiếu snapshot/cấu hình"}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  disabled={busy || !session}
-                  onClick={() =>
-                    void run(async () => {
-                      setMeasured(
-                        await window.electronAPI.prepareMeasuredReport!(
-                          gameId,
-                          Number(session),
-                        ),
-                      );
-                      setShare(true);
-                    })
-                  }
-                >
-                  Dùng phiên đo này
-                </button>
-                <button
-                  type="button"
-                  className="gv-btn-cyan"
-                  disabled={busy}
-                  onClick={() => {
-                    setMeasured(undefined);
-                    setShare(true);
-                  }}
-                >
-                  Nhập kết quả tự khai báo
-                </button>
-                <button type="button" disabled={busy} onClick={() => void load()}>
-                  <RefreshCw size={14} />
-                </button>
-              </div>
-
-              {share && preview && base && (
-                <PerformanceShareForm
-                  key={measured ? String(session) : "manual"}
-                  api={api}
-                  game={preview.game}
-                  measured={measured}
-                  defaults={{ ...hardware, graphics }}
-                  onShared={onShared}
-                />
-              )}
-            </>
+            <div className="gv-stack-sm" style={{ maxHeight: 320, overflowY: "auto" }}>
+              {preview?.reports.map((r) => {
+                const isSelected = r.sessionId === bestSessionId;
+                const displayGpu = r.gpu || gpuLabel || "GPU máy hiện tại";
+                const displayCpu = r.cpu || hardware?.cpu_name || "CPU máy hiện tại";
+                const displayRam = r.ramGb > 0 ? r.ramGb : hardware?.ram_gb || 0;
+                return (
+                  <article className="gv-perf-card" key={r.sessionId}>
+                    <div className="gv-stack-sm">
+                      <div className="gv-actions" style={{ gap: 8, flexWrap: "wrap" }}>
+                        <span className="gv-muted" style={{ fontSize: 12 }}>
+                          {new Date(r.measuredAt).toLocaleString("vi-VN")}
+                        </span>
+                        <span className="gv-pill gv-pill-emerald">Tự đo</span>
+                        {isSelected && (
+                          <span className="gv-pill gv-pill-cyan">
+                            <CheckCircle2 size={11} /> Tự chọn đồng bộ Cộng đồng
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>
+                        <Monitor size={14} style={{ display: "inline", marginRight: 6 }} />
+                        {displayGpu} · {displayCpu} · {displayRam > 0 ? `${displayRam} GB RAM` : "RAM —"}
+                      </div>
+                      <div className="gv-actions" style={{ gap: 6, flexWrap: "wrap" }}>
+                        <span className="gv-pill gv-pill-cyan">
+                          {r.graphics.width && r.graphics.height
+                            ? `${r.graphics.width}×${r.graphics.height}`
+                            : "Chưa nhận diện độ phân giải"}
+                        </span>
+                        <span className="gv-pill">
+                          {r.graphics.preset || "Chưa nhận diện preset"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="gv-fps-box">
+                      <div className="gv-fps-big">{r.fpsAverage.toFixed(1)}</div>
+                      <div className="gv-muted" style={{ fontSize: 11 }}>AVG FPS</div>
+                      <div className="gv-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        1% low: {r.fpsLow != null ? r.fpsLow.toFixed(1) : "—"}
+                      </div>
+                      <div className="gv-muted" style={{ fontSize: 10, marginTop: 4 }}>
+                        {r.samples.toLocaleString("vi-VN")} frames
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>

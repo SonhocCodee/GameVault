@@ -65,7 +65,6 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
   const [myReview, setMyReview] = useState<string>('');
   const [myDropped, setMyDropped] = useState<boolean>(false);
   const [myDropReason, setMyDropReason] = useState<string>('');
-  const [myFps, setMyFps] = useState<string>('');
 
   const authErrorMessage = (err: any) => {
     let msg = String(err?.message || err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
@@ -176,10 +175,9 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
         review: myReview,
         dropped: myDropped,
         dropReason: myDropped ? myDropReason : undefined,
-        fps: myFps ? parseInt(myFps) : undefined,
+        fps: localGame.fps_avg && localGame.fps_avg > 0 ? Math.round(localGame.fps_avg) : undefined,
       });
       setMyReview('');
-      setMyFps('');
       await loadAll();
       await loadReviews(selectedEntry.gameKey);
     } catch (err: any) {
@@ -596,14 +594,21 @@ export const LegacyCommunityView: React.FC<CommunityViewProps> = ({ onBack }) =>
                                         className="flex-1 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1.5 text-xs text-white outline-none focus:border-amber-400"
                                       />
                                     )}
-                                    <div className="flex items-center gap-1.5 text-xs text-[#8e95a5]">
-                                      <Gauge className="h-3.5 w-3.5" />
-                                      <input
-                                        value={myFps}
-                                        onChange={(e) => setMyFps(e.target.value.replace(/[^0-9]/g, ''))}
-                                        placeholder="FPS"
-                                        className="w-16 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2 py-1.5 font-mono text-white outline-none focus:border-sky-400"
-                                      />
+                                    <div
+                                      className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1.5 text-xs text-[#8e95a5]"
+                                      title="FPS trung bình đo tự động trên máy này (không chỉnh sửa thủ công)"
+                                    >
+                                      <Gauge className="h-3.5 w-3.5 text-sky-400" />
+                                      {(() => {
+                                        const measuredFps = localGameForKey(selectedEntry.gameKey)?.fps_avg;
+                                        return measuredFps && measuredFps > 0 ? (
+                                          <span className="font-mono text-white">
+                                            {Math.round(measuredFps)} FPS <span className="text-[10px] text-[#8e95a5]">(đo từ máy)</span>
+                                          </span>
+                                        ) : (
+                                          <span className="text-[11px] text-[#8e95a5]">Chưa đo FPS trên máy này</span>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                   <div className="flex justify-end gap-2">

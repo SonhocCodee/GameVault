@@ -26,6 +26,8 @@ import {
   saveGameGraphics,
   prepareMeasuredReport,
   compatibleFpsAverage,
+  selectBestMeasuredReport,
+  buildAutoCommunityPerformanceReport,
 } from "../src/main/performance-context.ts";
 let dir;
 beforeEach(() => {
@@ -228,4 +230,81 @@ test("legacy churn repair never merges benchmark sessions or their different gra
     preview.reports.find((r) => r.graphics.preset === "Low").fpsAverage,
     120,
   );
+});
+
+test("auto-selection prefers snapshot+resolution sessions and fills cached hardware without manual input", async () => {
+  const game = createGame({ title: "Auto Sync Game", status: "playing" });
+  getDb()
+    .prepare(
+      "INSERT INTO app_settings(key,value) VALUES ('hardware_info', ?)",
+    )
+    .run(
+      JSON.stringify({
+        collected_at: new Date().toISOString(),
+        os_name: "Windows 11",
+        os_build: "26100",
+        cpu_name: "Ryzen 7 7800X3D",
+        cpu_cores: 8,
+        cpu_threads: 16,
+        ram_gb: 32,
+        gpus: [{ name: "AMD Radeon RX 7800 XT", driver: "1.0", vram_mb: 16384 }],
+        display: { width: 2560, height: 1440, refresh_hz: 165 },
+        presentmon_path: null,
+      }),
+    );
+
+  // Session 1: measured FPS without snapshot
+  const s1 = Number(
+    getDb()
+      .prepare(
+        "INSERT INTO sessions(game_id,start_time,end_time,fps_avg,fps_samples,fps_1pct_low,source) VALUES (?,?,?,80,500,45,'amd_import')",
+      )
+      .run(game.id, "2026-11-24T10:00:00Z", "2026-11-24T11:00:00Z")
+      .lastInsertRowid,
+  );
+  const autoFromFallback = await buildAutoCommunityPerformanceReport(game.id);
+  assert.ok(autoFromFallback);
+  assert.equal(autoFromFallback.sessionId, s1);
+  assert.equal(autoFromFallback.cpu, "Ryzen 7 7800X3D");
+  assert.equal(autoFromFallback.gpu, "AMD Radeon RX 7800 XT");
+  assert.equal(autoFromFallback.ramGb, 32);
+  assert.equal(autoFromFallback.source, "presentmon");
+  assert.equal(autoFromFallback.graphics.source, "unknown");
+  assert.equal(validatePerformanceReport(autoFromFallback).gameKey, autoFromFallback.gameKey);
+
+  // Session 2: measured FPS with full snapshot + graphics resolution
+  const s2 = Number(
+    getDb()
+      .prepare(
+        "INSERT INTO sessions(game_id,start_time,end_time,fps_avg,fps_samples,fps_1pct_low,source) VALUES (?,?,?,110,2000,72,'tracker')",
+      )
+      .run(game.id, "2026-11-25T10:00:00Z", "2026-11-25T11:00:00Z")
+      .lastInsertRowid,
+  );
+  saveGameGraphics(game.id, { width: 2560, height: 1440, preset: "High", source: "config" });
+  await capturePerformanceContext(
+    s2,
+    game.id,
+    { cpu_name: "Ryzen 7 7800X3D", gpus: [{ name: "RX 7800 XT" }], ram_gb: 32 },
+    "2026-11-25T10:00:00Z",
+  );
+  const preview = getPerformancePreview(game.id);
+  const best = selectBestMeasuredReport(preview.reports);
+  assert.equal(best?.sessionId, s2);
+});
+
+test("performance UI removes manual FPS/config input forms", () => {
+  const panel = fs.readFileSync(
+    path.resolve("src/renderer/community/PerformancePanel.tsx"),
+    "utf8",
+  );
+  const hub = fs.readFileSync(
+    path.resolve("src/renderer/community/GameHub.tsx"),
+    "utf8",
+  );
+  assert.equal(panel.includes("Nhập kết quả tự khai báo"), false);
+  assert.equal(panel.includes("Lưu cấu hình phiên tiếp theo"), false);
+  assert.equal(panel.includes("Chọn file thủ công"), false);
+  assert.equal(hub.includes("Chia sẻ thủ công"), false);
+  assert.equal(fs.existsSync(path.resolve("src/renderer/community/PerformanceShareForm.tsx")), false);
 });

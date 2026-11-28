@@ -175,9 +175,12 @@ export function GamePlayers({
                       </span>
                       <span className="gv-pill gv-pill-emerald">
                         <Gauge size={12} />
-                        {p.performance.fpsAverage.toFixed(1)} FPS (
-                        {p.performance.graphics.width}×{p.performance.graphics.height}{" "}
-                        {p.performance.graphics.preset})
+                        {p.performance.fpsAverage.toFixed(1)} FPS
+                        {p.performance.graphics.width && p.performance.graphics.height
+                          ? ` (${p.performance.graphics.width}×${p.performance.graphics.height}${p.performance.graphics.preset ? ` ${p.performance.graphics.preset}` : ""})`
+                          : p.performance.graphics.preset
+                            ? ` (${p.performance.graphics.preset})`
+                            : ""}
                       </span>
                     </div>
                   ) : (

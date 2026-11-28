@@ -468,9 +468,188 @@ export function importAMDDatabase(
     } catch {}
   }
 
+  // Enrich matching AMD sessions with frame-time FPS captured in AMD's GameReport/*/gpa.bin
+  try {
+    syncAmdGameReportFps(vaultDb, amdPath, rawGames);
+  } catch {}
+
   return {
     importedGames,
     importedSessions,
     skippedGames,
   };
+}
+
+export interface AmdGpaFpsMetrics {
+  fps_avg: number;
+  fps_1pct_low: number | null;
+  fps_samples: number;
+}
+
+/**
+ * Parses an AMD Adrenalin `gpa.bin` file (space-separated frame times in microseconds)
+ * into average FPS, 1% low FPS, and sample count.
+ */
+export function parseAmdGpaFrametimes(content: string, minSamples: number = 10): AmdGpaFpsMetrics | null {
+  if (!content) return null;
+  const tokens = content.trim().split(/\s+/);
+  const frameTimesUs: number[] = [];
+  for (const tok of tokens) {
+    if (!tok) continue;
+    const v = Number(tok);
+    if (Number.isFinite(v) && v > 0 && v < 10_000_000) {
+      frameTimesUs.push(v);
+    }
+  }
+  if (frameTimesUs.length < minSamples) return null;
+
+  const meanUs = frameTimesUs.reduce((a, b) => a + b, 0) / frameTimesUs.length;
+  if (!(meanUs > 0)) return null;
+
+  const sorted = [...frameTimesUs].sort((a, b) => a - b);
+  const worstCount = Math.max(1, Math.ceil(sorted.length * 0.01));
+  let worstSumUs = 0;
+  for (let i = sorted.length - worstCount; i < sorted.length; i++) {
+    worstSumUs += sorted[i];
+  }
+  const worstMeanUs = worstSumUs / worstCount;
+
+  const fpsAvg = Math.round((1_000_000 / meanUs) * 10) / 10;
+  const fps1PctLow = worstMeanUs > 0 ? Math.round((1_000_000 / worstMeanUs) * 10) / 10 : null;
+  if (!Number.isFinite(fpsAvg) || fpsAvg <= 0) return null;
+
+  return {
+    fps_avg: fpsAvg,
+    fps_1pct_low: fps1PctLow && Number.isFinite(fps1PctLow) ? fps1PctLow : null,
+    fps_samples: frameTimesUs.length,
+  };
+}
+
+function parseSessionTimestampMs(raw?: string | null): number {
+  if (!raw) return NaN;
+  const s = String(raw).trim();
+  if (!s) return NaN;
+  const normalized = s.includes('T') ? s : s.replace(' ', 'T');
+  return new Date(normalized).getTime();
+}
+
+/**
+ * Scans AMD Adrenalin's `GameReport/<exe>/gpa.bin` files and populates `fps_avg`,
+ * `fps_samples`, and `fps_1pct_low` on matching finished sessions that lack FPS data.
+ */
+export function syncAmdGameReportFps(
+  vaultDb: DatabaseSync,
+  amdDbPath?: string,
+  rawInstalledGames?: any[]
+): number {
+  const sourceAmdPath = amdDbPath || DEFAULT_AMD_DB_PATH;
+  const reportDir = path.join(path.dirname(sourceAmdPath), 'GameReport');
+  if (!fs.existsSync(reportDir)) return 0;
+
+  let installedGames = rawInstalledGames;
+  if (!installedGames && fs.existsSync(sourceAmdPath)) {
+    try {
+      const amdDb = new DatabaseSync(sourceAmdPath, { readOnly: true });
+      installedGames = amdDb.prepare('SELECT ExePath, Title, SteamID FROM InstalledGames').all() as any[];
+      amdDb.close();
+    } catch {
+      installedGames = [];
+    }
+  }
+
+  const exeToAmdInfo = new Map<string, { title: string; steamId: number }>();
+  for (const g of installedGames || []) {
+    if (!g?.ExePath) continue;
+    const base = path.basename(String(g.ExePath)).toLowerCase();
+    if (!base) continue;
+    exeToAmdInfo.set(base, {
+      title: g.Title ? String(g.Title).trim() : '',
+      steamId: typeof g.SteamID === 'number' ? g.SteamID : -1,
+    });
+  }
+
+  const vaultGames = vaultDb.prepare('SELECT id, title, exe_name, exe_path, steam_id FROM games').all() as any[];
+  const byExe = new Map<string, any>();
+  const bySteam = new Map<number, any>();
+  const byTitle = new Map<string, any>();
+  for (const g of vaultGames) {
+    if (g.exe_name) byExe.set(String(g.exe_name).toLowerCase(), g);
+    if (g.exe_path) byExe.set(path.basename(String(g.exe_path)).toLowerCase(), g);
+    if (g.steam_id && g.steam_id > 0) bySteam.set(Number(g.steam_id), g);
+    if (g.title) byTitle.set(String(g.title).toLowerCase().trim(), g);
+  }
+
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(reportDir, { withFileTypes: true }).filter((d) => d.isDirectory());
+  } catch {
+    return 0;
+  }
+
+  const sessionsStmt = vaultDb.prepare(`
+    SELECT id, start_time, end_time, fps_avg
+    FROM sessions
+    WHERE game_id = ? AND is_running = 0 AND fps_avg IS NULL
+    ORDER BY start_time DESC
+    LIMIT 200
+  `);
+  const updateStmt = vaultDb.prepare(`
+    UPDATE sessions
+    SET fps_avg = ?, fps_samples = ?, fps_1pct_low = ?
+    WHERE id = ? AND fps_avg IS NULL
+  `);
+
+  const MAX_MATCH_DIFF_MS = 15 * 60 * 1000;
+  let updatedCount = 0;
+
+  for (const ent of entries) {
+    const gpaPath = path.join(reportDir, ent.name, 'gpa.bin');
+    if (!fs.existsSync(gpaPath)) continue;
+
+    let mtimeMs = 0;
+    try {
+      mtimeMs = fs.statSync(gpaPath).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (!(mtimeMs > 0)) continue;
+
+    const folderLower = ent.name.toLowerCase();
+    const exeMatch = folderLower.match(/^(.+?\.exe)(?:_.*)?$/);
+    const exeCandidate = exeMatch ? exeMatch[1] : folderLower;
+
+    let matchedGame = byExe.get(exeCandidate);
+    if (!matchedGame) {
+      const amdInfo = exeToAmdInfo.get(exeCandidate);
+      if (amdInfo) {
+        if (amdInfo.steamId > 0) matchedGame = bySteam.get(amdInfo.steamId);
+        if (!matchedGame && amdInfo.title) matchedGame = byTitle.get(amdInfo.title.toLowerCase());
+      }
+    }
+    if (!matchedGame) continue;
+
+    const candidateSessions = sessionsStmt.all(matchedGame.id) as any[];
+    let bestSession: any = null;
+    let bestDiff = Infinity;
+    for (const s of candidateSessions) {
+      const endMs = parseSessionTimestampMs(s.end_time || s.start_time);
+      if (!Number.isFinite(endMs)) continue;
+      const diff = Math.abs(endMs - mtimeMs);
+      if (diff <= MAX_MATCH_DIFF_MS && diff < bestDiff) {
+        bestDiff = diff;
+        bestSession = s;
+      }
+    }
+    if (!bestSession) continue;
+
+    try {
+      const content = fs.readFileSync(gpaPath, 'utf8');
+      const metrics = parseAmdGpaFrametimes(content);
+      if (!metrics) continue;
+      const res = updateStmt.run(metrics.fps_avg, metrics.fps_samples, metrics.fps_1pct_low, bestSession.id);
+      if (Number(res.changes) > 0) updatedCount++;
+    } catch {}
+  }
+
+  return updatedCount;
 }

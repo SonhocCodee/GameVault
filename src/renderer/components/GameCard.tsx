@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Star, Clock, Trophy, PlayCircle, PauseCircle, XCircle, BookmarkCheck, Gamepad2, FolderOpen, Trash2 } from 'lucide-react';
+import { Star, Clock, Trophy, PlayCircle, PauseCircle, XCircle, BookmarkCheck, Gamepad2, FolderOpen, Trash2, Gauge } from 'lucide-react';
 import type { Game, GameStatus } from '../../shared/types.js';
 import { formatScore } from '../community/CommunityWidgets.tsx';
 
@@ -161,10 +161,21 @@ export const GameCard: React.FC<GameCardProps> = ({ game, onSelect, onDelete, is
           </h3>
 
           <div className="mt-1.5 flex items-center justify-between gap-1 text-[11px]">
-            {/* Playtime */}
-            <div className="flex items-center gap-1 font-mono text-[11px] font-semibold text-[#f1f3f7] whitespace-nowrap shrink-0">
-              <Clock className="h-3 w-3 text-[#ff2a44] shrink-0" />
-              <span className="whitespace-nowrap">{formatPlaytime(game.playtime_minutes)}</span>
+            {/* Playtime & FPS */}
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex items-center gap-1 font-mono text-[11px] font-semibold text-[#f1f3f7] whitespace-nowrap shrink-0">
+                <Clock className="h-3 w-3 text-[#ff2a44] shrink-0" />
+                <span className="whitespace-nowrap">{formatPlaytime(game.playtime_minutes)}</span>
+              </div>
+              {game.fps_avg != null && game.fps_avg > 0 && (
+                <div
+                  className="flex items-center gap-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-300 whitespace-nowrap shrink-0"
+                  title={`FPS trung bình: ${game.fps_avg.toFixed(1)}${game.fps_1pct_low != null && game.fps_1pct_low > 0 ? ` · 1% low: ${game.fps_1pct_low.toFixed(1)}` : ''}`}
+                >
+                  <Gauge className="h-2.5 w-2.5 text-emerald-400 shrink-0" />
+                  <span>{Math.round(game.fps_avg)} FPS</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-1 shrink-0">

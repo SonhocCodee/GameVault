@@ -356,7 +356,11 @@ export function getGames(filter?: GameFilter): Game[] {
   const query = `
     SELECT 
       games.*,
-      (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual') AS last_played_at
+      (SELECT MAX(start_time) FROM sessions WHERE sessions.game_id = games.id AND COALESCE(sessions.source, '') != 'manual') AS last_played_at,
+      (SELECT ROUND(SUM(s.fps_avg * s.fps_samples) / NULLIF(SUM(s.fps_samples), 0), 1)
+       FROM sessions s WHERE s.game_id = games.id AND s.is_running = 0 AND s.fps_avg > 0 AND s.fps_samples > 0) AS fps_avg,
+      (SELECT ROUND(SUM(s.fps_1pct_low * s.fps_samples) / NULLIF(SUM(CASE WHEN s.fps_1pct_low IS NOT NULL AND s.fps_1pct_low > 0 THEN s.fps_samples ELSE 0 END), 0), 1)
+       FROM sessions s WHERE s.game_id = games.id AND s.is_running = 0 AND s.fps_avg > 0 AND s.fps_samples > 0) AS fps_1pct_low
     FROM games
     ${whereClause}
     ${orderClause}
@@ -368,7 +372,16 @@ export function getGames(filter?: GameFilter): Game[] {
 
 export function getGameById(id: number): Game | null {
   const db = getDb();
-  const stmt = db.prepare('SELECT * FROM games WHERE id = ?');
+  const stmt = db.prepare(`
+    SELECT
+      games.*,
+      (SELECT ROUND(SUM(s.fps_avg * s.fps_samples) / NULLIF(SUM(s.fps_samples), 0), 1)
+       FROM sessions s WHERE s.game_id = games.id AND s.is_running = 0 AND s.fps_avg > 0 AND s.fps_samples > 0) AS fps_avg,
+      (SELECT ROUND(SUM(s.fps_1pct_low * s.fps_samples) / NULLIF(SUM(CASE WHEN s.fps_1pct_low IS NOT NULL AND s.fps_1pct_low > 0 THEN s.fps_samples ELSE 0 END), 0), 1)
+       FROM sessions s WHERE s.game_id = games.id AND s.is_running = 0 AND s.fps_avg > 0 AND s.fps_samples > 0) AS fps_1pct_low
+    FROM games
+    WHERE id = ?
+  `);
   const row = stmt.get(id);
   return (row as unknown as Game) || null;
 }

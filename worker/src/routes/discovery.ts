@@ -378,7 +378,11 @@ export function registerDiscoveryRoutes(router: Router) {
     const rows =
       (
         await env.DB.prepare(
-          `SELECT f.id,f.uid,f.data_json,p.nickname FROM community_performance f LEFT JOIN community_profiles p ON p.uid=f.uid
+          `SELECT f.id,f.uid,f.data_json,p.nickname,
+            COALESCE('/community/profile-presets/avatars/'||p.avatar_preset||'.svg',u.photo_url) AS avatar_url
+      FROM community_performance f
+      LEFT JOIN community_profiles p ON p.uid=f.uid
+      LEFT JOIN users u ON u.uid=f.uid
       WHERE ${filters.join(" AND ")} ORDER BY f.updated_at DESC,f.id DESC LIMIT ? OFFSET ?`,
         )
           .bind(...args, limit + 1, offset)
@@ -391,6 +395,7 @@ export function registerDiscoveryRoutes(router: Router) {
           id: r.id,
           uid: r.uid,
           nickname: safeName(r.nickname),
+          avatarUrl: communityAvatar(request, r.avatar_url),
         })),
         limit,
         offset,

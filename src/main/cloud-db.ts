@@ -17,7 +17,11 @@ import { canonicalNonSteamGameKeyFromTitle } from '../shared/game-identity.ts';
 import { autoEnrichAllGameCovers } from './covers.ts';
 import { NON_GAME_TITLE_REGEX } from './tracker.ts';
 import { getValidSessionToken, getAuthStatus, getCurrentSession, getCloudConfig, type FetchLike } from './auth.ts';
-import { assertLibraryAccount } from './account-library.ts';
+import { assertLibraryAccount, canImportDeviceHistory } from './account-library.ts';
+import { syncAmdGameReportFps } from './importer.ts';
+import { buildAutoCommunityPerformanceReport } from './performance-context.ts';
+import { loadAppSettings } from './settings.ts';
+import { getHardwareInfo } from './hardware.ts';
 import type {
   CloudReview,
   CloudSessionItem,
@@ -438,7 +442,12 @@ export async function submitReview(
     dropped: Boolean(payload.dropped),
     dropReason: payload.dropped ? String(payload.dropReason || '').slice(0, 300) : null,
     playtimeMinutes: game.playtime_minutes || 0,
-    fps: payload.fps && payload.fps > 0 ? Math.round(payload.fps) : null,
+    fps:
+      game.fps_avg && game.fps_avg > 0
+        ? Math.round(game.fps_avg)
+        : payload.fps && payload.fps > 0
+          ? Math.round(payload.fps)
+          : null,
   };
 
   const resp = await apiFetch(
@@ -673,6 +682,25 @@ export async function getMyHardwareProfile(): Promise<HardwareProfile | null> {
   return { gpu: user.gpu || '', cpu: user.cpu || '', ramGb: Number(user.ramGb) || 0 };
 }
 
+/**
+ * Auto-detects the current machine's actual hardware (primary GPU, CPU, RAM)
+ * and syncs it to the logged-in user's cloud profile so switching machines
+ * always reflects the active PC's real specs.
+ */
+export async function syncCurrentMachineHardwareProfile(force = false): Promise<HardwareProfile | null> {
+  const status = getAuthStatus();
+  if (!status.loggedIn || !status.profile?.uid) return null;
+
+  const info = await getHardwareInfo(force);
+  const sortedGpus = [...(info.gpus || [])].sort((a, b) => (b.vram_mb || 0) - (a.vram_mb || 0));
+  const gpu = sortedGpus[0]?.name || '';
+  const cpu = info.cpu_name || '';
+  const ramGb = info.ram_gb ? Math.round(info.ram_gb) : 0;
+  if (!gpu && !cpu && !ramGb) return null;
+
+  return setMyHardwareProfile({ gpu, cpu, ramGb });
+}
+
 export async function getUserDoc(uid: string): Promise<Record<string, any> | null> {
   const resp = await apiFetch(`/api/users/${encodeURIComponent(uid)}`, { method: 'GET' });
   if (resp.status === 404) return null;
@@ -762,6 +790,13 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
   assertContext();
   const syncMode = options?.mode === 'overwrite' ? 'overwrite' : 'merge';
   const localSyncEpoch = Number(getSetting(SYNC_EPOCH_SETTING_KEY) || '0') || 0;
+
+  // 0. Scan AMD GameReport frametime logs so newly measured/imported sessions have FPS before sync
+  if (canImportDeviceHistory(db)) {
+    try {
+      syncAmdGameReportFps(db);
+    } catch {}
+  }
 
   // 1. Sanitize local paths in DB (reset local/non-HTTP paths to NULL so canonical web covers are enriched)
   try {
@@ -1293,6 +1328,12 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
   assertContext();
   await syncLocalReviews();
   assertContext();
+  try {
+    await syncLocalPerformanceToCommunity({ maxUploads: 4 });
+  } catch (err) {
+    console.warn('Auto performance sync warning:', err);
+  }
+  assertContext();
 
   if (serverSyncEpoch > 0) {
     setSetting(SYNC_EPOCH_SETTING_KEY, String(serverSyncEpoch));
@@ -1326,4 +1367,142 @@ async function runSyncLibraryWithCloud(options?: LibrarySyncOptions): Promise<Li
     syncEpoch: serverSyncEpoch,
     authoritativePull: isAuthoritativePull,
   };
+}
+
+const PERF_SYNC_HASHES_KEY = 'perf_sync_hashes';
+
+function computePerformanceSignature(report: {
+  gameKey: string;
+  completionStatus: string;
+  fpsAverage: number;
+  fpsLow?: number | null;
+  samples: number;
+  measuredAt: string;
+  cpu: string;
+  gpu: string;
+  ramGb: number;
+  graphics: { width: number | null; height: number | null; preset: string };
+}): string {
+  return [
+    report.gameKey,
+    report.completionStatus,
+    report.fpsAverage,
+    report.fpsLow ?? '',
+    report.samples,
+    report.measuredAt,
+    report.cpu,
+    report.gpu,
+    report.ramGb,
+    report.graphics.width ?? '',
+    report.graphics.height ?? '',
+    report.graphics.preset || '',
+  ].join('|');
+}
+
+/**
+ * Automatically selects the best measured FPS session for local games and
+ * syncs changed reports to the Community Hub without manual user entry.
+ */
+export async function syncLocalPerformanceToCommunity(options?: {
+  gameIds?: number[];
+  preferredSessionId?: number;
+  maxUploads?: number;
+  force?: boolean;
+}): Promise<{ synced: number; skipped?: boolean }> {
+  const uid = getCurrentSession()?.user.uid;
+  if (!uid) return { synced: 0, skipped: true };
+  const db = getDb();
+  assertLibraryAccount(uid, db);
+
+  if (!options?.force && !loadAppSettings(db).fpsAutoShareEnabled) {
+    return { synced: 0, skipped: true };
+  }
+
+  let targetGameIds = options?.gameIds;
+  if (!targetGameIds || targetGameIds.length === 0) {
+    const rows = db
+      .prepare(`
+        SELECT s.game_id
+        FROM sessions s
+        WHERE s.is_running = 0 AND s.fps_avg > 0 AND s.fps_samples >= 10
+        GROUP BY s.game_id
+        ORDER BY MAX(s.start_time) DESC
+        LIMIT 100
+      `)
+      .all() as Array<{ game_id: number }>;
+    targetGameIds = rows.map((r) => Number(r.game_id)).filter((id) => Number.isFinite(id) && id > 0);
+  }
+
+  if (targetGameIds.length === 0) return { synced: 0 };
+
+  let hashes: Record<string, string> = {};
+  try {
+    const raw = getSetting(PERF_SYNC_HASHES_KEY, db);
+    if (raw) hashes = JSON.parse(raw) || {};
+  } catch {
+    hashes = {};
+  }
+
+  const maxUploads = Math.max(1, options?.maxUploads ?? 4);
+  let synced = 0;
+
+  for (const gameId of targetGameIds) {
+    if (synced >= maxUploads) break;
+    if (getCurrentSession()?.user.uid !== uid || getDb() !== db) break;
+
+    const built = await buildAutoCommunityPerformanceReport(gameId, options?.preferredSessionId);
+    if (!built) continue;
+
+    const { sessionId: _sid, ...report } = built;
+    const signature = computePerformanceSignature(report);
+    if (!options?.force && hashes[report.gameKey] === signature) continue;
+
+    const resp = await apiFetch(
+      `/api/community/games/${encodeURIComponent(report.gameKey)}/performance`,
+      {
+        method: 'POST',
+        body: JSON.stringify(report),
+      },
+      true,
+    );
+
+    if (resp.status === 429) {
+      // Rate-limited by Worker (5 reports / 300s) — stop gracefully and retry on next sync
+      break;
+    }
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      console.warn(`[performance] Sync failed for ${report.gameKey}: ${resp.status} ${errText.slice(0, 160)}`);
+      continue;
+    }
+
+    hashes[report.gameKey] = signature;
+    synced++;
+    try {
+      setSetting(PERF_SYNC_HASHES_KEY, JSON.stringify(hashes), db);
+    } catch {}
+  }
+
+  return { synced };
+}
+
+/**
+ * Scans AMD GameReport FPS if available and syncs a single game's
+ * auto-selected FPS session to its Community Hub page.
+ */
+export async function syncSingleGamePerformanceToCommunity(
+  gameId: number,
+  preferredSessionId?: number,
+): Promise<{ synced: number; skipped?: boolean }> {
+  const db = getDb();
+  if (canImportDeviceHistory(db)) {
+    try {
+      syncAmdGameReportFps(db);
+    } catch {}
+  }
+  return syncLocalPerformanceToCommunity({
+    gameIds: [gameId],
+    preferredSessionId,
+    maxUploads: 1,
+  });
 }

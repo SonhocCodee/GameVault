@@ -6,6 +6,30 @@ Quy tắc đi kèm được lưu tại `.agents/rules/push-sync-log.md`.
 > **Quy ước:**
 > - **Mục mới nhất luôn nằm trên cùng**, chèn ngay bên dưới thẻ `<!-- LATEST_FIRST -->
 
+## [2026-11-28 10:55] — Máy: DESKTOP-BU4IIOC — Branch: main
+
+### Tóm tắt công việc
+- **Tự động nhận diện & khóa chỉnh sửa thủ công cấu hình máy + FPS theo máy đang đăng nhập**:
+  - Cập nhật `src/renderer/components/AuthBadge.tsx`: bỏ toàn bộ ô nhập tay GPU/CPU/RAM và nút lưu thủ công; hiển thị chỉ đọc thông số phần cứng thực tế từ `getHardwareInfo()` (Card GPU + VRAM, CPU + nhân/luồng, RAM, Màn hình `width×height @ Hz`, OS) kèm nút **Tự nhận diện** để quét lại & đồng bộ lên cloud.
+  - Thêm `syncCurrentMachineHardwareProfile` trong `src/main/cloud-db.ts` (expose qua `community:syncMyHardwareProfile` trong `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/types.ts`), tự động chạy khi đăng nhập (`changeAccount`) và khi mở app đã đăng nhập (`app.whenReady()`), đảm bảo đổi máy đăng nhập sẽ tự nhận đúng cấu hình máy đó.
+  - Cập nhật `src/renderer/components/CommunityView.tsx` & `submitReview` (`src/main/cloud-db.ts`): bỏ ô nhập tay FPS khi viết review, tự động lấy `fps_avg` đo được trên máy hiện tại (chỉ đọc).
+- **Đồng bộ các thay đổi đang có trên `DESKTOP-BU4IIOC`**:
+  - Bao gồm cập nhật auto-share performance (`PerformancePanel.tsx`, xóa `PerformanceShareForm.tsx`), AMD watcher/importer FPS, `SaveVaultSection.tsx`, `GameDetail.tsx`, `GameCard.tsx`, và `worker/src/routes/discovery.ts`.
+
+### File chính đã thay đổi
+- `src/renderer/components/AuthBadge.tsx`, `src/renderer/components/CommunityView.tsx`
+- `src/main/cloud-db.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/types.ts`
+- Cùng các file đang sửa trên máy (`src/main/amd-watcher.ts`, `src/main/importer.ts`, `src/main/performance-context.ts`, `src/renderer/community/*`, `src/renderer/components/SaveVaultSection.tsx`, `worker/src/routes/discovery.ts`, `tests/amd-watcher.test.js`, `tests/game-settings.test.js`)
+- `PUSH_LOG.md`
+
+### Kiểm tra (Verify)
+- `npx tsc --noEmit`: Pass.
+- `npm run build`: Pass.
+- `npm test`: Pass `558/558` (103 suites, 0 fail, 0 skipped).
+
+### Bàn giao cho máy kia (Notes / Next)
+- Pull `main` về và chạy `npm install` nếu có thay đổi `package-lock.json`.
+
 ## [2026-11-27 17:34] — Máy: CNTT-PM6 — Branch: main
 
 ### Tóm tắt công việc

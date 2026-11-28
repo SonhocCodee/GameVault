@@ -357,189 +357,80 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
   };
 
   return (
-    <div className="mt-12 space-y-4">
-      {/* Section header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-bold text-white flex items-center gap-2">
-          <HardDrive className="h-4 w-4 text-amber-400" />
-          <span>Lưu trữ Save</span>
-          {backups.length > 0 && (
-            <span className="rounded bg-[#2a2e3d] px-2 py-0.5 text-[10px] font-mono text-[#8e95a5]">
-              {backups.length} bản backup
-            </span>
+    <div className="space-y-5">
+      {/* Top Bar: Title, Vault Location Pill, Cloud & Primary Backup CTA */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#2a2e3d] bg-[#161821] px-5 py-4">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <HardDrive className="h-5 w-5 text-amber-400 shrink-0" />
+            <h2 className="text-base font-bold text-white">Lưu trữ Save</h2>
+            {backups.length > 0 && (
+              <span className="rounded-full bg-[#2a2e3d] px-2.5 py-0.5 text-[11px] font-mono font-semibold text-[#f1f3f7]">
+                {backups.length} bản backup
+              </span>
+            )}
+          </div>
+          {vault && (
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#8e95a5]">
+              <span>Nơi lưu Vault:</span>
+              <span
+                className="truncate max-w-xs sm:max-w-md font-mono text-[#f1f3f7]"
+                title={`${vault.root}\nMẹo: trỏ vault vào folder Google Drive / OneDrive để tự động đồng bộ cloud.`}
+              >
+                {vault.root}
+              </span>
+              {vault.markerFound ? (
+                <span className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" /> Sẵn sàng
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
+                  <AlertCircle className="h-3 w-3" /> {vault.isDirectory ? 'Chưa có backup' : 'Folder chưa tạo'}
+                </span>
+              )}
+              <button
+                onClick={handleChangeVaultRoot}
+                disabled={busy !== null}
+                className="inline-flex items-center gap-1 rounded-md border border-[#2a2e3d] bg-[#0e1015] px-2 py-0.5 text-[10px] font-semibold text-[#8e95a5] transition hover:border-[#ff2a44] hover:text-white disabled:opacity-50"
+                title="Đổi thư mục lưu trữ Vault (có thể trỏ vào Google Drive / OneDrive)"
+              >
+                {busy === 'vaultRoot' ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+                <span>Đổi nơi lưu</span>
+              </button>
+            </div>
           )}
-        </h2>
-        <div className="flex items-center gap-2">
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={handleDetect}
+            onClick={handleFetchCloudBackups}
             disabled={busy !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#161821] px-3 py-1.5 text-xs font-semibold text-[#8e95a5] transition hover:border-[#ff2a44] hover:text-white disabled:opacity-50"
-            title="Tự động tìm các folder save có thể thuộc game này"
+            className="flex items-center gap-1.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] px-3.5 py-2 text-xs font-semibold text-[#8e95a5] transition hover:border-sky-400 hover:text-white disabled:opacity-50"
+            title="Quét các bản save của bạn đã lưu trên Google Drive"
           >
-            {busy === 'detect' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanSearch className="h-3.5 w-3.5" />}
-            <span>Quét tự động</span>
+            {busy === 'cloudBackups' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-400" />
+            ) : (
+              <CloudDownload className="h-3.5 w-3.5 text-sky-400" />
+            )}
+            <span>Tải từ Google Drive</span>
           </button>
-          <button
-            onClick={handleSearchWeb}
-            disabled={busy !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#161821] px-3 py-1.5 text-xs font-semibold text-[#8e95a5] transition hover:border-sky-400 hover:text-white disabled:opacity-50"
-            title="Google-style search: '<game>' save game data location — đọc path từ kết quả tìm kiếm"
-          >
-            {busy === 'web' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}
-            <span>Tìm trên web</span>
-          </button>
-          <button
-            onClick={handleAddManual}
-            disabled={busy !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#161821] px-3 py-1.5 text-xs font-semibold text-[#8e95a5] transition hover:border-[#ff2a44] hover:text-white disabled:opacity-50"
-          >
-            {busy === 'addManual' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderPlus className="h-3.5 w-3.5" />}
-            <span>Thêm thủ công</span>
-          </button>
+
           <button
             onClick={handleBackupNow}
             disabled={busy !== null || paths.filter((p) => p.enabled === 1).length === 0}
-            className="flex items-center gap-1.5 rounded-lg bg-[#ff2a44] px-3 py-1.5 text-xs font-bold text-white shadow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-            title={paths.filter((p) => p.enabled === 1).length === 0 ? 'Cần khai báo ít nhất 1 folder save' : 'Copy toàn bộ folder save vào vault'}
+            className="flex items-center gap-2 rounded-xl bg-[#ff2a44] px-4 py-2 text-xs font-bold text-white shadow-md shadow-[#ff2a44]/25 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            title={
+              paths.filter((p) => p.enabled === 1).length === 0
+                ? 'Hãy chọn ít nhất 1 thư mục save bên dưới trước khi backup'
+                : 'Sao chép toàn bộ thư mục save hiện tại vào Vault'
+            }
           >
-            {busy === 'backup' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {busy === 'backup' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             <span>Backup ngay</span>
           </button>
         </div>
       </div>
-
-      {/* Save Profile Swapper Card */}
-      <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-[#161821] to-[#161821] p-4 shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div
-              className={`p-2.5 rounded-xl border ${
-                profileInfo?.activeProfile === 'my_save'
-                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                  : profileInfo?.activeProfile === 'host'
-                  ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400'
-                  : 'bg-[#2a2e3d] border-[#373c4e] text-[#8e95a5]'
-              }`}
-            >
-              <ArrowLeftRight className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-[#8e95a5] font-medium">Hồ sơ Save trên máy:</span>
-                {profileInfo?.activeProfile === 'my_save' ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    Save của tôi (Đang kích hoạt)
-                  </span>
-                ) : profileInfo?.activeProfile === 'host' ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
-                    <span className="h-2 w-2 rounded-full bg-indigo-400" />
-                    Save gốc của máy này (Chủ máy)
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#2a2e3d] text-[#8e95a5]">
-                    Mặc định
-                  </span>
-                )}
-                {isGameRunning && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                    <AlertCircle className="h-3 w-3" /> Game đang chạy (thoát game để đổi save)
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-[11px] text-[#8e95a5]">
-                {profileInfo?.activeProfile === 'my_save'
-                  ? 'Bạn đang chơi trên dữ liệu save của bạn. Khi trả máy, hãy bấm "Hoàn trả Save" để phục hồi nguyên trạng cho chủ máy.'
-                  : 'Thư mục game hiện đang chứa save nguyên bản của máy. Bấm "Chuyển sang Save của tôi" để nạp tiến độ của bạn.'}
-              </p>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            {profileInfo?.activeProfile === 'my_save' ? (
-              <button
-                onClick={handleRevertToHost}
-                disabled={busy !== null || isGameRunning}
-                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition hover:brightness-110 disabled:opacity-40"
-                title="Tự động sao lưu tiến độ vừa chơi và phục hồi lại save gốc của chủ máy"
-              >
-                {busy === 'revertHost' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
-                )}
-                <span>Hoàn trả Save cho máy này</span>
-              </button>
-            ) : (
-              <button
-                onClick={handleSwitchToMySave}
-                disabled={busy !== null || isGameRunning}
-                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition hover:brightness-110 disabled:opacity-40"
-                title="Tự động đóng băng lưu lại save của máy này và kích hoạt save của bạn"
-              >
-                {busy === 'switchMySave' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ArrowLeftRight className="h-3.5 w-3.5" />
-                )}
-                <span>Chuyển sang Save của tôi</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleFetchCloudBackups}
-              disabled={busy !== null}
-              className="flex items-center gap-1.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] px-3 py-2 text-xs font-semibold text-[#8e95a5] transition hover:border-sky-400 hover:text-white disabled:opacity-50"
-              title="Quét các bản save của bạn đã lưu trên Google Drive"
-            >
-              {busy === 'cloudBackups' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <CloudDownload className="h-3.5 w-3.5 text-sky-400" />
-              )}
-              <span>Tải từ Cloud Drive</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Vault root row */}
-      {vault && (
-        <div className="rounded-2xl border border-[#2a2e3d] bg-[#161821] px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-semibold text-white">
-                <HardDrive className="h-3.5 w-3.5 text-[#8e95a5]" />
-                <span>Nơi lưu vault</span>
-                {vault.markerFound ? (
-                  <span className="flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
-                    <CheckCircle2 className="h-3 w-3" /> Đã nhận diện
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400">
-                    <AlertCircle className="h-3 w-3" /> {vault.isDirectory ? 'Chưa có backup nào' : 'Folder chưa tồn tại'}
-                  </span>
-                )}
-              </div>
-              <div className="mt-1 truncate font-mono text-[11px] text-[#8e95a5]" title={vault.root}>
-                {vault.root}
-              </div>
-            </div>
-            <button
-              onClick={handleChangeVaultRoot}
-              disabled={busy !== null}
-              className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-3 py-1.5 text-xs font-semibold text-[#8e95a5] transition hover:border-[#ff2a44] hover:text-white disabled:opacity-50"
-            >
-              {busy === 'vaultRoot' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              <span>Đổi nơi lưu</span>
-            </button>
-          </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-[#8e95a5]/80">
-            Mẹo: trỏ vault vào folder được Google Drive / OneDrive đồng bộ để save tự động lên cloud. Cài lại app sẽ tự nhận lại vault cũ qua file đánh dấu trong Documents.
-          </p>
-        </div>
-      )}
 
       {error && (
         <div className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">
@@ -555,29 +446,143 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
         </div>
       )}
 
-      {/* Configured save folders */}
-      <div className="rounded-2xl border border-[#2a2e3d] bg-[#161821] p-4">
-        <div className="mb-2 text-xs font-semibold text-[#8e95a5]">Folder save đã khai báo ({paths.length})</div>
+      {lastBackupResult && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
+            <CheckCircle2 className="h-4 w-4" />
+            Backup thành công — {lastBackupResult.slotTime.replace('_', ' ')}
+          </div>
+          <div className="mt-1 text-[11px] text-[#8e95a5]">
+            {lastBackupResult.totalFiles} file · {formatBytes(lastBackupResult.totalBytes)} · lưu tại{' '}
+            <span className="font-mono">{lastBackupResult.backupDir}</span>
+          </div>
+          {lastBackupResult.sources.some((s) => s.status !== 'copied') && (
+            <ul className="mt-2 space-y-1 text-[10px] text-amber-400/90">
+              {lastBackupResult.sources
+                .filter((s) => s.status !== 'copied')
+                .map((s, i) => (
+                  <li key={i}>
+                    ⚠ {s.sourcePath} — {s.status === 'skipped_missing' ? 'folder không tồn tại' : s.status === 'skipped_empty' ? 'folder trống' : `lỗi: ${s.error}`}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Step 1: Configured Save Folders */}
+      <div className="rounded-2xl border border-[#2a2e3d] bg-[#161821] p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+              1. Thư mục Save của game ({paths.length})
+            </h3>
+            <p className="mt-0.5 text-[11px] text-[#8e95a5]">
+              Khai báo nơi game lưu file tiến độ. Sau khi thêm, bấm <span className="font-semibold text-white">Backup ngay</span> ở trên.
+            </p>
+          </div>
+          {paths.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={handleDetect}
+                disabled={busy !== null}
+                className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1.5 text-[11px] font-semibold text-[#8e95a5] transition hover:border-[#ff2a44] hover:text-white disabled:opacity-50"
+              >
+                {busy === 'detect' ? <Loader2 className="h-3 w-3 animate-spin" /> : <ScanSearch className="h-3 w-3" />}
+                <span>Quét tự động</span>
+              </button>
+              <button
+                onClick={handleSearchWeb}
+                disabled={busy !== null}
+                className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1.5 text-[11px] font-semibold text-[#8e95a5] transition hover:border-sky-400 hover:text-white disabled:opacity-50"
+              >
+                {busy === 'web' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Globe className="h-3 w-3" />}
+                <span>Tìm trên web</span>
+              </button>
+              <button
+                onClick={handleAddManual}
+                disabled={busy !== null}
+                className="flex items-center gap-1.5 rounded-lg border border-[#2a2e3d] bg-[#0e1015] px-2.5 py-1.5 text-[11px] font-semibold text-[#8e95a5] transition hover:border-emerald-400 hover:text-white disabled:opacity-50"
+              >
+                {busy === 'addManual' ? <Loader2 className="h-3 w-3 animate-spin" /> : <FolderPlus className="h-3 w-3" />}
+                <span>Thêm thủ công</span>
+              </button>
+            </div>
+          )}
+        </div>
+
         {loading ? (
-          <div className="flex items-center gap-2 py-3 text-xs text-[#8e95a5]">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang tải...
+          <div className="flex items-center gap-2 py-4 text-xs text-[#8e95a5]">
+            <Loader2 className="h-4 w-4 animate-spin" /> Đang tải...
           </div>
         ) : paths.length === 0 ? (
-          <p className="py-2 text-xs text-[#8e95a5]/70">
-            Chưa khai báo folder nào. Bấm <span className="font-semibold text-white">Quét tự động</span> để tool tìm hộ các vị trí save thường gặp (Documents\My Games, AppData, LocalLow, folder cài game...), hoặc chọn folder bằng <span className="font-semibold text-white">Thêm thủ công</span>.
-          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <button
+              onClick={handleDetect}
+              disabled={busy !== null}
+              className="flex flex-col items-start gap-1.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-3.5 text-left transition hover:border-[#ff2a44] hover:bg-[#1a1d28] disabled:opacity-50"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold text-white">
+                {busy === 'detect' ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-[#ff2a44]" />
+                ) : (
+                  <ScanSearch className="h-4 w-4 text-[#ff2a44]" />
+                )}
+                <span>Quét tự động trên máy</span>
+              </div>
+              <p className="text-[11px] text-[#8e95a5] leading-relaxed">
+                Tìm nhanh trong Documents, AppData, Saved Games và thư mục cài game.
+              </p>
+            </button>
+
+            <button
+              onClick={handleSearchWeb}
+              disabled={busy !== null}
+              className="flex flex-col items-start gap-1.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-3.5 text-left transition hover:border-sky-400 hover:bg-[#1a1d28] disabled:opacity-50"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold text-white">
+                {busy === 'web' ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
+                ) : (
+                  <Globe className="h-4 w-4 text-sky-400" />
+                )}
+                <span>Tìm đường dẫn trên Web</span>
+              </div>
+              <p className="text-[11px] text-[#8e95a5] leading-relaxed">
+                Tra cứu vị trí lưu save mặc định của game này trên internet.
+              </p>
+            </button>
+
+            <button
+              onClick={handleAddManual}
+              disabled={busy !== null}
+              className="flex flex-col items-start gap-1.5 rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-3.5 text-left transition hover:border-emerald-400 hover:bg-[#1a1d28] disabled:opacity-50"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold text-white">
+                {busy === 'addManual' ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                ) : (
+                  <FolderPlus className="h-4 w-4 text-emerald-400" />
+                )}
+                <span>Chọn thư mục thủ công</span>
+              </div>
+              <p className="text-[11px] text-[#8e95a5] leading-relaxed">
+                Tự mở File Explorer và trỏ trực tiếp vào thư mục chứa file save.
+              </p>
+            </button>
+          </div>
         ) : (
           <div className="space-y-2">
             {paths.map((p) => (
               <div
                 key={p.id}
-                className="flex items-center justify-between gap-3 rounded-lg bg-[#0e1015] px-3 py-2 border border-[#2a2e3d]/50"
+                className="flex items-center justify-between gap-3 rounded-xl bg-[#0e1015] px-3.5 py-2.5 border border-[#2a2e3d]/60"
               >
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <button
                     onClick={() => handleTogglePath(p)}
                     disabled={busy !== null}
-                    title={p.enabled === 1 ? 'Đang backup — bấm để tạm tắt' : 'Đã tắt — bấm để bật lại'}
+                    title={p.enabled === 1 ? 'Đang bật backup — bấm để tạm tắt' : 'Đã tắt — bấm để bật lại'}
                     className={`h-4 w-8 shrink-0 rounded-full transition ${p.enabled === 1 ? 'bg-[#ff2a44]' : 'bg-[#2a2e3d]'}`}
                   >
                     <span
@@ -605,10 +610,10 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
 
         {/* Detection candidates */}
         {candidates !== null && (
-          <div className="mt-3 rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-3">
+          <div className="mt-4 rounded-xl border border-[#2a2e3d] bg-[#0e1015] p-3.5">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-semibold text-white">
-                Kết quả quét ({candidates.length} vị trí nghi vấn)
+                Kết quả quét trên máy ({candidates.length} vị trí)
               </span>
               <button
                 onClick={() => setCandidates(null)}
@@ -619,8 +624,8 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
               </button>
             </div>
             {candidates.length === 0 ? (
-              <p className="py-2 text-xs text-[#8e95a5]/70">
-                Không tìm thấy folder nào khớp với tên game. Thử <span className="font-semibold text-white">Thêm thủ công</span> — nhiều game lưu save ở vị trí riêng.
+              <p className="py-2 text-xs text-[#8e95a5]/80">
+                Không tìm thấy folder nào khớp với tên game. Hãy thử <span className="font-semibold text-white">Tìm đường dẫn trên Web</span> hoặc <span className="font-semibold text-white">Chọn thư mục thủ công</span>.
               </p>
             ) : (
               <>
@@ -677,7 +682,7 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
 
         {/* Web search candidates */}
         {webCandidates !== null && (
-          <div className="mt-3 rounded-xl border border-sky-500/30 bg-[#0e1015] p-3">
+          <div className="mt-4 rounded-xl border border-sky-500/30 bg-[#0e1015] p-3.5">
             <div className="mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
                 <Globe className="h-3.5 w-3.5 text-sky-400" />
@@ -697,8 +702,8 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
               </p>
             )}
             {webCandidates.length === 0 ? (
-              <p className="py-2 text-xs text-[#8e95a5]/70">
-                Web không chỉ ra path nào cho game này. Thử <span className="font-semibold text-white">Thêm thủ công</span> hoặc xem hướng dẫn riêng của game.
+              <p className="py-2 text-xs text-[#8e95a5]/80">
+                Web không chỉ ra path nào cho game này. Thử <span className="font-semibold text-white">Chọn thư mục thủ công</span>.
               </p>
             ) : (
               <>
@@ -768,47 +773,32 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
         )}
       </div>
 
-      {/* Last backup result */}
-      {lastBackupResult && (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
-            <CheckCircle2 className="h-4 w-4" />
-            Backup thành công — {lastBackupResult.slotTime.replace('_', ' ')}
+      {/* Step 2: Backup History */}
+      <div className="rounded-2xl border border-[#2a2e3d] bg-[#161821] p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+              2. Lịch sử các bản Backup ({backups.length})
+            </h3>
+            <p className="mt-0.5 text-[11px] text-[#8e95a5]">
+              Bấm <span className="font-semibold text-white">Phục hồi</span> để đưa save quay lại trạng thái đã lưu (luôn tự động sao lưu an toàn trước khi ghi đè).
+            </p>
           </div>
-          <div className="mt-1 text-[11px] text-[#8e95a5]">
-            {lastBackupResult.totalFiles} file · {formatBytes(lastBackupResult.totalBytes)} · lưu tại{' '}
-            <span className="font-mono">{lastBackupResult.backupDir}</span>
-          </div>
-          {lastBackupResult.sources.some((s) => s.status !== 'copied') && (
-            <ul className="mt-2 space-y-1 text-[10px] text-amber-400/90">
-              {lastBackupResult.sources
-                .filter((s) => s.status !== 'copied')
-                .map((s, i) => (
-                  <li key={i}>
-                    ⚠ {s.sourcePath} — {s.status === 'skipped_missing' ? 'folder không tồn tại' : s.status === 'skipped_empty' ? 'folder trống' : `lỗi: ${s.error}`}
-                  </li>
-                ))}
-            </ul>
-          )}
         </div>
-      )}
 
-      {/* Backup history */}
-      <div className="rounded-2xl border border-[#2a2e3d] bg-[#161821] p-4">
-        <div className="mb-2 text-xs font-semibold text-[#8e95a5]">Lịch sử backup ({backups.length})</div>
         {backups.length === 0 ? (
-          <p className="py-2 text-xs text-[#8e95a5]/70">
-            Chưa có bản backup nào. Bấm <span className="font-semibold text-white">Backup ngay</span> để lưu trạng thái save hiện tại — xóa game xong vẫn có thể phục hồi.
+          <p className="rounded-xl border border-dashed border-[#2a2e3d] bg-[#0e1015]/60 px-4 py-5 text-center text-xs text-[#8e95a5]">
+            Chưa có bản backup nào. Sau khi thêm thư mục save ở bước 1, hãy bấm <span className="font-semibold text-white">Backup ngay</span>.
           </p>
         ) : (
-          <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+          <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
             {backups.map((b) => (
               <div
                 key={b.id}
-                className="flex items-center justify-between gap-3 rounded-lg bg-[#0e1015] px-3 py-2.5 border border-[#2a2e3d]/50 hover:border-[#373c4e] transition"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#0e1015] px-3.5 py-2.5 border border-[#2a2e3d]/60 hover:border-[#373c4e] transition"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="shrink-0 font-mono text-xs text-[#f1f3f7]">
+                  <span className="shrink-0 font-mono text-xs font-semibold text-[#f1f3f7]">
                     {b.slot_time.replace('_', ' ')}
                   </span>
                   <span
@@ -829,29 +819,40 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
                     </span>
                   )}
                   {b.note && (
-                    <span className="truncate text-[10px] text-[#8e95a5]/80" title={b.note}>
+                    <span className="truncate max-w-xs text-[11px] text-[#8e95a5]" title={b.note}>
                       {b.note}
                     </span>
                   )}
                 </div>
+
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <span className="mr-1 font-mono text-[10px] text-[#8e95a5]">
+                  <span className="mr-1.5 font-mono text-[11px] text-[#8e95a5]">
                     {b.file_count} file · {formatBytes(b.size_bytes)}
                   </span>
 
-                  {/* Quick Apply into Game */}
+                  {/* Primary Restore Button */}
                   <button
-                    onClick={() => handleApplyDirect(b, b.trigger === 'host_snapshot' ? 'host' : 'my_save')}
+                    onClick={() => setRestoreTarget(b)}
                     disabled={busy !== null || isGameRunning}
-                    className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-40"
-                    title="Nạp bản save này vào game ngay lập tức"
+                    className="flex items-center gap-1.5 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-bold text-emerald-400 transition hover:bg-emerald-500/20 disabled:opacity-40"
+                    title="Phục hồi các folder save về trạng thái của bản backup này"
                   >
-                    {busy === `apply-${b.id}` ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Phục hồi</span>
+                  </button>
+
+                  {/* Upload to Drive */}
+                  <button
+                    onClick={() => handleUploadToDrive(b)}
+                    disabled={busy !== null}
+                    className="rounded-lg p-1.5 text-[#8e95a5] transition hover:bg-sky-500/10 hover:text-sky-400 disabled:opacity-50"
+                    title="Upload bản backup này lên Google Drive"
+                  >
+                    {busy === `drive-${b.id}` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <ArrowLeftRight className="h-3 w-3" />
+                      <HardDriveUpload className="h-3.5 w-3.5" />
                     )}
-                    <span>Kích hoạt</span>
                   </button>
 
                   {/* Change Tag */}
@@ -864,20 +865,6 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
                     <Tag className="h-3.5 w-3.5" />
                   </button>
 
-                  {/* Upload to Drive */}
-                  <button
-                    onClick={() => handleUploadToDrive(b)}
-                    disabled={busy !== null}
-                    className="rounded-lg p-1.5 text-[#8e95a5] transition hover:bg-sky-500/10 hover:text-sky-400 disabled:opacity-50"
-                    title="Upload bản backup này lên Google Drive của bạn (cần đăng nhập)"
-                  >
-                    {busy === `drive-${b.id}` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <HardDriveUpload className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-
                   {/* Open Folder */}
                   <button
                     onClick={() => window.electronAPI.openSaveBackupFolder(b.id)}
@@ -885,17 +872,6 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
                     title="Mở folder backup trên máy"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-
-                  {/* Restore */}
-                  <button
-                    onClick={() => setRestoreTarget(b)}
-                    disabled={busy !== null}
-                    className="flex items-center gap-1 rounded-lg border border-[#2a2e3d] px-2 py-1 text-[11px] font-semibold text-[#8e95a5] transition hover:border-[#8e95a5] hover:text-white disabled:opacity-50"
-                    title="Phục hồi các folder save về trạng thái của bản backup này"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    <span>Phục hồi</span>
                   </button>
 
                   {/* Delete */}
@@ -913,6 +889,87 @@ export const SaveVaultSection: React.FC<SaveVaultSectionProps> = ({ gameId }) =>
           </div>
         )}
       </div>
+
+      {/* Step 3: Profile Swapper (Host vs Personal Save) */}
+      {(paths.length > 0 || backups.length > 0) && (
+        <div className="rounded-2xl border border-indigo-500/25 bg-gradient-to-r from-indigo-950/30 via-[#161821] to-[#161821] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div
+                className={`p-2.5 rounded-xl border ${
+                  profileInfo?.activeProfile === 'my_save'
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                    : profileInfo?.activeProfile === 'host'
+                    ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400'
+                    : 'bg-[#2a2e3d] border-[#373c4e] text-[#8e95a5]'
+                }`}
+              >
+                <ArrowLeftRight className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-[#8e95a5] font-medium">Chế độ đổi hồ sơ Save (Chơi nhờ máy khác):</span>
+                  {profileInfo?.activeProfile === 'my_save' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Save của tôi (Đang kích hoạt)
+                    </span>
+                  ) : profileInfo?.activeProfile === 'host' ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+                      <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                      Save gốc của máy này (Chủ máy)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[#2a2e3d] text-[#8e95a5]">
+                      Mặc định
+                    </span>
+                  )}
+                  {isGameRunning && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                      <AlertCircle className="h-3 w-3" /> Game đang chạy (thoát game để đổi save)
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] text-[#8e95a5]">
+                  {profileInfo?.activeProfile === 'my_save'
+                    ? 'Bạn đang chơi trên save cá nhân. Khi trả máy, bấm "Hoàn trả Save" để phục hồi nguyên trạng cho chủ máy.'
+                    : 'Tạm cất save gốc của máy này và nạp save cá nhân của bạn vào để chơi, sau đó có thể hoàn trả nguyên vẹn.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {profileInfo?.activeProfile === 'my_save' ? (
+                <button
+                  onClick={handleRevertToHost}
+                  disabled={busy !== null || isGameRunning}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition hover:brightness-110 disabled:opacity-40"
+                >
+                  {busy === 'revertHost' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  )}
+                  <span>Hoàn trả Save cho máy này</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleSwitchToMySave}
+                  disabled={busy !== null || isGameRunning}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow-md transition hover:brightness-110 disabled:opacity-40"
+                >
+                  {busy === 'switchMySave' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ArrowLeftRight className="h-3.5 w-3.5" />
+                  )}
+                  <span>Chuyển sang Save của tôi</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tag Edit Modal */}
       {tagModalBackup && (

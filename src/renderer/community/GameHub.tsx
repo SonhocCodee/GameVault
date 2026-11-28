@@ -37,7 +37,7 @@ import type {
   SharedLibraryGame,
   SteamRequirements,
 } from "../../shared/community.ts";
-import type { FpsStatus } from "../../shared/types.js";
+import type { FpsStatus, HardwareInfo } from "../../shared/types.js";
 import { setupFpsCapture } from "../fps-setup.js";
 import {
   communityError,
@@ -47,8 +47,6 @@ import {
   qualifyCommunityUrl,
 } from "./client.ts";
 import { GamePlayers } from "./GamePlayers.tsx";
-import { PerformancePanel } from "./PerformancePanel.tsx";
-import { PerformanceShareForm } from "./PerformanceShareForm.tsx";
 import { PostCard } from "./PostCard.tsx";
 import { PostComposer } from "./PostComposer.tsx";
 import {
@@ -105,6 +103,7 @@ export function GameHub({
 
   const [reports, setReports] = useState<Page<PerformanceReport>>(emptyPage());
   const [localPreview, setLocalPreview] = useState<PerformancePreview | null>(null);
+  const [localHardware, setLocalHardware] = useState<HardwareInfo | null>(null);
   const [localFpsStatus, setLocalFpsStatus] = useState<FpsStatus | null>(null);
   const [localAutoCaptureEnabled, setLocalAutoCaptureEnabled] = useState(true);
   const [localAutoShareEnabled, setLocalAutoShareEnabled] = useState(false);
@@ -120,7 +119,6 @@ export function GameHub({
   const [gpu, setGpu] = useState("");
   const [resolution, setResolution] = useState("");
   const [preset, setPreset] = useState("");
-  const [sharePerfOpen, setSharePerfOpen] = useState(false);
 
   // Review composer state
   const [reviewFormOpen, setReviewFormOpen] = useState(false);
@@ -142,6 +140,7 @@ export function GameHub({
   const [busy, setBusy] = useState(false);
   const [playersRevision, setPlayersRevision] = useState(0);
   const loadSequence = useRef(0);
+  const autoSyncedPerfKeys = useRef<Set<string>>(new Set());
 
   const activeGame: PublicGame = {
     ...game,
@@ -172,13 +171,18 @@ export function GameHub({
       const settingsPromise = window.electronAPI.getSettings
         ? window.electronAPI.getSettings().catch(() => null)
         : Promise.resolve(null);
-      const [preview, status, settings] = await Promise.all([
+      const hardwarePromise = window.electronAPI.getHardwareInfo
+        ? window.electronAPI.getHardwareInfo().catch(() => null)
+        : Promise.resolve(null);
+      const [preview, status, settings, hw] = await Promise.all([
         window.electronAPI.getPerformancePreview(gameId),
         statusPromise,
         settingsPromise,
+        hardwarePromise,
       ]);
       setLocalPreview(preview);
       setLocalFpsStatus(status);
+      if (hw) setLocalHardware(hw);
       if (settings) {
         setLocalAutoCaptureEnabled(settings.fpsAutoCaptureEnabled);
         setLocalAutoShareEnabled(settings.fpsAutoShareEnabled);
@@ -193,6 +197,82 @@ export function GameHub({
   useEffect(() => {
     void loadLocalPerformance();
   }, [loadLocalPerformance]);
+
+  const autoSelectedLocalReport = useMemo(() => {
+    const items = (localPreview?.reports || []).filter(
+      (r) => Number.isFinite(r.fpsAverage) && r.fpsAverage > 0 && (r.samples || 0) >= 10,
+    );
+    if (items.length === 0) return null;
+    return (
+      items.find((r) => r.snapshotAvailable && r.cpu && r.gpu && r.ramGb > 0 && r.graphics.width && r.graphics.height) ||
+      items.find((r) => r.snapshotAvailable && r.cpu && r.gpu && r.ramGb > 0) ||
+      items[0]
+    );
+  }, [localPreview]);
+
+  // Tự động chọn phiên FPS đo được và đồng bộ lên trang game cộng đồng khi dữ liệu thay đổi
+  useEffect(() => {
+    const gameId = localGame?.localGameId;
+    if (
+      loading ||
+      !me?.uid ||
+      !gameId ||
+      !localAutoShareEnabled ||
+      !autoSelectedLocalReport ||
+      !window.electronAPI?.syncGamePerformance
+    ) {
+      return;
+    }
+    const alreadySynced = reports.items.some(
+      (r) =>
+        r.uid === me.uid &&
+        Math.abs(r.fpsAverage - autoSelectedLocalReport.fpsAverage) < 0.05 &&
+        r.measuredAt === autoSelectedLocalReport.measuredAt,
+    );
+    if (alreadySynced) return;
+    const syncKey = `${game.gameKey}:${autoSelectedLocalReport.sessionId}:${autoSelectedLocalReport.fpsAverage}:${autoSelectedLocalReport.measuredAt}`;
+    if (autoSyncedPerfKeys.current.has(syncKey)) return;
+    autoSyncedPerfKeys.current.add(syncKey);
+
+    let cancelled = false;
+    void window.electronAPI
+      .syncGamePerformance(gameId)
+      .then((res) => {
+        if (!cancelled && res?.synced) {
+          return api
+            .request<Page<PerformanceReport>>(`${base}/performance`)
+            .then((next) => {
+              if (!cancelled) setReports(next);
+            });
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    api,
+    autoSelectedLocalReport,
+    base,
+    game.gameKey,
+    loading,
+    localAutoShareEnabled,
+    localGame?.localGameId,
+    me?.uid,
+    reports.items,
+  ]);
+
+  // Tự tải lại FPS đo cục bộ khi game được cập nhật (ví dụ vừa xong phiên chơi hoặc vừa đồng bộ AMD)
+  useEffect(() => {
+    const gameId = localGame?.localGameId;
+    if (!gameId || !window.electronAPI?.onGameUpdated) return;
+    return window.electronAPI.onGameUpdated((updatedGame) => {
+      if (updatedGame?.id === gameId) {
+        void loadLocalPerformance();
+      }
+    });
+  }, [loadLocalPerformance, localGame?.localGameId]);
 
   const enableLocalFps = async () => {
     if (!window.electronAPI?.saveSettings) return;
@@ -281,7 +361,6 @@ export function GameHub({
     setGpu("");
     setResolution("");
     setPreset("");
-    setSharePerfOpen(false);
     setReviewFormOpen(false);
     setPostComposerOpen(false);
     void load();
@@ -807,97 +886,122 @@ export function GameHub({
               <div className="gv-actions">
                 <button
                   type="button"
-                  className="gv-primary"
-                  onClick={() => {
-                    if (!me) {
-                      void api.signIn().catch((e) => setError(communityError(e)));
-                      return;
-                    }
-                    setHubTab("specs");
-                    setSharePerfOpen(true);
-                  }}
-                >
-                  <Plus size={15} /> Chia sẻ thủ công
-                </button>
-                <button
-                  type="button"
                   onClick={() => setHubTab("specs")}
                 >
-                  Lọc & Xem tất cả ({reports.items.length})
+                  Lọc &amp; Xem tất cả ({reports.items.length})
                   <ChevronRight size={15} />
                 </button>
               </div>
             </div>
 
-            {localPreview?.reports[0] && (() => {
-              const r = localPreview.reports[0];
-              return (
-                <article className="gv-perf-row">
-                  <div className="gv-stack-sm" style={{ flex: 1 }}>
-                    <div className="gv-actions">
-                      <span className="gv-pill gv-pill-cyan">Máy bạn</span>
-                      <span className="gv-muted" style={{ fontSize: 12 }}>
-                        {new Date(r.measuredAt).toLocaleString("vi-VN")}
-                      </span>
-                      <span className="gv-pill gv-pill-emerald">PresentMon</span>
-                    </div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>
-                      <Monitor size={14} style={{ display: "inline", marginRight: 6 }} />
-                      {r.gpu || "GPU chưa nhận diện"} · {r.cpu || "CPU chưa nhận diện"} · {r.ramGb > 0 ? `${r.ramGb} GB RAM` : "RAM chưa nhận diện"}
-                    </div>
-                    <div className="gv-actions" style={{ gap: 6 }}>
-                      <span className="gv-pill gv-pill-cyan">
-                        {r.graphics.width && r.graphics.height
-                          ? `${r.graphics.width}×${r.graphics.height}`
-                          : "Chưa nhận diện độ phân giải"}
-                      </span>
-                      <span className="gv-pill">{r.graphics.preset || "Mức đồ họa chưa nhận diện"}</span>
-                    </div>
+            {autoSelectedLocalReport &&
+              !reports.items.some((item) => item.uid && item.uid === me?.uid) &&
+              (() => {
+                const r = autoSelectedLocalReport;
+                return (
+                  <div className="gv-stack-sm">
+                    <div className="gv-perf-section-label">Phiên đo trên máy bạn (đang chờ đồng bộ)</div>
+                    <article className="gv-perf-card">
+                      <div className="gv-stack-sm">
+                        <div className="gv-actions" style={{ gap: 10 }}>
+                          <Avatar name={me?.nickname || "Bạn"} url={me?.avatarUrl} size={36} />
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: "#f1f3f7" }}>
+                              {me?.nickname || "Máy của bạn"}
+                            </div>
+                            <div className="gv-actions" style={{ gap: 6, marginTop: 2 }}>
+                              <span className="gv-pill gv-pill-cyan">Máy bạn · Tự chọn đồng bộ</span>
+                              <span className="gv-pill gv-pill-emerald">Tự đo</span>
+                              <span className="gv-muted" style={{ fontSize: 12 }}>
+                                {new Date(r.measuredAt).toLocaleString("vi-VN")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>
+                          <Monitor size={14} style={{ display: "inline", marginRight: 6 }} />
+                          {r.gpu || localHardware?.gpus?.map((g) => g.name).filter(Boolean).join(" / ") || "GPU chưa nhận diện"} ·{" "}
+                          {r.cpu || localHardware?.cpu_name || "CPU chưa nhận diện"} ·{" "}
+                          {(r.ramGb > 0 ? r.ramGb : localHardware?.ram_gb || 0) > 0
+                            ? `${r.ramGb > 0 ? r.ramGb : localHardware?.ram_gb} GB RAM`
+                            : "RAM chưa nhận diện"}
+                        </div>
+                        <div className="gv-actions" style={{ gap: 6 }}>
+                          <span className="gv-pill gv-pill-cyan">
+                            {r.graphics.width && r.graphics.height
+                              ? `${r.graphics.width}×${r.graphics.height}`
+                              : localHardware?.display?.width && localHardware?.display?.height
+                                ? `${localHardware.display.width}×${localHardware.display.height} (Màn hình)`
+                                : "Chưa nhận diện độ phân giải"}
+                          </span>
+                          <span className="gv-pill">{r.graphics.preset || "Mức đồ họa chưa nhận diện"}</span>
+                        </div>
+                      </div>
+                      <div className="gv-fps-box">
+                        <div className="gv-fps-big">{r.fpsAverage.toFixed(1)}</div>
+                        <div className="gv-muted" style={{ fontSize: 11 }}>AVG FPS</div>
+                        <div className="gv-muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          1% Low: {r.fpsLow != null ? r.fpsLow.toFixed(1) : "—"}
+                        </div>
+                      </div>
+                    </article>
                   </div>
-                  <div className="gv-fps-box">
-                    <div className="gv-fps-big">{r.fpsAverage.toFixed(1)}</div>
-                    <div className="gv-muted" style={{ fontSize: 11 }}>AVG FPS</div>
-                    <div className="gv-muted" style={{ fontSize: 11, marginTop: 4 }}>
-                      1% Low: {r.fpsLow != null ? r.fpsLow.toFixed(1) : "—"}
-                    </div>
-                  </div>
-                </article>
-              );
-            })()}
+                );
+              })()}
 
             {reports.items.length > 0 ? (
               <div className="gv-stack">
-                {reports.items.slice(0, 3).map((r) => (
-                  <article className="gv-perf-row" key={r.id}>
-                    <div className="gv-stack-sm" style={{ flex: 1 }}>
-                      <div className="gv-actions">
-                        {r.uid ? (
-                          <button
-                            type="button"
-                            className="gv-link"
-                            onClick={() => onProfile(r.uid!)}
-                            style={{ padding: 0, fontWeight: 700 }}
-                          >
-                            {r.nickname}
-                          </button>
-                        ) : (
-                          <span style={{ fontWeight: 700 }}>{r.nickname}</span>
-                        )}
-                        {r.source === "presentmon" && (
-                          <span className="gv-pill gv-pill-emerald">
-                            <CheckCircle2 size={11} /> PresentMon
-                          </span>
-                        )}
+                {reports.items.slice(0, 5).map((r) => (
+                  <article className="gv-perf-card" key={r.id}>
+                    <div className="gv-stack-sm">
+                      <div className="gv-actions" style={{ gap: 10 }}>
+                        <Avatar name={r.nickname} url={r.avatarUrl} size={36} />
+                        <div>
+                          <div className="gv-actions" style={{ gap: 8 }}>
+                            {r.uid ? (
+                              <button
+                                type="button"
+                                className="gv-link"
+                                onClick={() => onProfile(r.uid!)}
+                                style={{ padding: 0, fontWeight: 700, fontSize: 14, color: "#f1f3f7" }}
+                              >
+                                {r.nickname}
+                                {r.uid === me?.uid ? " (Bạn)" : ""}
+                              </button>
+                            ) : (
+                              <span style={{ fontWeight: 700, fontSize: 14 }}>{r.nickname}</span>
+                            )}
+                            {r.source === "presentmon" && (
+                              <span className="gv-pill gv-pill-emerald">
+                                <CheckCircle2 size={11} /> PresentMon
+                              </span>
+                            )}
+                            <span className="gv-pill">
+                              {r.completionStatus === "completed" ? "Đã hoàn thành" : "Đã chơi"}
+                            </span>
+                          </div>
+                          <div className="gv-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                            {new Date(r.measuredAt).toLocaleDateString("vi-VN")}
+                            {r.samples > 0 ? ` · ${r.samples.toLocaleString("vi-VN")} frames` : ""}
+                          </div>
+                        </div>
                       </div>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>
                         <Monitor size={14} style={{ display: "inline", marginRight: 6 }} />
                         {r.gpu} · {r.cpu} · {r.ramGb} GB RAM
                       </div>
-                      <div className="gv-actions" style={{ gap: 6 }}>
+                      <div className="gv-actions" style={{ gap: 6, flexWrap: "wrap" }}>
                         <span className="gv-pill gv-pill-cyan">
-                          {r.graphics.width}×{r.graphics.height}
+                          {r.graphics.width && r.graphics.height
+                            ? `${r.graphics.width}×${r.graphics.height}`
+                            : "Chưa nhận diện độ phân giải"}
                         </span>
-                        <span className="gv-pill">{r.graphics.preset}</span>
+                        <span className="gv-pill">
+                          {r.graphics.preset || "Chưa nhận diện preset"}
+                        </span>
+                        {r.graphics.upscaling && r.graphics.upscaling !== "Off" && (
+                          <span className="gv-pill">Upscaling: {r.graphics.upscaling}</span>
+                        )}
                       </div>
                     </div>
                     <div className="gv-fps-box">
@@ -1004,7 +1108,7 @@ export function GameHub({
                 <div>
                   <h2>FPS đo trên máy bạn</h2>
                   <p className="gv-muted">
-                    Các phiên PresentMon và cấu hình phần cứng/đồ họa được ghi cục bộ.
+                    App tự động quét từ PresentMon / AMD GameReport, tự chọn phiên đại diện và đồng bộ lên Cộng đồng khi có dữ liệu mới.
                   </p>
                 </div>
                 <div className="gv-actions">
@@ -1067,17 +1171,28 @@ export function GameHub({
                           <span className="gv-muted" style={{ fontSize: 12 }}>
                             {new Date(r.measuredAt).toLocaleString("vi-VN")}
                           </span>
-                          <span className="gv-pill gv-pill-emerald">PresentMon</span>
+                          <span className="gv-pill gv-pill-emerald">Tự đo</span>
+                          {autoSelectedLocalReport?.sessionId === r.sessionId && (
+                            <span className="gv-pill gv-pill-cyan">
+                              <CheckCircle2 size={11} /> Tự chọn đồng bộ Cộng đồng
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontWeight: 700, fontSize: 13 }}>
                           <Monitor size={14} style={{ display: "inline", marginRight: 6 }} />
-                          {r.gpu || "GPU chưa nhận diện"} · {r.cpu || "CPU chưa nhận diện"} · {r.ramGb > 0 ? `${r.ramGb} GB RAM` : "RAM chưa nhận diện"}
+                          {r.gpu || localHardware?.gpus?.map((g) => g.name).filter(Boolean).join(" / ") || "GPU chưa nhận diện"} ·{" "}
+                          {r.cpu || localHardware?.cpu_name || "CPU chưa nhận diện"} ·{" "}
+                          {(r.ramGb > 0 ? r.ramGb : localHardware?.ram_gb || 0) > 0
+                            ? `${r.ramGb > 0 ? r.ramGb : localHardware?.ram_gb} GB RAM`
+                            : "RAM chưa nhận diện"}
                         </div>
                         <div className="gv-actions" style={{ gap: 6 }}>
                           <span className="gv-pill gv-pill-cyan">
                             {r.graphics.width && r.graphics.height
                               ? `${r.graphics.width}×${r.graphics.height}`
-                              : "Chưa nhận diện độ phân giải"}
+                              : localHardware?.display?.width && localHardware?.display?.height
+                                ? `${localHardware.display.width}×${localHardware.display.height} (Màn hình)`
+                                : "Chưa nhận diện độ phân giải"}
                           </span>
                           <span className="gv-pill">{r.graphics.preset || "Mức đồ họa chưa nhận diện"}</span>
                           <span className="gv-pill">
@@ -1124,53 +1239,20 @@ export function GameHub({
               <div>
                 <h2>Báo cáo FPS từ Cộng đồng</h2>
                 <p className="gv-muted">
-                  Báo cáo mới nhất của mỗi người chơi: FPS, 1% low, phần cứng và thiết lập đồ họa.
+                  Tự động đồng bộ phiên FPS mới nhất của người chơi khi có dữ liệu: FPS, 1% low, phần cứng và thiết lập nhận diện được.
                 </p>
               </div>
               <button
                 type="button"
-                className="gv-primary"
-                onClick={() =>
-                  me
-                    ? setSharePerfOpen(!sharePerfOpen)
-                    : void api.signIn().catch((e) => setError(communityError(e)))
-                }
+                className="gv-icon-btn"
+                title="Tải lại báo cáo Cộng đồng"
+                aria-label="Tải lại báo cáo Cộng đồng"
+                disabled={busy}
+                onClick={() => void loadPerformance()}
               >
-                {sharePerfOpen ? (
-                  <>
-                    <X size={15} /> Đóng biểu mẫu
-                  </>
-                ) : (
-                  <>
-                    <Plus size={15} /> Chia sẻ thủ công
-                  </>
-                )}
+                <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
               </button>
             </div>
-
-            {sharePerfOpen && me && (
-              <div>
-                {localGame?.localGameId ? (
-                  <PerformancePanel
-                    gameId={localGame.localGameId}
-                    status={localGame.status}
-                    onShared={() => {
-                      setSharePerfOpen(false);
-                      void load();
-                    }}
-                  />
-                ) : (
-                  <PerformanceShareForm
-                    api={api}
-                    game={activeGame}
-                    onShared={() => {
-                      setSharePerfOpen(false);
-                      void loadPerformance();
-                    }}
-                  />
-                )}
-              </div>
-            )}
 
             {perfStats && (
               <div className="gv-perf-summary">
@@ -1278,7 +1360,7 @@ export function GameHub({
                   <article className="gv-perf-card" key={r.id}>
                     <div className="gv-stack-sm">
                       <div className="gv-actions" style={{ gap: 10 }}>
-                        <Avatar name={r.nickname} size={30} />
+                        <Avatar name={r.nickname} url={r.avatarUrl} size={36} />
                         <button
                           type="button"
                           className="gv-link"
@@ -1286,6 +1368,7 @@ export function GameHub({
                           onClick={() => onProfile(r.uid!)}
                         >
                           {r.nickname}
+                          {r.uid === me?.uid ? " (Bạn)" : ""}
                         </button>
                         <span
                           className={`gv-pill ${
